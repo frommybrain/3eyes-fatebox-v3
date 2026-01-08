@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
 const ALLOWED_ORIGINS = new Set([
-  "https://3eyes.fun",
-  "https://www.3eyes.fun",
+  "https://degenbox.fun",
+  "https://www.degenbox.fun",
 ]);
 
 export function middleware(req) {

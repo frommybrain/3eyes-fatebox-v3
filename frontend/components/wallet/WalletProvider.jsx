@@ -4,7 +4,7 @@
 import { useMemo } from 'react';
 import { ConnectionProvider, WalletProvider as SolanaWalletProvider } from '@solana/wallet-adapter-react';
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
-import { PhantomWalletAdapter, SolflareWalletAdapter, TorusWalletAdapter } from '@solana/wallet-adapter-wallets';
+import { SolflareWalletAdapter, TorusWalletAdapter } from '@solana/wallet-adapter-wallets';
 import useNetworkStore from '@/store/useNetworkStore';
 
 // Import wallet adapter CSS
@@ -24,9 +24,9 @@ export default function WalletProvider({ children }) {
     }, [config]);
 
     // Configure wallets
+    // Note: Phantom auto-detects via Standard Wallet API, no need to add it explicitly
     const wallets = useMemo(
         () => [
-            new PhantomWalletAdapter(),
             new SolflareWalletAdapter(),
             new TorusWalletAdapter(),
         ],

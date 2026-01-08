@@ -4,19 +4,41 @@
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { authenticateWallet } from '@/lib/auth';
 
 export default function WalletButton() {
-    const { publicKey, disconnect, connected } = useWallet();
+    const { publicKey, disconnect, connected, wallet } = useWallet();
     const { setVisible } = useWalletModal();
     const router = useRouter();
+    const [authenticating, setAuthenticating] = useState(false);
 
-    // Auto-redirect to dashboard on connect
+    // Auto-authenticate when wallet connects
     useEffect(() => {
-        if (connected && publicKey) {
-            console.log('Wallet connected:', publicKey.toString());
+        if (connected && publicKey && wallet && !authenticating) {
+            handleAuthentication();
         }
-    }, [connected, publicKey]);
+    }, [connected, publicKey, wallet]);
+
+    const handleAuthentication = async () => {
+        if (!wallet || !publicKey) return;
+
+        setAuthenticating(true);
+        try {
+            const result = await authenticateWallet(wallet);
+            console.log('✅ Authenticated:', result.user);
+
+            // Optional: Store user data in local storage or Zustand
+            if (result.user) {
+                localStorage.setItem('degenbox_user', JSON.stringify(result.user));
+            }
+        } catch (error) {
+            console.error('Authentication error:', error);
+            // Don't block user if auth fails, they can still use the app
+        } finally {
+            setAuthenticating(false);
+        }
+    };
 
     const handleClick = () => {
         if (connected) {

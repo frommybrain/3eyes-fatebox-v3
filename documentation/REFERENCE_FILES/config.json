@@ -1,0 +1,57 @@
+{
+  "tokenStandard": "nft",
+  "number": 5000,
+  "symbol": "F8BX_BETA",
+  "sellerFeeBasisPoints": 500,
+  "isMutable": true,
+  "isSequential": false,
+  "creators": [
+    {
+      "address": "HSTAySYGfw5rmsxaBeaSznWHCpakEdkvSJNQgq5UZUWJ",
+      "share": 100
+    }
+  ],
+  "uploadMethod": "bundlr",
+  "ruleSet": null,
+  "awsConfig": null,
+  "sdriveApiKey": null,
+  "nftStorageAuthToken": null,
+  "shdwStorageAccount": null,
+  "pinataConfig": null,
+  "hiddenSettings": {
+    "name": "F8 Box BETA #$ID+1$",
+    "uri": "https://ipfs.io/ipfs/bafkreibik2luzmkql5junk56hh6q6zvkdic7jfppsxghqyni4mx25eqpzu",
+    "hash": "9bjHGXcn2N9hzAYvNEVUtXTBgC6X1uj7"
+  },
+  "guards": {
+    "default": {
+      "botTax": null,
+      "solPayment": null,
+      "tokenPayment": {
+        "amount": 1000000000000,
+        "mint": "C9gy1zx3kHe1pxkvhGedG7Moj9UngRcFCyc1r149ttz3",
+        "destinationAta": "BDeSqH2crYPYizVKYJ5BVH1eVQpoFDAZEJpyCTpUVBnX"
+      },
+      "startDate": null,
+      "thirdPartySigner": null,
+      "tokenGate": null,
+      "gatekeeper": null,
+      "endDate": null,
+      "allowList": null,
+      "mintLimit": null,
+      "nftPayment": null,
+      "redeemedAmount": null,
+      "addressGate": null,
+      "nftGate": null,
+      "nftBurn": null,
+      "tokenBurn": null,
+      "freezeSolPayment": null,
+      "freezeTokenPayment": null,
+      "programGate": null,
+      "allocation": null,
+      "token2022Payment": null
+    },
+    "groups": null
+  },
+  "maxEditionSupply": null
+}

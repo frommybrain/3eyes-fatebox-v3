@@ -12,7 +12,7 @@ export default function AdminDashboard() {
     const router = useRouter();
     const { publicKey, connected } = useWallet();
     const { config, configLoading, refreshConfig } = useNetworkStore();
-    const { projects, loadProjects } = useProjectStore();
+    const { projects, loadAllProjects } = useProjectStore();
 
     const [mounted, setMounted] = useState(false);
     const [activeTab, setActiveTab] = useState('projects'); // 'projects' or 'config'
@@ -33,7 +33,7 @@ export default function AdminDashboard() {
 
         // Load data
         if (isAdmin) {
-            loadProjects(config.network);
+            loadAllProjects();
             setConfigForm({
                 launchFeeAmount: config.launchFeeAmount ? config.launchFeeAmount / 1e9 : 100,
                 withdrawalFeePercentage: config.withdrawalFeePercentage || 2.0,
@@ -63,7 +63,7 @@ export default function AdminDashboard() {
         setSaving(false);
     };
 
-    const toggleProjectStatus = async (projectId, currentStatus) => {
+    const toggleProjectActive = async (projectId, currentStatus) => {
         try {
             const { error } = await supabase
                 .from('projects')
@@ -72,10 +72,27 @@ export default function AdminDashboard() {
 
             if (error) throw error;
 
-            alert(`Project ${!currentStatus ? 'activated' : 'paused'} successfully`);
-            loadProjects(config.network);
+            alert(`Project ${!currentStatus ? 'activated' : 'deactivated'} successfully`);
+            loadAllProjects();
         } catch (error) {
-            console.error('Error toggling project:', error);
+            console.error('Error toggling project active:', error);
+            alert('Failed to update project');
+        }
+    };
+
+    const toggleProjectPaused = async (projectId, currentStatus) => {
+        try {
+            const { error } = await supabase
+                .from('projects')
+                .update({ is_paused: !currentStatus })
+                .eq('id', projectId);
+
+            if (error) throw error;
+
+            alert(`Project ${!currentStatus ? 'paused' : 'unpaused'} successfully`);
+            loadAllProjects();
+        } catch (error) {
+            console.error('Error toggling project paused:', error);
             alert('Failed to update project');
         }
     };
@@ -175,37 +192,50 @@ export default function AdminDashboard() {
                                     >
                                         <div className="flex-1">
                                             <div className="flex items-center gap-3 mb-2">
-                                                <h3 className="text-white font-bold">{project.name}</h3>
-                                                {project.network === 'devnet' && (
-                                                    <span className="bg-yellow-500/20 text-yellow-500 px-2 py-1 rounded text-xs font-bold">
-                                                        DEVNET
-                                                    </span>
-                                                )}
+                                                <h3 className="text-white font-bold">{project.project_name}</h3>
                                                 <span className={`px-2 py-1 rounded text-xs font-bold ${
                                                     project.is_active
                                                         ? 'bg-green-500/20 text-green-500'
                                                         : 'bg-red-500/20 text-red-500'
                                                 }`}>
-                                                    {project.is_active ? 'ACTIVE' : 'PAUSED'}
+                                                    {project.is_active ? 'ACTIVE' : 'INACTIVE'}
+                                                </span>
+                                                <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                                    project.is_paused
+                                                        ? 'bg-yellow-500/20 text-yellow-500'
+                                                        : 'bg-blue-500/20 text-blue-500'
+                                                }`}>
+                                                    {project.is_paused ? 'PAUSED' : 'RUNNING'}
                                                 </span>
                                             </div>
                                             <p className="text-gray-400 text-sm mb-2">{project.subdomain}.degenbox.fun</p>
                                             <div className="flex gap-6 text-sm">
                                                 <span className="text-gray-500">Owner: {project.owner_wallet.slice(0, 8)}...</span>
-                                                <span className="text-gray-500">Boxes: {project.total_boxes_created || 0}</span>
-                                                <span className="text-gray-500">Jackpots: {project.total_jackpots_hit || 0}</span>
+                                                <span className="text-gray-500">Boxes: {project.boxes_created || 0}</span>
                                             </div>
                                         </div>
-                                        <button
-                                            onClick={() => toggleProjectStatus(project.project_id, project.is_active)}
-                                            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                                                project.is_active
-                                                    ? 'bg-red-600 hover:bg-red-700 text-white'
-                                                    : 'bg-green-600 hover:bg-green-700 text-white'
-                                            }`}
-                                        >
-                                            {project.is_active ? '⏸ Pause' : '▶ Activate'}
-                                        </button>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => toggleProjectActive(project.id, project.is_active)}
+                                                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                                                    project.is_active
+                                                        ? 'bg-red-600 hover:bg-red-700 text-white'
+                                                        : 'bg-green-600 hover:bg-green-700 text-white'
+                                                }`}
+                                            >
+                                                {project.is_active ? '✗ Deactivate' : '✓ Activate'}
+                                            </button>
+                                            <button
+                                                onClick={() => toggleProjectPaused(project.id, project.is_paused)}
+                                                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                                                    project.is_paused
+                                                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                                                        : 'bg-yellow-600 hover:bg-yellow-700 text-white'
+                                                }`}
+                                            >
+                                                {project.is_paused ? '▶ Unpause' : '⏸ Pause'}
+                                            </button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>

@@ -89,9 +89,8 @@ const useProjectStore = create((set, get) => ({
 
     /**
      * Load all active projects (for listings)
-     * @param {string} network - Filter by network (optional)
      */
-    loadProjects: async (network = null) => {
+    loadProjects: async () => {
         set({ projectsLoading: true, projectsError: null });
 
         try {
@@ -101,10 +100,6 @@ const useProjectStore = create((set, get) => ({
                 .eq('is_active', true)
                 .eq('archived', false)
                 .order('created_at', { ascending: false });
-
-            if (network) {
-                query = query.eq('network', network);
-            }
 
             const { data, error } = await query;
 
@@ -118,6 +113,38 @@ const useProjectStore = create((set, get) => ({
             return data;
         } catch (error) {
             console.error('Failed to load projects:', error);
+            set({
+                projectsError: error.message,
+                projectsLoading: false,
+            });
+            throw error;
+        }
+    },
+
+    /**
+     * Load all projects (for admin dashboard)
+     * Includes both active and inactive, but excludes archived
+     */
+    loadAllProjects: async () => {
+        set({ projectsLoading: true, projectsError: null });
+
+        try {
+            const { data, error } = await supabase
+                .from('projects')
+                .select('*')
+                .eq('archived', false)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+
+            set({
+                projects: data || [],
+                projectsLoading: false,
+            });
+
+            return data;
+        } catch (error) {
+            console.error('Failed to load all projects:', error);
             set({
                 projectsError: error.message,
                 projectsLoading: false,

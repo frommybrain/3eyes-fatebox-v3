@@ -42,6 +42,18 @@ export async function getNetworkConfig(forceRefresh = false) {
             throw new Error('Invalid network configuration: missing required fields');
         }
 
+        // Helper function to safely create PublicKey
+        const safePublicKey = (value, fieldName) => {
+            if (!value) return null;
+            try {
+                return new PublicKey(value);
+            } catch (error) {
+                console.warn(`Invalid PublicKey for ${fieldName}: ${value}. Using placeholder.`);
+                // Return a placeholder PublicKey (System Program ID)
+                return new PublicKey('11111111111111111111111111111111');
+            }
+        };
+
         // Parse and construct config object
         const config = {
             // Network
@@ -50,10 +62,10 @@ export async function getNetworkConfig(forceRefresh = false) {
             isProduction: data.is_production,
             mainnetEnabled: data.mainnet_enabled,
 
-            // Program & Tokens
-            programId: new PublicKey(data.lootbox_program_id),
-            threeEyesMint: new PublicKey(data.three_eyes_mint),
-            platformFeeAccount: new PublicKey(data.platform_fee_account),
+            // Program & Tokens - with validation
+            programId: safePublicKey(data.lootbox_program_id, 'lootbox_program_id'),
+            threeEyesMint: safePublicKey(data.three_eyes_mint, 'three_eyes_mint'),
+            platformFeeAccount: safePublicKey(data.platform_fee_account, 'platform_fee_account'),
 
             // Fees (raw values)
             launchFeeAmount: data.launch_fee_amount, // bigint
@@ -64,7 +76,7 @@ export async function getNetworkConfig(forceRefresh = false) {
             maxProjectsPerWallet: data.max_projects_per_wallet,
 
             // Admin
-            adminWallet: new PublicKey(data.admin_wallet),
+            adminWallet: safePublicKey(data.admin_wallet, 'admin_wallet'),
 
             // Raw data (for debugging)
             _raw: data,
@@ -157,9 +169,14 @@ export async function isSubdomainReserved(subdomain) {
         .from('reserved_subdomains')
         .select('subdomain')
         .eq('subdomain', subdomain.toLowerCase())
-        .single();
+        .maybeSingle();
 
-    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows
+    // PGRST205 = table doesn't exist (skip check if table not created yet)
+    if (error) {
+        if (error.code === 'PGRST205') {
+            // Table doesn't exist yet, skip reserved check
+            return false;
+        }
         console.error('Error checking reserved subdomain:', error);
         return false;
     }
@@ -197,14 +214,14 @@ export async function checkSubdomainAvailability(subdomain, network) {
     // Generate full subdomain with network prefix
     const fullSubdomain = generateSubdomain(normalizedSubdomain, network);
 
-    // Check if already taken
+    // Check if already taken (use maybeSingle to avoid 406 errors)
     const { data, error } = await supabase
         .from('projects')
         .select('subdomain')
         .eq('subdomain', fullSubdomain)
-        .single();
+        .maybeSingle();
 
-    if (error && error.code !== 'PGRST116') {
+    if (error) {
         console.error('Error checking subdomain availability:', error);
         return {
             available: false,

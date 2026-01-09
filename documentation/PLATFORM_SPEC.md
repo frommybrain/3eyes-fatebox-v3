@@ -1064,7 +1064,7 @@ SUPABASE_URL=https://xxx.supabase.co
 SUPABASE_KEY=your_anon_key
 
 # Server
-PORT=3001
+PORT=3333
 NODE_ENV=production
 
 # JWT Secret
@@ -3061,7 +3061,7 @@ const program = new Program(idl, config.programId, provider);
 **Development (Devnet)**:
 ```bash
 NEXT_PUBLIC_NETWORK=devnet
-NEXT_PUBLIC_API_URL=http://localhost:3001
+NEXT_PUBLIC_API_URL=http://localhost:3333
 ```
 
 **Production (Backend determines network)**:

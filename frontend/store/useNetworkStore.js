@@ -58,6 +58,7 @@ const useNetworkStore = create((set, get) => ({
         });
 
         set({ unsubscribe });
+        return unsubscribe; // Return the unsubscribe function
     },
 
     /**

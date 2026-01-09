@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
+import { PublicKey } from '@solana/web3.js';
 import { useRouter } from 'next/navigation';
 import useNetworkStore from '@/store/useNetworkStore';
 import useProjectStore from '@/store/useProjectStore';
@@ -36,7 +37,9 @@ export default function AdminDashboard() {
             loadAllProjects();
             setConfigForm({
                 launchFeeAmount: config.launchFeeAmount ? config.launchFeeAmount / 1e9 : 100,
-                withdrawalFeePercentage: config.withdrawalFeePercentage || 2.0,
+                withdrawalFeePercentage: config.withdrawalFeePercentage ?? 2.0, // Use ?? instead of || to allow 0
+                threeEyesMint: config.threeEyesMint?.toString() || '',
+                lootboxProgramId: config.lootboxProgramId?.toString() || '',
             });
         }
     }, [connected, isAdmin, mounted, router, config]);
@@ -44,12 +47,46 @@ export default function AdminDashboard() {
     const handleSaveConfig = async () => {
         setSaving(true);
         try {
+            const updates = {
+                launch_fee_amount: Math.floor(configForm.launchFeeAmount * 1e9),
+                withdrawal_fee_percentage: configForm.withdrawalFeePercentage,
+            };
+
+            // Only update token addresses if they're provided
+            // Handle both string and object types (PublicKey)
+            const threeEyesMintStr = typeof configForm.threeEyesMint === 'string'
+                ? configForm.threeEyesMint
+                : configForm.threeEyesMint?.toString();
+
+            const lootboxProgramIdStr = typeof configForm.lootboxProgramId === 'string'
+                ? configForm.lootboxProgramId
+                : configForm.lootboxProgramId?.toString();
+
+            // Validate PublicKey formats before saving
+            if (threeEyesMintStr?.trim()) {
+                try {
+                    new PublicKey(threeEyesMintStr.trim());
+                    updates.three_eyes_mint = threeEyesMintStr.trim();
+                } catch (error) {
+                    alert('Invalid $3EYES Token Mint address format. Please enter a valid Solana address.');
+                    setSaving(false);
+                    return;
+                }
+            }
+            if (lootboxProgramIdStr?.trim()) {
+                try {
+                    new PublicKey(lootboxProgramIdStr.trim());
+                    updates.lootbox_program_id = lootboxProgramIdStr.trim();
+                } catch (error) {
+                    alert('Invalid Lootbox Program ID format. Please enter a valid Solana address.');
+                    setSaving(false);
+                    return;
+                }
+            }
+
             const { error } = await supabase
                 .from('super_admin_config')
-                .update({
-                    launch_fee_amount: Math.floor(configForm.launchFeeAmount * 1e9),
-                    withdrawal_fee_percentage: configForm.withdrawalFeePercentage,
-                })
+                .update(updates)
                 .eq('id', 1);
 
             if (error) throw error;
@@ -248,47 +285,114 @@ export default function AdminDashboard() {
                     <div className="bg-white/5 border border-white/10 rounded-xl p-8">
                         <h2 className="text-white text-2xl font-bold mb-6">Platform Configuration</h2>
 
-                        {/* Launch Fee */}
-                        <div className="mb-6">
-                            <label className="block text-white font-medium mb-2">
-                                Launch Fee (in $3EYES tokens)
-                            </label>
-                            <input
-                                type="number"
-                                value={configForm.launchFeeAmount}
-                                onChange={(e) => setConfigForm({ ...configForm, launchFeeAmount: parseFloat(e.target.value) })}
-                                min="0"
-                                step="1"
-                                className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white focus:outline-none focus:border-purple-500"
-                            />
-                            <p className="text-gray-500 text-sm mt-1">
-                                Fee users must pay to create a new project
-                            </p>
+                        {/* Token Addresses Section */}
+                        <div className="mb-8 p-6 bg-purple-500/10 border border-purple-500/30 rounded-xl">
+                            <h3 className="text-white text-xl font-bold mb-4">🪙 Token Addresses</h3>
+
+                            {/* $3EYES Token Mint */}
+                            <div className="mb-6">
+                                <label className="block text-white font-medium mb-2">
+                                    $3EYES Token Mint Address
+                                </label>
+                                <input
+                                    type="text"
+                                    value={configForm.threeEyesMint}
+                                    onChange={(e) => setConfigForm({ ...configForm, threeEyesMint: e.target.value })}
+                                    placeholder="Enter token mint address"
+                                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-purple-500"
+                                />
+                                <p className="text-gray-400 text-sm mt-1">
+                                    Platform token used for launch fees and withdrawal fees
+                                </p>
+                                {config.network === 'devnet' && (
+                                    <p className="text-yellow-500 text-sm mt-1">
+                                        🧪 Use devnet test token address for testing
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* Lootbox Program ID */}
+                            <div className="mb-6">
+                                <label className="block text-white font-medium mb-2">
+                                    Lootbox Program ID
+                                </label>
+                                <input
+                                    type="text"
+                                    value={configForm.lootboxProgramId}
+                                    onChange={(e) => setConfigForm({ ...configForm, lootboxProgramId: e.target.value })}
+                                    placeholder="Enter program ID (after deployment)"
+                                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-purple-500"
+                                />
+                                <p className="text-gray-400 text-sm mt-1">
+                                    On-chain program address (same on devnet and mainnet if using same deploy wallet)
+                                </p>
+                            </div>
                         </div>
 
-                        {/* Withdrawal Fee */}
-                        <div className="mb-6">
-                            <label className="block text-white font-medium mb-2">
-                                Withdrawal Fee (percentage)
-                            </label>
-                            <input
-                                type="number"
-                                value={configForm.withdrawalFeePercentage}
-                                onChange={(e) => setConfigForm({ ...configForm, withdrawalFeePercentage: parseFloat(e.target.value) })}
-                                min="0"
-                                max="100"
-                                step="0.1"
-                                className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white focus:outline-none focus:border-purple-500"
-                            />
-                            <p className="text-gray-500 text-sm mt-1">
-                                Fee creators pay when withdrawing earnings (in $3EYES)
-                            </p>
+                        {/* Fees Section */}
+                        <div className="mb-8">
+                            <h3 className="text-white text-xl font-bold mb-4">💰 Platform Fees</h3>
+
+                            {/* Launch Fee */}
+                            <div className="mb-6">
+                                <label className="block text-white font-medium mb-2">
+                                    Launch Fee (in $3EYES tokens)
+                                </label>
+                                <input
+                                    type="number"
+                                    value={configForm.launchFeeAmount}
+                                    onChange={(e) => {
+                                        const value = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                        setConfigForm({ ...configForm, launchFeeAmount: isNaN(value) ? 0 : value });
+                                    }}
+                                    min="0"
+                                    step="1"
+                                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white focus:outline-none focus:border-purple-500"
+                                />
+                                <p className="text-gray-500 text-sm mt-1">
+                                    Fee users must pay to create a new project
+                                </p>
+                            </div>
+
+                            {/* Withdrawal Fee */}
+                            <div className="mb-6">
+                                <label className="block text-white font-medium mb-2">
+                                    Withdrawal Fee (percentage)
+                                </label>
+                                <input
+                                    type="number"
+                                    value={configForm.withdrawalFeePercentage}
+                                    onChange={(e) => {
+                                        const value = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                        setConfigForm({ ...configForm, withdrawalFeePercentage: isNaN(value) ? 0 : value });
+                                    }}
+                                    min="0"
+                                    max="100"
+                                    step="0.1"
+                                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white focus:outline-none focus:border-purple-500"
+                                />
+                                <p className="text-gray-500 text-sm mt-1">
+                                    Fee creators pay when withdrawing earnings (in $3EYES)
+                                </p>
+                            </div>
                         </div>
 
                         {/* Current Values Display */}
                         <div className="mb-6 p-4 bg-black/30 rounded-lg">
                             <p className="text-gray-400 text-sm mb-2">Current Configuration:</p>
-                            <div className="flex gap-8">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <p className="text-gray-500 text-xs">$3EYES Token</p>
+                                    <p className="text-white font-mono text-xs break-all">
+                                        {config.threeEyesMint?.toString()?.slice(0, 20) || 'Not set'}...
+                                    </p>
+                                </div>
+                                <div>
+                                    <p className="text-gray-500 text-xs">Program ID</p>
+                                    <p className="text-white font-mono text-xs break-all">
+                                        {config.lootboxProgramId?.toString()?.slice(0, 20) || 'Not set'}...
+                                    </p>
+                                </div>
                                 <div>
                                     <p className="text-gray-500 text-xs">Launch Fee</p>
                                     <p className="text-white font-bold">{config.launchFeeAmount / 1e9} $3EYES</p>

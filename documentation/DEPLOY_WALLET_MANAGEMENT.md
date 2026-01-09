@@ -96,7 +96,7 @@ SUPABASE_URL=https://xxx.supabase.co
 SUPABASE_KEY=your_anon_key
 
 # Server
-PORT=3001
+PORT=3333
 NODE_ENV=development
 ```
 

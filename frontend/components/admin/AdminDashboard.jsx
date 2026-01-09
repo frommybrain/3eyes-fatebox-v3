@@ -67,8 +67,8 @@ export default function AdminDashboard() {
         try {
             const { error } = await supabase
                 .from('projects')
-                .update({ active: !currentStatus })
-                .eq('project_id', projectId);
+                .update({ is_active: !currentStatus })
+                .eq('id', projectId);
 
             if (error) throw error;
 
@@ -182,11 +182,11 @@ export default function AdminDashboard() {
                                                     </span>
                                                 )}
                                                 <span className={`px-2 py-1 rounded text-xs font-bold ${
-                                                    project.active
+                                                    project.is_active
                                                         ? 'bg-green-500/20 text-green-500'
                                                         : 'bg-red-500/20 text-red-500'
                                                 }`}>
-                                                    {project.active ? 'ACTIVE' : 'PAUSED'}
+                                                    {project.is_active ? 'ACTIVE' : 'PAUSED'}
                                                 </span>
                                             </div>
                                             <p className="text-gray-400 text-sm mb-2">{project.subdomain}.degenbox.fun</p>
@@ -197,14 +197,14 @@ export default function AdminDashboard() {
                                             </div>
                                         </div>
                                         <button
-                                            onClick={() => toggleProjectStatus(project.project_id, project.active)}
+                                            onClick={() => toggleProjectStatus(project.project_id, project.is_active)}
                                             className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                                                project.active
+                                                project.is_active
                                                     ? 'bg-red-600 hover:bg-red-700 text-white'
                                                     : 'bg-green-600 hover:bg-green-700 text-white'
                                             }`}
                                         >
-                                            {project.active ? '⏸ Pause' : '▶ Activate'}
+                                            {project.is_active ? '⏸ Pause' : '▶ Activate'}
                                         </button>
                                     </div>
                                 ))}

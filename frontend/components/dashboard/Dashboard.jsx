@@ -171,8 +171,8 @@ function ProjectCard({ project, config }) {
                 </div>
                 <div className="text-center">
                     <p className="text-gray-500 text-xs">Status</p>
-                    <p className={`font-bold ${project.active ? 'text-green-400' : 'text-red-400'}`}>
-                        {project.active ? '✓' : '⏸'}
+                    <p className={`font-bold ${project.is_active ? 'text-green-400' : 'text-red-400'}`}>
+                        {project.is_active ? '✓' : '⏸'}
                     </p>
                 </div>
             </div>

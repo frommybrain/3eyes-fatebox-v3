@@ -104,22 +104,14 @@ export default function CreateProject() {
             const { data, error } = await supabase
                 .from('projects')
                 .insert({
-                    project_id: nextProjectId,
                     owner_wallet: publicKey.toString(),
-                    network: config.network,
                     subdomain: fullSubdomain,
-                    name: formData.name,
+                    project_name: formData.name,
                     description: formData.description,
-                    logo_url: formData.logoUrl,
-                    payment_token_mint: formData.paymentTokenMint,
-                    payment_token_symbol: formData.paymentTokenSymbol || 'TOKEN',
-                    payment_token_decimals: formData.paymentTokenDecimals,
-                    box_price: Math.floor(parseFloat(formData.boxPrice) * Math.pow(10, formData.paymentTokenDecimals)),
-                    project_pda: 'MOCK_PDA',
-                    vault_pda: 'MOCK_VAULT_PDA',
-                    vault_authority_pda: 'MOCK_VAULT_AUTH_PDA',
-                    vault_token_account: 'MOCK_VAULT_TOKEN_ACCOUNT',
-                    active: true,
+                    treasury_wallet: publicKey.toString(), // Default to owner wallet
+                    box_price: Math.floor(parseFloat(formData.boxPrice) * 1e9), // Convert SOL to lamports
+                    max_boxes: 1000, // Default
+                    is_active: true,
                 })
                 .select()
                 .single();

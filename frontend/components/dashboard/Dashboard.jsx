@@ -199,7 +199,7 @@ function ProjectCard({ project, config }) {
                     🔗 Visit Site
                 </button>
                 <button
-                    onClick={() => router.push(`/project/${project.subdomain}/manage`)}
+                    onClick={() => router.push(`/dashboard/manage/${project.id}`)}
                     className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg transition-colors"
                 >
                     ⚙️ Manage

@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS projects (
     is_active BOOLEAN DEFAULT true,
     is_paused BOOLEAN DEFAULT false,
     is_verified BOOLEAN DEFAULT false,
+    archived BOOLEAN DEFAULT false,
 
     -- Timestamps
     launch_date TIMESTAMP,

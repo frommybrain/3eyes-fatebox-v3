@@ -75,7 +75,7 @@ export default function Dashboard() {
 
                 {/* Create New Project Button */}
                 <Link
-                    href="/create"
+                    href="/dashboard/create"
                     className="inline-block mb-8 px-8 py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white text-lg font-bold rounded-xl shadow-lg transform transition-all hover:scale-105 active:scale-95"
                 >
                     ➕ Create New Project
@@ -101,7 +101,7 @@ export default function Dashboard() {
                             Create your first lootbox project to get started!
                         </p>
                         <Link
-                            href="/create"
+                            href="/dashboard/create"
                             className="inline-block px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors"
                         >
                             Create Your First Project

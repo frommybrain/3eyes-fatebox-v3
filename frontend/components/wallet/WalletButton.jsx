@@ -17,7 +17,7 @@ export default function WalletButton() {
         if (connected && publicKey) {
             const walletAddress = publicKey.toString();
             storeWallet(walletAddress);
-            console.log('✅ Wallet connected:', walletAddress);
+            console.log('Wallet connected:', walletAddress);
         } else {
             clearStoredWallet();
         }

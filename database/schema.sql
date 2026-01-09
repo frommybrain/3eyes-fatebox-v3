@@ -59,9 +59,11 @@ CREATE TABLE IF NOT EXISTS projects (
     -- Owner (wallet address - no users table needed)
     owner_wallet TEXT NOT NULL,
 
-    -- Treasury
-    treasury_wallet TEXT NOT NULL,
-    treasury_balance BIGINT DEFAULT 0, -- in lamports
+    -- Vault (program-controlled wallet for this project)
+    vault_wallet TEXT NOT NULL,
+    vault_pda TEXT,
+    vault_authority_pda TEXT,
+    vault_token_account TEXT,
 
     -- Box configuration
     box_price BIGINT NOT NULL, -- in lamports

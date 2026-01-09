@@ -108,7 +108,7 @@ export default function CreateProject() {
                     subdomain: fullSubdomain,
                     project_name: formData.name,
                     description: formData.description,
-                    treasury_wallet: publicKey.toString(), // Default to owner wallet
+                    vault_wallet: publicKey.toString(), // Temporary - will be replaced with PDA
                     box_price: Math.floor(parseFloat(formData.boxPrice) * 1e9), // Convert SOL to lamports
                     max_boxes: 1000, // Default
                     is_active: true,

@@ -89,7 +89,7 @@ export default function ProjectPage({ subdomain }) {
     }
 
     // Check if project is active
-    if (!currentProject.active) {
+    if (!currentProject.is_active || currentProject.is_paused) {
         return (
             <div className="flex min-h-screen items-center justify-center">
                 <div className="text-center max-w-md mx-auto p-8">
@@ -98,7 +98,7 @@ export default function ProjectPage({ subdomain }) {
                         Project Paused
                     </h1>
                     <p className="text-gray-400 mb-6">
-                        {currentProject.name} is currently paused by the creator.
+                        {currentProject.project_name} is currently paused by the creator.
                         Check back later!
                     </p>
                     <button
@@ -132,12 +132,12 @@ export default function ProjectPage({ subdomain }) {
                         {currentProject.logo_url && (
                             <img
                                 src={currentProject.logo_url}
-                                alt={currentProject.name}
+                                alt={currentProject.project_name}
                                 className="w-24 h-24 mx-auto mb-4 rounded-full"
                             />
                         )}
                         <h1 className="text-white text-4xl font-bold mb-2">
-                            {currentProject.name}
+                            {currentProject.project_name}
                         </h1>
                         {currentProject.description && (
                             <p className="text-gray-400 text-lg max-w-md mx-auto">

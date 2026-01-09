@@ -4,41 +4,24 @@
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import { authenticateWallet } from '@/lib/auth';
+import { useEffect } from 'react';
+import { storeWallet, clearStoredWallet } from '@/lib/auth';
 
 export default function WalletButton() {
-    const { publicKey, disconnect, connected, wallet } = useWallet();
+    const { publicKey, disconnect, connected } = useWallet();
     const { setVisible } = useWalletModal();
     const router = useRouter();
-    const [authenticating, setAuthenticating] = useState(false);
 
-    // Auto-authenticate when wallet connects
+    // Store wallet address when connected
     useEffect(() => {
-        if (connected && publicKey && wallet && !authenticating) {
-            handleAuthentication();
+        if (connected && publicKey) {
+            const walletAddress = publicKey.toString();
+            storeWallet(walletAddress);
+            console.log('✅ Wallet connected:', walletAddress);
+        } else {
+            clearStoredWallet();
         }
-    }, [connected, publicKey, wallet]);
-
-    const handleAuthentication = async () => {
-        if (!wallet || !publicKey) return;
-
-        setAuthenticating(true);
-        try {
-            const result = await authenticateWallet(wallet);
-            console.log('✅ Authenticated:', result.user);
-
-            // Optional: Store user data in local storage or Zustand
-            if (result.user) {
-                localStorage.setItem('degenbox_user', JSON.stringify(result.user));
-            }
-        } catch (error) {
-            console.error('Authentication error:', error);
-            // Don't block user if auth fails, they can still use the app
-        } finally {
-            setAuthenticating(false);
-        }
-    };
+    }, [connected, publicKey]);
 
     const handleClick = () => {
         if (connected) {
@@ -51,6 +34,7 @@ export default function WalletButton() {
     };
 
     const handleDisconnect = async () => {
+        clearStoredWallet();
         await disconnect();
     };
 

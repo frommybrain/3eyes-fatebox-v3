@@ -208,9 +208,29 @@ export default function CreateProject() {
             console.error('Error creating project:', error);
 
             // Clean up: delete the project from database if on-chain init failed
-            if (projectData) {
-                console.log('Cleaning up failed project from database...');
-                await supabase.from('projects').delete().eq('id', projectData.id);
+            if (projectData?.id) {
+                console.log('🧹 Cleaning up failed project from database...');
+                console.log('   Project ID:', projectData.id);
+                console.log('   Numeric ID:', projectData.project_numeric_id);
+                try {
+                    const { data: deleteData, error: deleteError, count } = await supabase
+                        .from('projects')
+                        .delete()
+                        .eq('id', projectData.id)
+                        .select(); // Add select() to get confirmation of what was deleted
+
+                    console.log('Delete response:', { deleteData, deleteError, count });
+
+                    if (deleteError) {
+                        console.error('❌ Failed to clean up project:', deleteError);
+                    } else if (!deleteData || deleteData.length === 0) {
+                        console.warn('⚠️ Delete succeeded but no rows were affected - possible RLS policy blocking');
+                    } else {
+                        console.log('✅ Failed project removed from database:', deleteData);
+                    }
+                } catch (cleanupError) {
+                    console.error('❌ Error during cleanup:', cleanupError);
+                }
             }
 
             alert(`Failed to create project: ${error.message}\n\nPlease try again.`);

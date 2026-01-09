@@ -35,14 +35,20 @@ export default function AdminDashboard() {
         // Load data
         if (isAdmin) {
             loadAllProjects();
+        }
+    }, [connected, isAdmin, mounted, router, loadAllProjects]);
+
+    // Separate effect to update form when config changes
+    useEffect(() => {
+        if (config && isAdmin) {
             setConfigForm({
                 launchFeeAmount: config.launchFeeAmount ? config.launchFeeAmount / 1e9 : 100,
-                withdrawalFeePercentage: config.withdrawalFeePercentage ?? 2.0, // Use ?? instead of || to allow 0
+                withdrawalFeePercentage: config.withdrawalFeePercentage ?? 2.0,
                 threeEyesMint: config.threeEyesMint?.toString() || '',
-                lootboxProgramId: config.lootboxProgramId?.toString() || '',
+                lootboxProgramId: config.lootboxProgramId?.toString() || config.programId?.toString() || '',
             });
         }
-    }, [connected, isAdmin, mounted, router, config]);
+    }, [config, isAdmin]);
 
     const handleSaveConfig = async () => {
         setSaving(true);
@@ -318,9 +324,9 @@ export default function AdminDashboard() {
                                 </label>
                                 <input
                                     type="text"
-                                    value={configForm.lootboxProgramId}
+                                    value={configForm.lootboxProgramId || ''}
                                     onChange={(e) => setConfigForm({ ...configForm, lootboxProgramId: e.target.value })}
-                                    placeholder="Enter program ID (after deployment)"
+                                    placeholder={config.lootboxProgramId?.toString() || "Enter program ID (after deployment)"}
                                     className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-purple-500"
                                 />
                                 <p className="text-gray-400 text-sm mt-1">
@@ -384,13 +390,17 @@ export default function AdminDashboard() {
                                 <div>
                                     <p className="text-gray-500 text-xs">$3EYES Token</p>
                                     <p className="text-white font-mono text-xs break-all">
-                                        {config.threeEyesMint?.toString()?.slice(0, 20) || 'Not set'}...
+                                        {config.threeEyesMint?.toString() ?
+                                            `${config.threeEyesMint.toString().slice(0, 20)}...` :
+                                            'Not set'}
                                     </p>
                                 </div>
                                 <div>
                                     <p className="text-gray-500 text-xs">Program ID</p>
                                     <p className="text-white font-mono text-xs break-all">
-                                        {config.lootboxProgramId?.toString()?.slice(0, 20) || 'Not set'}...
+                                        {config.lootboxProgramId?.toString() ?
+                                            `${config.lootboxProgramId.toString().slice(0, 20)}...` :
+                                            'Not set'}
                                     </p>
                                 </div>
                                 <div>

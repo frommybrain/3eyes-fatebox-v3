@@ -64,6 +64,7 @@ export async function getNetworkConfig(forceRefresh = false) {
 
             // Program & Tokens - with validation
             programId: safePublicKey(data.lootbox_program_id, 'lootbox_program_id'),
+            lootboxProgramId: safePublicKey(data.lootbox_program_id, 'lootbox_program_id'), // Alias for compatibility
             threeEyesMint: safePublicKey(data.three_eyes_mint, 'three_eyes_mint'),
             platformFeeAccount: safePublicKey(data.platform_fee_account, 'platform_fee_account'),
 

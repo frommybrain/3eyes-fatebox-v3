@@ -2,15 +2,17 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useRouter } from 'next/navigation';
+import { Transaction } from '@solana/web3.js';
 import useNetworkStore from '@/store/useNetworkStore';
 import { checkSubdomainAvailability, generateSubdomain } from '@/lib/getNetworkConfig';
 import { supabase } from '@/lib/supabase';
 
 export default function CreateProject() {
     const router = useRouter();
-    const { publicKey, connected } = useWallet();
+    const { publicKey, connected, sendTransaction } = useWallet();
+    const { connection } = useConnection();
     const { config, configLoading } = useNetworkStore();
 
     const [mounted, setMounted] = useState(false);
@@ -88,43 +90,130 @@ export default function CreateProject() {
         return Object.keys(newErrors).length === 0;
     };
 
-    // Handle form submission (MOCK - no on-chain transaction yet)
+    // Handle form submission - Initializes on-chain FIRST, then creates in DB
     const handleSubmit = async () => {
         if (!validateStep1()) return;
 
         setStep(3); // Creating...
 
+        let projectData = null;
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+
         try {
-            // In production, this would call the on-chain create_project instruction
-            // For now, we'll just insert directly into the database for testing
-
             const fullSubdomain = generateSubdomain(formData.subdomain, config.network);
-            const nextProjectId = Date.now(); // Mock project ID
 
-            const { data, error } = await supabase
+            // Step 1: Create project in database first to get a numeric ID
+            const { data: tempProject, error: dbError } = await supabase
                 .from('projects')
                 .insert({
                     owner_wallet: publicKey.toString(),
                     subdomain: fullSubdomain,
                     project_name: formData.name,
                     description: formData.description,
-                    vault_wallet: publicKey.toString(), // Temporary - will be replaced with PDA
-                    box_price: Math.floor(parseFloat(formData.boxPrice) * 1e9), // Convert SOL to lamports
-                    max_boxes: 1000, // Default
+                    vault_wallet: publicKey.toString(),
+                    box_price: Math.floor(parseFloat(formData.boxPrice) * Math.pow(10, formData.paymentTokenDecimals)),
+                    max_boxes: 1000,
                     is_active: true,
+                    payment_token_mint: formData.paymentTokenMint,
+                    payment_token_symbol: formData.paymentTokenSymbol,
+                    payment_token_decimals: formData.paymentTokenDecimals,
+                    network: config.network,
                 })
                 .select()
                 .single();
 
-            if (error) throw error;
+            if (dbError) throw dbError;
+            projectData = tempProject;
 
-            // Success! Redirect to dashboard
-            alert(`Project "${formData.name}" created successfully! 🎉\n\nYour subdomain: ${fullSubdomain}.degenbox.fun`);
+            console.log('✅ Project created in database:', projectData);
+
+            if (!projectData.project_numeric_id) {
+                throw new Error('Project numeric ID not assigned. Please check database configuration.');
+            }
+
+            // Step 2: Build transaction via backend
+            const buildResponse = await fetch(`${backendUrl}/api/program/build-initialize-project-tx`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: projectData.project_numeric_id,
+                    boxPrice: Math.floor(parseFloat(formData.boxPrice) * Math.pow(10, formData.paymentTokenDecimals)),
+                    paymentTokenMint: formData.paymentTokenMint,
+                    ownerWallet: publicKey.toString(),
+                }),
+            });
+
+            const buildResult = await buildResponse.json();
+
+            if (!buildResult.success) {
+                throw new Error(buildResult.details || 'Failed to build transaction');
+            }
+
+            console.log('✅ Transaction built:', buildResult);
+
+            // Step 3: Deserialize transaction
+            const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
+
+            // Get a fresh blockhash (the one from backend may have expired)
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            transaction.recentBlockhash = blockhash;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+
+            console.log('🔑 Sending transaction for signing...');
+
+            // Step 4: Sign and send transaction
+            const signature = await sendTransaction(transaction, connection, {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed',
+            });
+
+            console.log('📤 Transaction sent:', signature);
+
+            // Step 5: Wait for confirmation
+            const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+
+            if (confirmation.value.err) {
+                throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+            }
+
+            console.log('✅ Transaction confirmed!');
+
+            // Step 6: Update database with PDAs
+            const confirmResponse = await fetch(`${backendUrl}/api/program/confirm-project-init`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: projectData.project_numeric_id,
+                    signature,
+                    pdas: buildResult.pdas,
+                }),
+            });
+
+            const confirmResult = await confirmResponse.json();
+
+            if (!confirmResult.success) {
+                console.warn('Warning: Failed to update database:', confirmResult.details);
+            }
+
+            // Success!
+            alert(
+                `Project "${formData.name}" created successfully! 🎉\n\n` +
+                `Subdomain: ${fullSubdomain}.degenbox.fun\n` +
+                `Transaction: ${signature}\n\n` +
+                `View on Solana Explorer: ${confirmResult.explorerUrl || `https://explorer.solana.com/tx/${signature}?cluster=${config.network}`}`
+            );
             router.push('/dashboard');
 
         } catch (error) {
             console.error('Error creating project:', error);
-            alert('Failed to create project. Please try again.');
+
+            // Clean up: delete the project from database if on-chain init failed
+            if (projectData) {
+                console.log('Cleaning up failed project from database...');
+                await supabase.from('projects').delete().eq('id', projectData.id);
+            }
+
+            alert(`Failed to create project: ${error.message}\n\nPlease try again.`);
             setStep(2);
         }
     };

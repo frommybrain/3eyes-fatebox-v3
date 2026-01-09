@@ -1,6 +1,7 @@
-// middleware.js
-// Next.js 16 Edge Middleware for Multi-Tenant Subdomain Routing
+// proxy.js
+// Next.js 16 Edge Proxy for Multi-Tenant Subdomain Routing
 // Based on Vercel's multi-tenant approach: https://vercel.com/docs/multi-tenant
+// Migrated from middleware.js (Next.js 16+ uses proxy.js instead)
 
 import { NextResponse } from 'next/server';
 
@@ -73,7 +74,7 @@ function isReservedSubdomain(subdomain) {
     return RESERVED_SUBDOMAINS.has(subdomain);
 }
 
-export function middleware(request) {
+export function proxy(request) {
     const { pathname, searchParams } = request.nextUrl;
     const hostname = request.headers.get('host') || '';
     const origin = request.headers.get("origin");
@@ -164,7 +165,7 @@ export function middleware(request) {
     return response;
 }
 
-// Configure middleware to run on all routes
+// Configure proxy to run on all routes
 export const config = {
     matcher: [
         /*

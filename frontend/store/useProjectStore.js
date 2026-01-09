@@ -98,7 +98,7 @@ const useProjectStore = create((set, get) => ({
             let query = supabase
                 .from('projects')
                 .select('*')
-                .eq('active', true)
+                .eq('is_active', true)
                 .eq('archived', false)
                 .order('created_at', { ascending: false });
 

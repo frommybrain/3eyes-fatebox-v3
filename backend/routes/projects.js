@@ -341,4 +341,96 @@ router.get('/', async (req, res) => {
     }
 });
 
+/**
+ * GET /api/projects/boxes/by-owner/:walletAddress
+ * Get all boxes owned by a specific wallet, grouped by project
+ */
+router.get('/boxes/by-owner/:walletAddress', async (req, res) => {
+    try {
+        const { walletAddress } = req.params;
+
+        if (!walletAddress) {
+            return res.status(400).json({
+                success: false,
+                error: 'Wallet address is required'
+            });
+        }
+
+        // Validate wallet address format
+        try {
+            new PublicKey(walletAddress);
+        } catch (error) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid wallet address format'
+            });
+        }
+
+        // Fetch all boxes owned by this wallet with project details
+        const { data: boxes, error } = await supabase
+            .from('boxes')
+            .select(`
+                id,
+                box_number,
+                box_result,
+                payout_amount,
+                opened_at,
+                created_at,
+                project_id,
+                projects (
+                    id,
+                    project_name,
+                    subdomain,
+                    payment_token_symbol,
+                    payment_token_decimals,
+                    box_price
+                )
+            `)
+            .eq('owner_wallet', walletAddress)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            console.error('Error fetching boxes:', error);
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to fetch boxes',
+                details: error.message
+            });
+        }
+
+        // Group boxes by project
+        const groupedBoxes = {};
+        boxes.forEach(box => {
+            const projectId = box.project_id;
+            if (!groupedBoxes[projectId]) {
+                groupedBoxes[projectId] = {
+                    project: box.projects,
+                    boxes: []
+                };
+            }
+            // Remove nested projects object from box
+            const { projects, ...boxData } = box;
+            groupedBoxes[projectId].boxes.push(boxData);
+        });
+
+        // Convert to array format
+        const projectsWithBoxes = Object.values(groupedBoxes);
+
+        return res.json({
+            success: true,
+            totalBoxes: boxes.length,
+            projectCount: projectsWithBoxes.length,
+            projectsWithBoxes
+        });
+
+    } catch (error) {
+        console.error('Error fetching user boxes:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Internal server error',
+            details: error.message
+        });
+    }
+});
+
 export default router;

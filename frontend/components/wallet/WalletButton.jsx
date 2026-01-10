@@ -6,6 +6,7 @@ import { useWalletModal } from '@solana/wallet-adapter-react-ui';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { storeWallet, clearStoredWallet } from '@/lib/auth';
+import { DegenButton } from '@/components/ui';
 
 export default function WalletButton() {
     const { publicKey, disconnect, connected } = useWallet();
@@ -41,12 +42,12 @@ export default function WalletButton() {
     if (!connected) {
         // Not connected - show connect button
         return (
-            <button
+            <DegenButton
                 onClick={handleClick}
-                className="px-6 py-2 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors"
+                variant="primary"
             >
                 Connect Wallet
-            </button>
+            </DegenButton>
         );
     }
 
@@ -59,25 +60,25 @@ export default function WalletButton() {
         <div className="relative group">
             <button
                 onClick={handleClick}
-                className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors flex items-center gap-2"
+                className="px-6 py-2 bg-degen-success text-degen-black font-medium uppercase tracking-wider border border-degen-black hover:bg-degen-success/80 transition-colors flex items-center gap-2"
             >
-                <div className="w-2 h-2 bg-green-300 rounded-full animate-pulse"></div>
+                <div className="w-2 h-2 bg-degen-black rounded-full animate-pulse"></div>
                 {shortAddress}
             </button>
 
             {/* Dropdown menu */}
-            <div className="absolute right-0 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+            <div className="absolute right-0 mt-1 w-48 bg-degen-white border border-degen-black shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
                 <button
                     onClick={handleClick}
-                    className="w-full px-4 py-3 text-left text-white hover:bg-gray-800 rounded-t-lg transition-colors"
+                    className="w-full px-4 py-3 text-left text-degen-black hover:bg-degen-bg transition-colors uppercase tracking-wider text-sm font-medium"
                 >
-                    📊 Dashboard
+                    Dashboard
                 </button>
                 <button
                     onClick={handleDisconnect}
-                    className="w-full px-4 py-3 text-left text-red-400 hover:bg-gray-800 rounded-b-lg transition-colors"
+                    className="w-full px-4 py-3 text-left text-degen-error hover:bg-degen-bg transition-colors uppercase tracking-wider text-sm font-medium border-t border-degen-black"
                 >
-                    🔌 Disconnect
+                    Disconnect
                 </button>
             </div>
         </div>

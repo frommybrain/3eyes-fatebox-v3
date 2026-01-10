@@ -11,11 +11,10 @@ export default function Header() {
   const isAdmin = publicKey && config && publicKey.toString() === config.adminWallet.toString();
 
   return (
-    <header className="relative w-full h-14 flex items-center justify-between px-4 bg-degen-black border-b border-degen-black z-50">
+    <header className="relative w-full h-14 flex items-center justify-between px-4 bg-degen-bg border-b border-degen-black z-50">
       {/* Logo / Brand */}
       <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-        <div className="text-xl">👁️👁️👁️</div>
-        <span className="text-degen-white font-medium text-lg uppercase tracking-wider">DegenBox</span>
+        <div className="text-xl"></div>
       </Link>
 
       {/* Navigation & Wallet */}
@@ -24,7 +23,7 @@ export default function Header() {
           <>
             <Link
               href="/dashboard"
-              className="px-4 py-2 text-degen-white/80 hover:text-degen-white hover:bg-degen-white/10 transition-colors font-medium text-sm uppercase tracking-wider"
+              className="px-4 py-2 text-degen-black/80 hover:text-degen-black hover:bg-degen-black/5 transition-colors font-medium text-sm uppercase tracking-wider"
             >
               My Projects
             </Link>
@@ -40,7 +39,7 @@ export default function Header() {
           </>
         )}
 
-        <div className="ml-2 border-l border-degen-white/20 pl-4">
+        <div className="ml-2 border-l border-degen-black/20 pl-4">
           <WalletButton />
         </div>
       </div>

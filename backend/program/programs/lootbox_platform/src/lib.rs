@@ -96,6 +96,7 @@ pub mod lootbox_platform {
         box_instance.reward_amount = 0;
         box_instance.is_jackpot = false;
         box_instance.random_percentage = 0.0;
+        box_instance.reward_tier = 0;
 
         // Update project stats
         project_config.total_boxes_created = box_id;
@@ -141,11 +142,19 @@ pub mod lootbox_platform {
 
         // Get randomness from Switchboard VRF
         // TODO: Integrate Switchboard VRF account reading
-        // For now, using a placeholder - will implement full VRF integration
-        let random_percentage = 0.5; // Placeholder - replace with Switchboard VRF
+        // For now, using a pseudo-random value based on slot hash for testing
+        // This is NOT secure for production - use Switchboard VRF
+        let clock = Clock::get()?;
+        let slot = clock.slot;
+        // Create a pseudo-random value from slot and box data (temporary for testing)
+        let seed = slot
+            .wrapping_add(box_id)
+            .wrapping_mul(project_id)
+            .wrapping_add(clock.unix_timestamp as u64);
+        let random_percentage = ((seed % 10000) as f64) / 10000.0; // 0.0 to 0.9999
 
-        // Calculate reward based on luck and randomness
-        let (reward_amount, is_jackpot) = calculate_reward(
+        // Calculate reward based on luck and randomness using tier system
+        let (reward_amount, is_jackpot, reward_tier) = calculate_reward(
             current_luck,
             random_percentage,
             project_config.box_price,
@@ -158,10 +167,22 @@ pub mod lootbox_platform {
         box_instance.reward_amount = reward_amount;
         box_instance.is_jackpot = is_jackpot;
         box_instance.random_percentage = random_percentage;
+        box_instance.reward_tier = reward_tier;
+
+        let tier_name = match reward_tier {
+            0 => "Dud",
+            1 => "Rebate",
+            2 => "Break-even",
+            3 => "Profit",
+            4 => "Jackpot",
+            _ => "Unknown",
+        };
 
         msg!("Box revealed!");
         msg!("Box ID: {}", box_id);
         msg!("Luck: {}/60", current_luck);
+        msg!("Random roll: {:.2}%", random_percentage * 100.0);
+        msg!("Tier: {} ({})", tier_name, reward_tier);
         msg!("Reward: {}", reward_amount);
         msg!("Is jackpot: {}", is_jackpot);
 
@@ -324,37 +345,81 @@ pub mod lootbox_platform {
     }
 }
 
-// Helper function to calculate reward based on luck and randomness
+/// Calculate reward tier and amount based on luck and randomness
+/// Uses probability tables that improve with higher luck scores
+///
+/// Reward Tiers:
+/// - Dud (0): 0x box price
+/// - Rebate (1): 0.8x box price
+/// - Break-even (2): 1.0x box price
+/// - Profit (3): 2.5x box price
+/// - Jackpot (4): 10x box price
 fn calculate_reward(
     luck: u8,
     random_percentage: f64,
     box_price: u64,
-    vault_balance: u64,
-) -> Result<(u64, bool)> {
-    // Calculate multiplier based on luck (0.5x to 6.0x)
-    let luck_multiplier = (luck as f64) / 10.0;
-
-    // Add random bonus (0.0x to 2.0x)
-    let random_bonus = random_percentage * 2.0;
-
-    // Total multiplier
-    let total_multiplier = luck_multiplier + random_bonus;
-
-    // Base reward
-    let base_reward = (box_price as f64 * total_multiplier) as u64;
-
-    // Check for jackpot (1% chance at max luck)
-    let is_jackpot = luck >= 60 && random_percentage > 0.99;
-
-    if is_jackpot {
-        // Jackpot: 50% of vault balance
-        let jackpot_amount = vault_balance
-            .checked_div(2)
-            .ok_or(LootboxError::ArithmeticOverflow)?;
-        Ok((jackpot_amount, true))
+    _vault_balance: u64, // Reserved for future jackpot calculations
+) -> Result<(u64, bool, u8)> {
+    // Probability tables based on luck score
+    // Returns (dud_chance, rebate_chance, break_even_chance, profit_chance)
+    // Jackpot chance is the remainder to 100%
+    let (dud_chance, rebate_chance, break_even_chance, profit_chance) = if luck <= 5 {
+        (55.0, 30.0, 10.0, 4.5) // Jackpot: 0.5%
+    } else if luck <= 13 {
+        // Linear interpolation between luck 5 and 13
+        let ratio = (luck as f64 - 5.0) / 8.0;
+        (
+            55.0 + (45.0 - 55.0) * ratio,  // 55% → 45%
+            30.0,                           // 30% → 30%
+            10.0 + (15.0 - 10.0) * ratio,  // 10% → 15%
+            4.5 + (8.5 - 4.5) * ratio,     // 4.5% → 8.5%
+        ) // Jackpot: 0.5% → 1.5%
     } else {
-        Ok((base_reward, false))
+        // Linear interpolation between luck 13 and 60
+        let ratio = (luck as f64 - 13.0) / 47.0;
+        (
+            45.0 + (30.0 - 45.0) * ratio,  // 45% → 30%
+            30.0 + (25.0 - 30.0) * ratio,  // 30% → 25%
+            15.0 + (20.0 - 15.0) * ratio,  // 15% → 20%
+            8.5 + (20.0 - 8.5) * ratio,    // 8.5% → 20%
+        ) // Jackpot: 1.5% → 5%
+    };
+
+    // Convert random_percentage from 0.0-1.0 to 0-100
+    let roll = random_percentage * 100.0;
+
+    // Determine tier based on cumulative probabilities
+    let mut cumulative = 0.0;
+
+    // Tier 0: Dud (0x)
+    cumulative += dud_chance;
+    if roll <= cumulative {
+        return Ok((0, false, 0));
     }
+
+    // Tier 1: Rebate (0.8x)
+    cumulative += rebate_chance;
+    if roll <= cumulative {
+        let reward = (box_price as f64 * 0.8) as u64;
+        return Ok((reward, false, 1));
+    }
+
+    // Tier 2: Break-even (1.0x)
+    cumulative += break_even_chance;
+    if roll <= cumulative {
+        return Ok((box_price, false, 2));
+    }
+
+    // Tier 3: Profit (2.5x)
+    cumulative += profit_chance;
+    if roll <= cumulative {
+        let reward = (box_price as f64 * 2.5) as u64;
+        return Ok((reward, false, 3));
+    }
+
+    // Tier 4: Jackpot (10x)
+    let reward = (box_price as f64 * 10.0) as u64;
+    Ok((reward, true, 4))
 }
 
 // Account validation contexts
@@ -577,10 +642,11 @@ pub struct BoxInstance {
     pub reward_amount: u64,           // 8 bytes
     pub is_jackpot: bool,             // 1 byte
     pub random_percentage: f64,       // 8 bytes
+    pub reward_tier: u8,              // 1 byte (0=Dud, 1=Rebate, 2=Break-even, 3=Profit, 4=Jackpot)
 }
 
 impl BoxInstance {
-    pub const LEN: usize = 8 + 8 + 32 + 8 + 1 + 1 + 1 + 8 + 1 + 8; // 76 bytes
+    pub const LEN: usize = 8 + 8 + 32 + 8 + 1 + 1 + 1 + 8 + 1 + 8 + 1; // 77 bytes
 }
 
 // Error codes

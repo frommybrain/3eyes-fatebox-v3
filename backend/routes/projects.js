@@ -375,10 +375,12 @@ router.get('/boxes/by-owner/:walletAddress', async (req, res) => {
                 box_result,
                 payout_amount,
                 opened_at,
+                settled_at,
                 created_at,
                 project_id,
                 projects (
                     id,
+                    project_numeric_id,
                     project_name,
                     subdomain,
                     payment_token_symbol,

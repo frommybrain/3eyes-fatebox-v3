@@ -178,7 +178,7 @@ export default function CreateProject() {
 
             console.log('✅ Transaction confirmed!');
 
-            // Step 6: Update database with PDAs
+            // Step 6: Update database with PDAs and vault funding status
             const confirmResponse = await fetch(`${backendUrl}/api/program/confirm-project-init`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -186,6 +186,7 @@ export default function CreateProject() {
                     projectId: projectData.project_numeric_id,
                     signature,
                     pdas: buildResult.pdas,
+                    vaultFunding: buildResult.vaultFunding, // Include vault funding info
                 }),
             });
 
@@ -255,6 +256,7 @@ export default function CreateProject() {
 
     const isDevnet = config?.network === 'devnet';
     const launchFee = config?.launchFeeAmount ? config.launchFeeAmount / 1e9 : 100; // Simplified for display
+    const vaultFundAmount = config?.vaultFundAmount ? Number(config.vaultFundAmount) / 1e9 : 50000000; // Default 50M
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 pt-24 pb-12 px-6">
@@ -447,16 +449,25 @@ export default function CreateProject() {
                             <ReviewItem label="Box Price" value={`${formData.boxPrice} ${formData.paymentTokenSymbol || 'TOKEN'}`} />
                         </div>
 
-                        {/* Launch Fee Notice */}
+                        {/* Launch Fee & Vault Funding Notice */}
                         <div className="bg-purple-500/10 border border-purple-500/50 rounded-xl p-6 mb-6">
-                            <h3 className="text-white font-bold mb-2">⚠️ Launch Fee Required</h3>
-                            <p className="text-gray-300 mb-4">
-                                Creating a project requires a launch fee of <strong>{launchFee} $3EYES</strong> tokens.
-                            </p>
+                            <h3 className="text-white font-bold mb-3">⚠️ Required Payments</h3>
+
+                            <div className="space-y-3 mb-4">
+                                <div className="flex justify-between items-center">
+                                    <span className="text-gray-300">Launch Fee ($3EYES)</span>
+                                    <span className="text-white font-bold">{launchFee.toLocaleString()} $3EYES</span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <span className="text-gray-300">Vault Funding ({formData.paymentTokenSymbol || 'tokens'})</span>
+                                    <span className="text-white font-bold">{vaultFundAmount.toLocaleString()} {formData.paymentTokenSymbol || 'tokens'}</span>
+                                </div>
+                            </div>
+
                             <p className="text-gray-400 text-sm">
                                 {isDevnet
                                     ? "This is DEVNET - no real tokens required for testing!"
-                                    : "This fee helps prevent spam and supports the platform."}
+                                    : "The vault funding ensures there are tokens available to pay out rewards to winners."}
                             </p>
                         </div>
 

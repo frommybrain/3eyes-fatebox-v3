@@ -46,6 +46,8 @@ export default function AdminDashboard() {
                 withdrawalFeePercentage: config.withdrawalFeePercentage ?? 2.0,
                 threeEyesMint: config.threeEyesMint?.toString() || '',
                 lootboxProgramId: config.lootboxProgramId?.toString() || config.programId?.toString() || '',
+                luckIntervalSeconds: config.luckIntervalSeconds ?? 3,
+                vaultFundAmount: config.vaultFundAmount ? config.vaultFundAmount / 1e9 : 50000000, // 50M default
             });
         }
     }, [config, isAdmin]);
@@ -56,6 +58,8 @@ export default function AdminDashboard() {
             const updates = {
                 launch_fee_amount: Math.floor(configForm.launchFeeAmount * 1e9),
                 withdrawal_fee_percentage: configForm.withdrawalFeePercentage,
+                luck_interval_seconds: configForm.luckIntervalSeconds,
+                vault_fund_amount: Math.floor(configForm.vaultFundAmount * 1e9),
             };
 
             // Only update token addresses if they're provided
@@ -331,6 +335,111 @@ export default function AdminDashboard() {
                                 />
                                 <p className="text-gray-400 text-sm mt-1">
                                     On-chain program address (same on devnet and mainnet if using same deploy wallet)
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Game Settings Section */}
+                        <div className="mb-8 p-6 bg-orange-500/10 border border-orange-500/30 rounded-xl">
+                            <h3 className="text-white text-xl font-bold mb-4">🎮 Game Settings</h3>
+                            <p className="text-orange-400 text-sm mb-4">
+                                ⚠️ REMINDER: Change luck interval to 10800 (3 hours) before mainnet launch!
+                            </p>
+
+                            {/* Luck Interval */}
+                            <div className="mb-6">
+                                <label className="block text-white font-medium mb-2">
+                                    Luck Interval (seconds)
+                                </label>
+                                <input
+                                    type="number"
+                                    value={configForm.luckIntervalSeconds ?? 3}
+                                    onChange={(e) => {
+                                        const value = e.target.value === '' ? 3 : parseInt(e.target.value);
+                                        setConfigForm({ ...configForm, luckIntervalSeconds: isNaN(value) ? 3 : value });
+                                    }}
+                                    min="1"
+                                    step="1"
+                                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white focus:outline-none focus:border-orange-500"
+                                />
+                                <p className="text-gray-500 text-sm mt-1">
+                                    How often luck increases by 1 point. Dev: 3 seconds | Production: 10800 seconds (3 hours)
+                                </p>
+                                <div className="mt-2 flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setConfigForm({ ...configForm, luckIntervalSeconds: 3 })}
+                                        className="px-3 py-1 bg-yellow-600 hover:bg-yellow-700 text-white text-xs rounded"
+                                    >
+                                        Set Dev Mode (3s)
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setConfigForm({ ...configForm, luckIntervalSeconds: 10800 })}
+                                        className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded"
+                                    >
+                                        Set Production (3 hours)
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Current Luck Setting Display */}
+                            <div className="p-3 bg-black/30 rounded-lg">
+                                <p className="text-gray-400 text-xs">Current Setting:</p>
+                                <p className={`font-bold ${(config.luckIntervalSeconds ?? 3) === 10800 ? 'text-green-400' : 'text-yellow-400'}`}>
+                                    {config.luckIntervalSeconds ?? 3} seconds
+                                    ({(config.luckIntervalSeconds ?? 3) === 10800 ? '✓ Production mode' : '⚠️ Dev/Testing mode'})
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Project Creation Settings Section */}
+                        <div className="mb-8 p-6 bg-blue-500/10 border border-blue-500/30 rounded-xl">
+                            <h3 className="text-white text-xl font-bold mb-4">🏗️ Project Creation Settings</h3>
+
+                            {/* Vault Fund Amount */}
+                            <div className="mb-6">
+                                <label className="block text-white font-medium mb-2">
+                                    Required Vault Funding (tokens)
+                                </label>
+                                <input
+                                    type="number"
+                                    value={configForm.vaultFundAmount ?? 50000000}
+                                    onChange={(e) => {
+                                        const value = e.target.value === '' ? 50000000 : parseFloat(e.target.value);
+                                        setConfigForm({ ...configForm, vaultFundAmount: isNaN(value) ? 50000000 : value });
+                                    }}
+                                    min="0"
+                                    step="1000000"
+                                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500"
+                                />
+                                <p className="text-gray-500 text-sm mt-1">
+                                    Amount of tokens project creators must transfer to fund their vault on project creation.
+                                    This ensures there are funds to pay out rewards.
+                                </p>
+                                <div className="mt-2 flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setConfigForm({ ...configForm, vaultFundAmount: 1000 })}
+                                        className="px-3 py-1 bg-yellow-600 hover:bg-yellow-700 text-white text-xs rounded"
+                                    >
+                                        Set Dev Mode (1K)
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setConfigForm({ ...configForm, vaultFundAmount: 50000000 })}
+                                        className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded"
+                                    >
+                                        Set Production (50M)
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Current Vault Fund Setting Display */}
+                            <div className="p-3 bg-black/30 rounded-lg">
+                                <p className="text-gray-400 text-xs">Current Setting:</p>
+                                <p className="text-white font-bold">
+                                    {(config.vaultFundAmount ? (Number(config.vaultFundAmount) / 1e9).toLocaleString() : '50,000,000')} tokens
                                 </p>
                             </div>
                         </div>

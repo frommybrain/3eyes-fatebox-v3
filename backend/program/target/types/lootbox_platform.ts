@@ -714,6 +714,10 @@ export type LootboxPlatform = {
           {
             "name": "randomPercentage",
             "type": "f64"
+          },
+          {
+            "name": "rewardTier",
+            "type": "u8"
           }
         ]
       }

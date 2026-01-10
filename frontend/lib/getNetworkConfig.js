@@ -76,6 +76,12 @@ export async function getNetworkConfig(forceRefresh = false) {
             minBoxPrice: data.min_box_price,
             maxProjectsPerWallet: data.max_projects_per_wallet,
 
+            // Game settings
+            luckIntervalSeconds: data.luck_interval_seconds ?? 3, // Default 3 seconds for dev
+
+            // Project creation settings
+            vaultFundAmount: data.vault_fund_amount, // Required vault funding for project creation
+
             // Admin
             adminWallet: safePublicKey(data.admin_wallet, 'admin_wallet'),
 

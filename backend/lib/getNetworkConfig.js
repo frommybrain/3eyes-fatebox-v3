@@ -49,6 +49,12 @@ export async function getNetworkConfig() {
             platformActive: data.platform_active,
             maintenanceMode: data.maintenance_mode,
 
+            // Game settings
+            luckIntervalSeconds: data.luck_interval_seconds ?? 3, // Default 3 seconds for dev
+
+            // Project creation settings
+            vaultFundAmount: BigInt(data.vault_fund_amount || '50000000000000000'), // Required vault funding for project creation (default 50M with 9 decimals)
+
             // Raw data (for backward compatibility)
             raw: data,
         };

@@ -31,6 +31,12 @@ CREATE TABLE IF NOT EXISTS super_admin_config (
     platform_active BOOLEAN DEFAULT true,
     maintenance_mode BOOLEAN DEFAULT false,
 
+    -- Game settings
+    luck_interval_seconds INTEGER NOT NULL DEFAULT 3, -- Seconds between luck increases (3 for dev, 10800 for production)
+
+    -- Vault funding requirement
+    vault_fund_amount BIGINT NOT NULL DEFAULT 50000000000000000, -- 50M tokens (with 9 decimals) required to fund vault on project creation
+
     -- Metadata
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
@@ -64,6 +70,9 @@ CREATE TABLE IF NOT EXISTS projects (
     vault_pda TEXT,
     vault_authority_pda TEXT,
     vault_token_account TEXT,
+    vault_funded BOOLEAN DEFAULT false,
+    vault_funded_amount BIGINT,
+    vault_funded_at TIMESTAMP,
 
     -- Box configuration
     box_price BIGINT NOT NULL, -- in lamports
@@ -127,6 +136,7 @@ CREATE TABLE IF NOT EXISTS boxes (
 
     -- Metadata
     opened_at TIMESTAMP,
+    settled_at TIMESTAMP, -- When reward was claimed/settled
     created_at TIMESTAMP DEFAULT NOW(),
 
     -- Constraints

@@ -1,8 +1,10 @@
 // components/dashboard/Dashboard.jsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
+import { useConnection } from '@solana/wallet-adapter-react';
+import { Transaction } from '@solana/web3.js';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import useProjectStore from '@/store/useProjectStore';
@@ -164,11 +166,19 @@ function MyProjectsTab({ projects, projectsLoading, projectsError, config }) {
 }
 
 function MyBoxesTab({ walletAddress, config }) {
+    const { publicKey, sendTransaction } = useWallet();
+    const { connection } = useConnection();
     const [boxesData, setBoxesData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [refreshKey, setRefreshKey] = useState(0);
 
     const platformDomain = config?.network === 'devnet' ? 'degenbox.fun' : 'degenbox.fun';
+
+    // Refresh boxes data
+    const refreshBoxes = useCallback(() => {
+        setRefreshKey(prev => prev + 1);
+    }, []);
 
     useEffect(() => {
         async function fetchUserBoxes() {
@@ -177,6 +187,7 @@ function MyBoxesTab({ walletAddress, config }) {
                 return;
             }
 
+            setLoading(true);
             try {
                 const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
                 const response = await fetch(`${backendUrl}/api/projects/boxes/by-owner/${walletAddress}`);
@@ -196,7 +207,7 @@ function MyBoxesTab({ walletAddress, config }) {
         }
 
         fetchUserBoxes();
-    }, [walletAddress]);
+    }, [walletAddress, refreshKey]);
 
     if (loading) {
         return (
@@ -249,13 +260,18 @@ function MyBoxesTab({ walletAddress, config }) {
                     key={projectGroup.project.id}
                     projectGroup={projectGroup}
                     platformDomain={platformDomain}
+                    walletAddress={walletAddress}
+                    publicKey={publicKey}
+                    sendTransaction={sendTransaction}
+                    connection={connection}
+                    onRefresh={refreshBoxes}
                 />
             ))}
         </div>
     );
 }
 
-function ProjectBoxesGroup({ projectGroup, platformDomain }) {
+function ProjectBoxesGroup({ projectGroup, platformDomain, walletAddress, publicKey, sendTransaction, connection, onRefresh }) {
     const { project, boxes } = projectGroup;
 
     const projectUrl = typeof window !== 'undefined' && window.location.hostname.includes('localhost')
@@ -298,7 +314,16 @@ function ProjectBoxesGroup({ projectGroup, platformDomain }) {
             <div className="p-6">
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
                     {boxes.map((box) => (
-                        <BoxCard key={box.id} box={box} project={project} />
+                        <BoxCard
+                            key={box.id}
+                            box={box}
+                            project={project}
+                            walletAddress={walletAddress}
+                            publicKey={publicKey}
+                            sendTransaction={sendTransaction}
+                            connection={connection}
+                            onRefresh={onRefresh}
+                        />
                     ))}
                 </div>
             </div>
@@ -306,35 +331,242 @@ function ProjectBoxesGroup({ projectGroup, platformDomain }) {
     );
 }
 
-function BoxCard({ box, project }) {
+function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, connection, onRefresh }) {
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [revealResult, setRevealResult] = useState(null);
+    const [error, setError] = useState(null);
+
     const isPending = box.box_result === 0;
-    const isWinner = box.box_result === 1;
+    // box_result: 1=dud, 2=rebate, 3=break-even, 4=profit, 5=jackpot
+    const isRevealed = box.box_result > 0;
+    const hasReward = box.payout_amount > 0;
+    const isJackpot = box.box_result === 5;
 
     // Format payout amount
     const payoutFormatted = box.payout_amount
         ? (box.payout_amount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
         : '0';
 
+    // Get tier name from result
+    const getTierName = (result) => {
+        switch (result) {
+            case 1: return 'Dud';
+            case 2: return 'Rebate';
+            case 3: return 'Break-even';
+            case 4: return 'Profit';
+            case 5: return 'Jackpot';
+            default: return 'Pending';
+        }
+    };
+
+    // Handle reveal box
+    const handleReveal = async () => {
+        if (!publicKey || !sendTransaction) return;
+
+        setIsProcessing(true);
+        setError(null);
+
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+
+            // Step 1: Build reveal transaction
+            const buildResponse = await fetch(`${backendUrl}/api/program/build-reveal-box-tx`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    ownerWallet: walletAddress,
+                }),
+            });
+
+            const buildResult = await buildResponse.json();
+            if (!buildResult.success) {
+                throw new Error(buildResult.details || buildResult.error);
+            }
+
+            // Store the reward info for display
+            setRevealResult(buildResult.reward);
+
+            // Step 2: Deserialize and sign transaction
+            const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            transaction.recentBlockhash = blockhash;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+
+            // Step 3: Send transaction
+            const signature = await sendTransaction(transaction, connection, {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed',
+            });
+
+            // Step 4: Wait for confirmation
+            await connection.confirmTransaction(signature, 'confirmed');
+
+            // Step 5: Confirm with backend
+            await fetch(`${backendUrl}/api/program/confirm-reveal`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    ownerWallet: walletAddress,
+                    signature,
+                    reward: buildResult.reward,
+                }),
+            });
+
+            // Refresh boxes list
+            if (onRefresh) onRefresh();
+
+        } catch (err) {
+            console.error('Error revealing box:', err);
+            setError(err.message);
+            setRevealResult(null);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    // Handle claim reward (settle)
+    const handleClaim = async () => {
+        if (!publicKey || !sendTransaction) return;
+
+        setIsProcessing(true);
+        setError(null);
+
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+
+            // Step 1: Build settle transaction
+            const buildResponse = await fetch(`${backendUrl}/api/program/build-settle-box-tx`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    ownerWallet: walletAddress,
+                }),
+            });
+
+            const buildResult = await buildResponse.json();
+            if (!buildResult.success) {
+                throw new Error(buildResult.details || buildResult.error);
+            }
+
+            // Step 2: Deserialize and sign transaction
+            const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            transaction.recentBlockhash = blockhash;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+
+            // Step 3: Send transaction
+            const signature = await sendTransaction(transaction, connection, {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed',
+            });
+
+            // Step 4: Wait for confirmation
+            await connection.confirmTransaction(signature, 'confirmed');
+
+            // Step 5: Confirm with backend
+            await fetch(`${backendUrl}/api/program/confirm-settle`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    signature,
+                }),
+            });
+
+            // Show success and refresh
+            alert(`Successfully claimed ${payoutFormatted} ${project.payment_token_symbol}!`);
+            if (onRefresh) onRefresh();
+
+        } catch (err) {
+            console.error('Error claiming reward:', err);
+            setError(err.message);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    // Get box styling based on state
+    const getBoxStyling = () => {
+        if (isPending) return 'bg-yellow-500/10 border-yellow-500/30 hover:bg-yellow-500/20';
+        if (isJackpot) return 'bg-gradient-to-br from-yellow-500/20 to-purple-500/20 border-yellow-400/50 animate-pulse';
+        if (hasReward) return 'bg-green-500/10 border-green-500/30 hover:bg-green-500/20';
+        return 'bg-gray-500/10 border-gray-500/30 hover:bg-gray-500/20';
+    };
+
+    // Get box icon
+    const getBoxIcon = () => {
+        if (isPending) return '📦';
+        if (isJackpot) return '🎰';
+        if (box.box_result === 4) return '💰'; // Profit
+        if (hasReward) return '🎁';
+        return '📭'; // Dud
+    };
+
     return (
-        <div className={`relative p-4 rounded-lg border text-center transition-all ${
-            isPending
-                ? 'bg-yellow-500/10 border-yellow-500/30 hover:bg-yellow-500/20'
-                : isWinner
-                    ? 'bg-green-500/10 border-green-500/30 hover:bg-green-500/20'
-                    : 'bg-gray-500/10 border-gray-500/30 hover:bg-gray-500/20'
-        }`}>
-            {/* Box Number */}
+        <div className={`relative p-4 rounded-lg border text-center transition-all ${getBoxStyling()}`}>
+            {/* Box Icon */}
             <div className="text-2xl mb-2">
-                {isPending ? '📦' : isWinner ? '🎉' : '📭'}
+                {isProcessing ? '⏳' : getBoxIcon()}
             </div>
             <p className="text-white font-bold">Box #{box.box_number}</p>
 
-            {/* Status */}
-            <p className={`text-xs mt-1 ${
-                isPending ? 'text-yellow-400' : isWinner ? 'text-green-400' : 'text-gray-400'
-            }`}>
-                {isPending ? 'Pending' : isWinner ? `Won ${payoutFormatted}` : 'No Win'}
-            </p>
+            {/* Status / Result */}
+            {isPending ? (
+                <p className="text-yellow-400 text-xs mt-1">Ready to Open</p>
+            ) : (
+                <div className="mt-1">
+                    <p className={`text-xs font-medium ${
+                        isJackpot ? 'text-yellow-400' :
+                        hasReward ? 'text-green-400' : 'text-gray-400'
+                    }`}>
+                        {getTierName(box.box_result)}
+                    </p>
+                    {hasReward && (
+                        <p className="text-green-400 text-xs">
+                            {payoutFormatted} {project.payment_token_symbol}
+                        </p>
+                    )}
+                </div>
+            )}
+
+            {/* Error Display */}
+            {error && (
+                <p className="text-red-400 text-xs mt-1 truncate" title={error}>
+                    Error
+                </p>
+            )}
+
+            {/* Action Button */}
+            <div className="mt-3">
+                {isPending ? (
+                    <button
+                        onClick={handleReveal}
+                        disabled={isProcessing}
+                        className="w-full px-3 py-1.5 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
+                    >
+                        {isProcessing ? 'Opening...' : 'Open Box'}
+                    </button>
+                ) : hasReward && !box.settled_at ? (
+                    <button
+                        onClick={handleClaim}
+                        disabled={isProcessing}
+                        className="w-full px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
+                    >
+                        {isProcessing ? 'Claiming...' : 'Claim'}
+                    </button>
+                ) : hasReward ? (
+                    <span className="text-green-400 text-xs">Claimed</span>
+                ) : (
+                    <span className="text-gray-500 text-xs">No reward</span>
+                )}
+            </div>
 
             {/* Purchase Date */}
             <p className="text-gray-500 text-xs mt-2">

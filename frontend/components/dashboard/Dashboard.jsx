@@ -28,7 +28,7 @@ import {
 export default function Dashboard() {
     const router = useRouter();
     const { publicKey, connected } = useWallet();
-    const [activeTab, setActiveTab] = useState('projects');
+    const [activeTab, setActiveTab] = useState('boxes');
 
     const {
         projects,
@@ -91,11 +91,11 @@ export default function Dashboard() {
                 {/* Tab Navigation */}
                 <DegenTabs value={activeTab} onValueChange={setActiveTab}>
                     <DegenTabsList className="mb-8">
-                        <DegenTabsTrigger value="projects">
-                            My Projects
-                        </DegenTabsTrigger>
                         <DegenTabsTrigger value="boxes">
                             My Boxes
+                        </DegenTabsTrigger>
+                        <DegenTabsTrigger value="projects">
+                            My Projects
                         </DegenTabsTrigger>
                     </DegenTabsList>
 
@@ -754,8 +754,12 @@ function ProjectCard({ project, config }) {
                 </div>
                 <div className="text-center bg-degen-bg p-2 border border-degen-black">
                     <p className="text-degen-text-muted text-xs uppercase">Status</p>
-                    <DegenBadge variant={project.is_active ? 'success' : 'danger'} size="sm" dot>
-                        {project.is_active ? 'Active' : 'Paused'}
+                    <DegenBadge
+                        variant={project.closed_at ? 'default' : (project.is_active ? 'success' : 'danger')}
+                        size="sm"
+                        dot
+                    >
+                        {project.closed_at ? 'Permanently Closed' : (project.is_active ? 'Active' : 'Paused')}
                     </DegenBadge>
                 </div>
             </div>

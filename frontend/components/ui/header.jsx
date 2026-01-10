@@ -1,6 +1,7 @@
 'use client';
 
 import { useWallet } from '@solana/wallet-adapter-react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import WalletButton from '@/components/wallet/WalletButton';
 import useNetworkStore from '@/store/useNetworkStore';
@@ -9,9 +10,31 @@ export default function Header() {
   const { publicKey } = useWallet();
   const { config } = useNetworkStore();
   const isAdmin = publicKey && config && publicKey.toString() === config.adminWallet.toString();
+  const [isVisible, setIsVisible] = useState(false);
+  const [keySequence, setKeySequence] = useState('');
+
+  // Listen for "iii" keyboard sequence to show header
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const newSequence = (keySequence + e.key).slice(-3);
+      setKeySequence(newSequence);
+
+      if (newSequence === 'iii') {
+        setIsVisible(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [keySequence]);
+
+  // Don't render if not visible
+  if (!isVisible) {
+    return null;
+  }
 
   return (
-    <header className="relative w-full h-14 flex items-center justify-between px-4 bg-degen-bg border-b border-degen-black z-50">
+    <header className="fixed top-0 left-0 w-full h-14 flex items-center justify-between px-4 bg-degen-bg border-b border-degen-black z-50">
       {/* Logo / Brand */}
       <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
         <div className="text-xl"></div>

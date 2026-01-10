@@ -1,0 +1,10 @@
+/Users/samskirrow/Dropbox/From My Brain/GIT/3eyes-fatebox-v3/backend/program/target/sbpf-solana-solana/release/deps/libmemoffset-e812c1393111ea63.rmeta: /Users/samskirrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/memoffset-0.9.1/src/lib.rs /Users/samskirrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/memoffset-0.9.1/src/raw_field.rs /Users/samskirrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/memoffset-0.9.1/src/offset_of.rs /Users/samskirrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/memoffset-0.9.1/src/span_of.rs
+
+/Users/samskirrow/Dropbox/From My Brain/GIT/3eyes-fatebox-v3/backend/program/target/sbpf-solana-solana/release/deps/libmemoffset-e812c1393111ea63.rlib: /Users/samskirrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/memoffset-0.9.1/src/lib.rs /Users/samskirrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/memoffset-0.9.1/src/raw_field.rs /Users/samskirrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/memoffset-0.9.1/src/offset_of.rs /Users/samskirrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/memoffset-0.9.1/src/span_of.rs
+
+/Users/samskirrow/Dropbox/From My Brain/GIT/3eyes-fatebox-v3/backend/program/target/sbpf-solana-solana/release/deps/memoffset-e812c1393111ea63.d: /Users/samskirrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/memoffset-0.9.1/src/lib.rs /Users/samskirrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/memoffset-0.9.1/src/raw_field.rs /Users/samskirrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/memoffset-0.9.1/src/offset_of.rs /Users/samskirrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/memoffset-0.9.1/src/span_of.rs
+
+/Users/samskirrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/memoffset-0.9.1/src/lib.rs:
+/Users/samskirrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/memoffset-0.9.1/src/raw_field.rs:
+/Users/samskirrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/memoffset-0.9.1/src/offset_of.rs:
+/Users/samskirrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/memoffset-0.9.1/src/span_of.rs:

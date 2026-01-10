@@ -31,9 +31,11 @@ app.get('/health', (req, res) => {
 // API routes
 import projectRoutes from './routes/projects.js';
 import vaultRoutes from './routes/vault.js';
+import programRoutes from './routes/program.js';
 
 app.use('/api/projects', projectRoutes);
 app.use('/api/vault', vaultRoutes);
+app.use('/api/program', programRoutes);
 
 // 404 handler
 app.use((req, res) => {

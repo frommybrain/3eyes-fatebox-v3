@@ -1,0 +1,1 @@
+/Users/samskirrow/Dropbox/From\ My\ Brain/GIT/3eyes-fatebox-v3/backend/program/target/sbpf-solana-solana/release/lootbox_platform.so: /Users/samskirrow/Dropbox/From\ My\ Brain/GIT/3eyes-fatebox-v3/backend/program/programs/lootbox_platform/src/lib.rs

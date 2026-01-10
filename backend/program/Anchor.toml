@@ -5,18 +5,36 @@ anchor_version = "0.31.0"
 resolution = true
 skip-lint = false
 
+[programs.localnet]
+lootbox_platform = "GTpP39xwT47iTUwbC5HZ7TjCiNon2owkLWg84uUyboat"
+
 [programs.devnet]
-lootbox_platform = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+lootbox_platform = "GTpP39xwT47iTUwbC5HZ7TjCiNon2owkLWg84uUyboat"
 
 [programs.mainnet]
-lootbox_platform = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+lootbox_platform = "GTpP39xwT47iTUwbC5HZ7TjCiNon2owkLWg84uUyboat"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Devnet"
+cluster = "Localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+
+[test]
+startup_wait = 5000
+shutdown_wait = 2000
+upgradeable = false
+rpc_port = 8000
+
+[test.validator]
+url = "https://api.devnet.solana.com"
+
+[[test.validator.clone]]
+address = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+
+[[test.validator.clone]]
+address = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"

@@ -4,7 +4,9 @@
 import express from 'express';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { createClient } from '@supabase/supabase-js';
+import BN from 'bn.js';
 import { getNetworkConfig } from '../lib/getNetworkConfig.js';
+import { getAnchorProgram } from '../lib/anchorClient.js';
 
 const router = express.Router();
 
@@ -192,6 +194,93 @@ router.post('/fund', async (req, res) => {
             success: false,
             error: 'Failed to fund vault',
             details: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/vault/balance/:projectId
+ * Fetch vault token account balance from on-chain
+ *
+ * Returns the current balance of tokens in the project's vault
+ */
+router.get('/balance/:projectId', async (req, res) => {
+    try {
+        const { projectId } = req.params;
+
+        console.log(`\n💰 Fetching vault balance for project ${projectId}...`);
+
+        // Fetch project from database
+        const { data: project, error: dbError } = await supabase
+            .from('projects')
+            .select('*')
+            .eq('project_numeric_id', parseInt(projectId))
+            .single();
+
+        if (dbError || !project) {
+            return res.status(404).json({
+                success: false,
+                error: 'Project not found'
+            });
+        }
+
+        if (!project.vault_token_account) {
+            return res.json({
+                success: true,
+                balance: '0',
+                formatted: '0',
+                tokenMint: project.payment_token_mint,
+                tokenSymbol: project.payment_token_symbol,
+                decimals: project.payment_token_decimals,
+            });
+        }
+
+        // Get connection
+        const { connection } = await getAnchorProgram();
+
+        // Fetch vault token account
+        const vaultTokenAccountPubkey = new PublicKey(project.vault_token_account);
+        const accountInfo = await connection.getAccountInfo(vaultTokenAccountPubkey);
+
+        if (!accountInfo) {
+            return res.json({
+                success: true,
+                balance: '0',
+                formatted: '0',
+                tokenMint: project.payment_token_mint,
+                tokenSymbol: project.payment_token_symbol,
+                decimals: project.payment_token_decimals,
+            });
+        }
+
+        // Parse token account data
+        // Token account layout: https://github.com/solana-labs/solana-program-library/blob/master/token/program/src/state.rs
+        // Amount is at offset 64 (u64, 8 bytes)
+        const data = accountInfo.data;
+        const amountBN = new BN(data.slice(64, 72), 'le');
+        const balance = amountBN.toString();
+
+        // Format balance for display
+        const decimals = project.payment_token_decimals || 9;
+        const formatted = (parseInt(balance) / Math.pow(10, decimals)).toFixed(decimals);
+
+        console.log(`✅ Vault balance: ${formatted} ${project.payment_token_symbol}`);
+
+        return res.json({
+            success: true,
+            balance,
+            formatted,
+            tokenMint: project.payment_token_mint,
+            tokenSymbol: project.payment_token_symbol,
+            decimals,
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching vault balance:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Failed to fetch vault balance',
+            details: error.message,
         });
     }
 });

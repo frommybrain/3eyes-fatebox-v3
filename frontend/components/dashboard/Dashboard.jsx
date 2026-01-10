@@ -1,6 +1,6 @@
 // components/dashboard/Dashboard.jsx
 'use client';
-
+ 
 import { useEffect, useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useRouter } from 'next/navigation';
@@ -11,7 +11,6 @@ import useNetworkStore from '@/store/useNetworkStore';
 export default function Dashboard() {
     const router = useRouter();
     const { publicKey, connected } = useWallet();
-    const [mounted, setMounted] = useState(false);
 
     const {
         projects,
@@ -22,11 +21,10 @@ export default function Dashboard() {
 
     const { config, configLoading } = useNetworkStore();
 
+    // Handle redirects and data loading
     useEffect(() => {
-        setMounted(true);
-
         // Redirect if not connected
-        if (mounted && !connected) {
+        if (!connected) {
             router.push('/');
             return;
         }
@@ -35,9 +33,9 @@ export default function Dashboard() {
         if (publicKey && config) {
             loadProjectsByOwner(publicKey.toString());
         }
-    }, [publicKey, connected, mounted, config]);
+    }, [publicKey, connected, config, router, loadProjectsByOwner]);
 
-    if (!mounted || configLoading) {
+    if (configLoading) {
         return (
             <div className="min-h-screen flex items-center justify-center">
                 <div className="text-center">
@@ -121,6 +119,9 @@ export default function Dashboard() {
 
 function ProjectCard({ project, config }) {
     const router = useRouter();
+    const [vaultBalance, setVaultBalance] = useState(null);
+    const [balanceLoading, setBalanceLoading] = useState(true);
+
     const isDevnet = project.network === 'devnet';
     const platformDomain = config?.network === 'devnet'
         ? 'degenbox.fun'  // Will be localhost:3000 in dev
@@ -128,8 +129,37 @@ function ProjectCard({ project, config }) {
 
     // Generate project URL
     const projectUrl = typeof window !== 'undefined' && window.location.hostname.includes('localhost')
-        ? `http://localhost:3000?subdomain=${project.subdomain}`
+        ? `http://localhost:3000/project/${project.subdomain}`
         : `https://${project.subdomain}.${platformDomain}`;
+
+    // Fetch vault balance
+    useEffect(() => {
+        async function fetchVaultBalance() {
+            if (!project.project_numeric_id) {
+                setBalanceLoading(false);
+                return;
+            }
+
+            try {
+                const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+                const response = await fetch(`${backendUrl}/api/vault/balance/${project.project_numeric_id}`);
+                const data = await response.json();
+
+                if (data.success) {
+                    setVaultBalance(data.balance);
+                } else {
+                    setVaultBalance(0);
+                }
+            } catch (error) {
+                console.error('Failed to fetch vault balance:', error);
+                setVaultBalance(0);
+            } finally {
+                setBalanceLoading(false);
+            }
+        }
+
+        fetchVaultBalance();
+    }, [project.project_numeric_id]);
 
     return (
         <div className="bg-white/5 border border-white/10 rounded-xl p-6 hover:bg-white/10 transition-all">
@@ -160,7 +190,7 @@ function ProjectCard({ project, config }) {
             )}
 
             {/* Stats */}
-            <div className="grid grid-cols-3 gap-3 mb-4">
+            <div className="grid grid-cols-2 gap-3 mb-4">
                 <div className="text-center">
                     <p className="text-gray-500 text-xs">Boxes</p>
                     <p className="text-white font-bold">{project.total_boxes_created || 0}</p>
@@ -168,6 +198,14 @@ function ProjectCard({ project, config }) {
                 <div className="text-center">
                     <p className="text-gray-500 text-xs">Jackpots</p>
                     <p className="text-white font-bold">{project.total_jackpots_hit || 0}</p>
+                </div>
+                <div className="text-center">
+                    <p className="text-gray-500 text-xs">Vault Balance</p>
+                    <p className="text-green-400 font-bold">
+                        {balanceLoading
+                            ? 'Loading...'
+                            : `${(vaultBalance / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)} ${project.payment_token_symbol || 'tokens'}`}
+                    </p>
                 </div>
                 <div className="text-center">
                     <p className="text-gray-500 text-xs">Status</p>

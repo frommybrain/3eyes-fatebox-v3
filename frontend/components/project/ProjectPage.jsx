@@ -3,6 +3,8 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useWallet, useConnection } from '@solana/wallet-adapter-react';
+import { Transaction } from '@solana/web3.js';
 import MainCanvas from '@/components/three/mainCanvas';
 import useProjectStore from '@/store/useProjectStore';
 import useNetworkStore from '@/store/useNetworkStore';
@@ -10,6 +12,11 @@ import useNetworkStore from '@/store/useNetworkStore';
 export default function ProjectPage({ subdomain }) {
     const router = useRouter();
     const [mounted, setMounted] = useState(false);
+    const [purchasing, setPurchasing] = useState(false);
+
+    // Wallet hooks
+    const { publicKey, connected, sendTransaction } = useWallet();
+    const { connection } = useConnection();
 
     // Zustand stores
     const {
@@ -52,6 +59,107 @@ export default function ProjectPage({ subdomain }) {
             unsubscribe();
         };
     }, [subdomain]);
+
+    // Handle box purchase
+    const handleBuyBox = async () => {
+        if (!connected || !publicKey) {
+            alert('Please connect your wallet first to purchase a box');
+            return;
+        }
+
+        if (!currentProject?.project_numeric_id) {
+            alert('Project data not loaded. Please refresh and try again.');
+            return;
+        }
+
+        setPurchasing(true);
+
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+
+            console.log('🎲 Purchasing box...');
+
+            // Step 1: Build transaction
+            const buildResponse = await fetch(`${backendUrl}/api/program/build-create-box-tx`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: currentProject.project_numeric_id,
+                    buyerWallet: publicKey.toString(),
+                }),
+            });
+
+            const buildResult = await buildResponse.json();
+
+            if (!buildResult.success) {
+                throw new Error(buildResult.details || buildResult.error || 'Failed to build transaction');
+            }
+
+            console.log('✅ Transaction built:', buildResult);
+
+            // Step 2: Deserialize transaction
+            const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
+
+            // Get fresh blockhash
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            transaction.recentBlockhash = blockhash;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+
+            console.log('🔑 Sending transaction for signing...');
+
+            // Step 3: Sign and send transaction
+            const signature = await sendTransaction(transaction, connection, {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed',
+            });
+
+            console.log('📤 Transaction sent:', signature);
+
+            // Step 4: Wait for confirmation
+            const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+
+            if (confirmation.value.err) {
+                throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+            }
+
+            console.log('✅ Transaction confirmed!');
+
+            // Step 5: Confirm with backend
+            const confirmResponse = await fetch(`${backendUrl}/api/program/confirm-box-creation`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: currentProject.project_numeric_id,
+                    boxId: buildResult.boxId,
+                    buyerWallet: publicKey.toString(),
+                    signature,
+                    boxInstancePDA: buildResult.boxInstancePDA,
+                }),
+            });
+
+            const confirmResult = await confirmResponse.json();
+
+            if (!confirmResult.success) {
+                console.warn('Warning: Failed to record box in database:', confirmResult.details);
+            }
+
+            // Success!
+            alert(
+                `Box #${buildResult.boxId} purchased successfully! 🎉\n\n` +
+                `Transaction: ${signature}\n\n` +
+                `View on Solana Explorer: ${confirmResult.explorerUrl || `https://explorer.solana.com/tx/${signature}?cluster=${config.network}`}`
+            );
+
+            // Reload project to update stats
+            await loadProjectBySubdomain(subdomain);
+
+        } catch (error) {
+            console.error('❌ Box purchase failed:', error);
+            alert(`Failed to purchase box: ${error.message}\n\nPlease try again.`);
+        } finally {
+            setPurchasing(false);
+        }
+    };
 
     // Show loading state
     if (!mounted || configLoading || projectLoading) {
@@ -170,13 +278,11 @@ export default function ProjectPage({ subdomain }) {
 
                     {/* Buy Box Button */}
                     <button
-                        className="px-8 py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white text-xl font-bold rounded-xl shadow-lg transform transition-all hover:scale-105 active:scale-95"
-                        onClick={() => {
-                            // TODO: Implement buy box flow
-                            console.log('Buy box clicked');
-                        }}
+                        className="px-8 py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:from-gray-600 disabled:to-gray-600 disabled:cursor-not-allowed text-white text-xl font-bold rounded-xl shadow-lg transform transition-all hover:scale-105 active:scale-95 disabled:scale-100"
+                        onClick={handleBuyBox}
+                        disabled={!connected || purchasing}
                     >
-                        🎲 Buy Box
+                        {purchasing ? '⏳ Purchasing...' : !connected ? '🔌 Connect Wallet' : '🎲 Buy Box'}
                     </button>
 
                     {/* Stats */}

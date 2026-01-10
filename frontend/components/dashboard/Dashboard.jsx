@@ -212,7 +212,7 @@ function MyBoxesTab({ walletAddress, config }) {
     if (!boxesData || boxesData.totalBoxes === 0) {
         return (
             <DegenEmptyState
-                icon="📦"
+                icon=""
                 title="No Boxes Yet"
                 description="You haven't purchased any lootboxes yet. Browse projects to get started!"
             />
@@ -268,7 +268,7 @@ function ProjectBoxesGroup({ projectGroup, platformDomain, walletAddress, public
             <div className="p-6 border-b border-degen-black flex items-center justify-between">
                 <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-degen-black flex items-center justify-center text-xl text-degen-white">
-                        🎲
+                        
                     </div>
                     <div>
                         <h3 className="text-degen-black text-lg font-medium uppercase tracking-wider">{project.project_name}</h3>

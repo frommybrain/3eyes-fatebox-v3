@@ -59,9 +59,11 @@ pub mod lootbox_platform {
 
     /// Create a new box (user purchases box)
     /// Transfers payment from buyer to vault
+    /// Stores the Switchboard randomness account for later reveal
     pub fn create_box(
         ctx: Context<CreateBox>,
         project_id: u64,
+        randomness_account: Pubkey,
     ) -> Result<()> {
         let project_config = &mut ctx.accounts.project_config;
         let box_instance = &mut ctx.accounts.box_instance;
@@ -97,6 +99,8 @@ pub mod lootbox_platform {
         box_instance.is_jackpot = false;
         box_instance.random_percentage = 0.0;
         box_instance.reward_tier = 0;
+        box_instance.randomness_account = randomness_account;
+        box_instance.randomness_committed = true;
 
         // Update project stats
         project_config.total_boxes_created = box_id;
@@ -104,20 +108,22 @@ pub mod lootbox_platform {
             .checked_add(project_config.box_price)
             .ok_or(LootboxError::ArithmeticOverflow)?;
 
-        msg!("Box created!");
+        msg!("Box created with Switchboard VRF!");
         msg!("Box ID: {}", box_id);
         msg!("Project ID: {}", project_id);
         msg!("Owner: {}", ctx.accounts.buyer.key());
         msg!("Price paid: {}", project_config.box_price);
+        msg!("Randomness account: {}", randomness_account);
 
         Ok(())
     }
 
     /// Reveal box with Switchboard VRF randomness
+    /// Reads randomness from Switchboard on-demand account
     /// Calculates luck based on hold time and determines reward
     pub fn reveal_box(
         ctx: Context<RevealBox>,
-        project_id: u64,
+        _project_id: u64,
         box_id: u64,
     ) -> Result<()> {
         let box_instance = &mut ctx.accounts.box_instance;
@@ -133,6 +139,18 @@ pub mod lootbox_platform {
         // Verify not already revealed
         require!(!box_instance.revealed, LootboxError::BoxAlreadyRevealed);
 
+        // Verify randomness was committed
+        require!(
+            box_instance.randomness_committed,
+            LootboxError::RandomnessNotCommitted
+        );
+
+        // Verify the randomness account matches what was committed
+        require!(
+            box_instance.randomness_account == ctx.accounts.randomness_account.key(),
+            LootboxError::InvalidRandomnessAccount
+        );
+
         // Calculate current luck based on hold time
         let hold_time = clock.unix_timestamp - box_instance.created_at;
         // For testing: +1 luck every 3 seconds, for production: +1 every 3 hours (10800 seconds)
@@ -140,18 +158,63 @@ pub mod lootbox_platform {
         let bonus_luck = (hold_time / time_interval) as u8;
         let current_luck = std::cmp::min(5 + bonus_luck, 60);
 
-        // Get randomness from Switchboard VRF
-        // TODO: Integrate Switchboard VRF account reading
-        // For now, using a pseudo-random value based on slot hash for testing
-        // This is NOT secure for production - use Switchboard VRF
-        let clock = Clock::get()?;
-        let slot = clock.slot;
-        // Create a pseudo-random value from slot and box data (temporary for testing)
-        let seed = slot
-            .wrapping_add(box_id)
-            .wrapping_mul(project_id)
-            .wrapping_add(clock.unix_timestamp as u64);
-        let random_percentage = ((seed % 10000) as f64) / 10000.0; // 0.0 to 0.9999
+        // Read randomness from Switchboard VRF account
+        // Switchboard On-Demand account structure varies - we need to find the actual randomness bytes
+        let randomness_data = ctx.accounts.randomness_account.try_borrow_data()?;
+
+        // Log the account data length for debugging
+        msg!("Switchboard account data length: {}", randomness_data.len());
+
+        // Ensure we have enough data
+        // Switchboard RandomnessAccountData structure:
+        // - 0-8: discriminator (8 bytes)
+        // - 8-40: authority (32 bytes)
+        // - 40-72: queue (32 bytes)
+        // - 72-104: oracle (32 bytes)
+        // - 104-112: seed_slot (8 bytes)
+        // - 112-144: seed_slothash (32 bytes)
+        // - 144-152: reveal_slot (8 bytes)
+        // - 152-184: randomness_value (32 bytes) <- THIS IS THE ACTUAL RANDOMNESS
+        require!(
+            randomness_data.len() >= 184,
+            LootboxError::RandomnessNotReady
+        );
+
+        // Check that randomness has been revealed (reveal_slot should be non-zero)
+        let reveal_slot = u64::from_le_bytes([
+            randomness_data[144],
+            randomness_data[145],
+            randomness_data[146],
+            randomness_data[147],
+            randomness_data[148],
+            randomness_data[149],
+            randomness_data[150],
+            randomness_data[151],
+        ]);
+
+        require!(
+            reveal_slot > 0,
+            LootboxError::RandomnessNotReady
+        );
+
+        // Read the revealed randomness value at offset 152
+        // Using first 4 bytes for u32 (32 bytes total available)
+        let random_u32 = u32::from_le_bytes([
+            randomness_data[152],
+            randomness_data[153],
+            randomness_data[154],
+            randomness_data[155],
+        ]);
+
+        msg!("Switchboard randomness revealed at slot {}", reveal_slot);
+        msg!("Randomness bytes: [{}, {}, {}, {}] -> u32: {}",
+            randomness_data[152], randomness_data[153],
+            randomness_data[154], randomness_data[155], random_u32);
+
+        // Convert to percentage (0.0 to 0.9999)
+        let random_percentage = (random_u32 as f64) / (u32::MAX as f64);
+
+        msg!("Switchboard randomness: u32={}, percentage={:.4}", random_u32, random_percentage);
 
         // Calculate reward based on luck and randomness using tier system
         let (reward_amount, is_jackpot, reward_tier) = calculate_reward(
@@ -178,7 +241,7 @@ pub mod lootbox_platform {
             _ => "Unknown",
         };
 
-        msg!("Box revealed!");
+        msg!("Box revealed with Switchboard VRF!");
         msg!("Box ID: {}", box_id);
         msg!("Luck: {}/60", current_luck);
         msg!("Random roll: {:.2}%", random_percentage * 100.0);
@@ -522,7 +585,8 @@ pub struct RevealBox<'info> {
 
     pub vault_token_account: Account<'info, TokenAccount>,
 
-    // TODO: Add Switchboard VRF accounts
+    /// CHECK: Switchboard VRF randomness account - verified against box_instance.randomness_account
+    pub randomness_account: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -643,10 +707,12 @@ pub struct BoxInstance {
     pub is_jackpot: bool,             // 1 byte
     pub random_percentage: f64,       // 8 bytes
     pub reward_tier: u8,              // 1 byte (0=Dud, 1=Rebate, 2=Break-even, 3=Profit, 4=Jackpot)
+    pub randomness_account: Pubkey,   // 32 bytes - Switchboard VRF randomness account
+    pub randomness_committed: bool,   // 1 byte - Whether randomness has been committed
 }
 
 impl BoxInstance {
-    pub const LEN: usize = 8 + 8 + 32 + 8 + 1 + 1 + 1 + 8 + 1 + 8 + 1; // 77 bytes
+    pub const LEN: usize = 8 + 8 + 32 + 8 + 1 + 1 + 1 + 8 + 1 + 8 + 1 + 32 + 1; // 110 bytes
 }
 
 // Error codes
@@ -690,4 +756,10 @@ pub enum LootboxError {
 
     #[msg("Randomness not ready")]
     RandomnessNotReady,
+
+    #[msg("Randomness not committed for this box")]
+    RandomnessNotCommitted,
+
+    #[msg("Invalid randomness account")]
+    InvalidRandomnessAccount,
 }

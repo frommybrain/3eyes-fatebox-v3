@@ -134,6 +134,10 @@ CREATE TABLE IF NOT EXISTS boxes (
     box_result INTEGER DEFAULT 0,
     payout_amount BIGINT DEFAULT 0, -- in lamports
 
+    -- Switchboard VRF randomness (for provable fairness)
+    randomness_account TEXT, -- Switchboard randomness account public key
+    randomness_committed BOOLEAN DEFAULT false, -- Whether randomness has been committed
+
     -- Metadata
     opened_at TIMESTAMP,
     settled_at TIMESTAMP, -- When reward was claimed/settled

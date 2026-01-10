@@ -9,6 +9,21 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import useProjectStore from '@/store/useProjectStore';
 import useNetworkStore from '@/store/useNetworkStore';
+import {
+    DegenButton,
+    DegenCard,
+    DegenCardHeader,
+    DegenCardTitle,
+    DegenCardContent,
+    DegenTabs,
+    DegenTabsList,
+    DegenTabsTrigger,
+    DegenTabsContent,
+    DegenBadge,
+    DegenLoadingState,
+    DegenEmptyState,
+    CardDropdown,
+} from '@/components/ui';
 
 export default function Dashboard() {
     const router = useRouter();
@@ -40,11 +55,8 @@ export default function Dashboard() {
 
     if (configLoading) {
         return (
-            <div className="min-h-screen flex items-center justify-center">
-                <div className="text-center">
-                    <div className="text-4xl mb-4">👁️👁️👁️</div>
-                    <p className="text-white text-lg">Loading...</p>
-                </div>
+            <div className="min-h-screen flex items-center justify-center bg-degen-bg">
+                <DegenLoadingState text="Loading..." />
             </div>
         );
     }
@@ -57,61 +69,52 @@ export default function Dashboard() {
     const isDevnet = config?.network === 'devnet';
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 pt-24 pb-12 px-6">
+        <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-6">
             <div className="max-w-7xl mx-auto">
                 {/* Network Badge */}
                 {isDevnet && (
-                    <div className="mb-6 inline-block bg-yellow-500 text-black px-4 py-2 rounded-lg font-bold">
-                        🧪 DEVNET MODE
+                    <div className="mb-6">
+                        <DegenBadge variant="warning" size="lg">
+                            DEVNET MODE
+                        </DegenBadge>
                     </div>
                 )}
 
                 {/* Header */}
                 <div className="mb-8">
-                    <h1 className="text-white text-4xl font-bold mb-2">Dashboard</h1>
-                    <p className="text-gray-400 text-lg">
+                    <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">Dashboard</h1>
+                    <p className="text-degen-text-muted text-lg">
                         Manage your projects and view your purchased boxes
                     </p>
                 </div>
 
                 {/* Tab Navigation */}
-                <div className="flex gap-2 mb-8">
-                    <button
-                        onClick={() => setActiveTab('projects')}
-                        className={`px-6 py-3 rounded-lg font-medium transition-all ${
-                            activeTab === 'projects'
-                                ? 'bg-purple-600 text-white'
-                                : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'
-                        }`}
-                    >
-                        My Projects
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('boxes')}
-                        className={`px-6 py-3 rounded-lg font-medium transition-all ${
-                            activeTab === 'boxes'
-                                ? 'bg-purple-600 text-white'
-                                : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'
-                        }`}
-                    >
-                        My Boxes
-                    </button>
-                </div>
+                <DegenTabs value={activeTab} onValueChange={setActiveTab}>
+                    <DegenTabsList className="mb-8">
+                        <DegenTabsTrigger value="projects">
+                            My Projects
+                        </DegenTabsTrigger>
+                        <DegenTabsTrigger value="boxes">
+                            My Boxes
+                        </DegenTabsTrigger>
+                    </DegenTabsList>
 
-                {/* Tab Content */}
-                {activeTab === 'projects' ? (
-                    <MyProjectsTab
-                        projects={projects}
-                        projectsLoading={projectsLoading}
-                        projectsError={projectsError}
-                        config={config}
-                    />
-                ) : (
-                    <MyBoxesTab
-                        walletAddress={publicKey?.toString()}
-                        config={config}
-                    />
-                )}
+                    <DegenTabsContent value="projects">
+                        <MyProjectsTab
+                            projects={projects}
+                            projectsLoading={projectsLoading}
+                            projectsError={projectsError}
+                            config={config}
+                        />
+                    </DegenTabsContent>
+
+                    <DegenTabsContent value="boxes">
+                        <MyBoxesTab
+                            walletAddress={publicKey?.toString()}
+                            config={config}
+                        />
+                    </DegenTabsContent>
+                </DegenTabs>
             </div>
         </div>
     );
@@ -121,39 +124,24 @@ function MyProjectsTab({ projects, projectsLoading, projectsError, config }) {
     return (
         <>
             {/* Create New Project Button */}
-            <Link
-                href="/dashboard/create"
-                className="inline-block mb-8 px-8 py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white text-lg font-bold rounded-xl shadow-lg transform transition-all hover:scale-105 active:scale-95"
-            >
+            <DegenButton href="/dashboard/create" size="lg" className="mb-8">
                 + Create New Project
-            </Link>
+            </DegenButton>
 
             {/* Projects List */}
             {projectsLoading ? (
-                <div className="text-center py-12">
-                    <div className="text-2xl mb-2">...</div>
-                    <p className="text-gray-400">Loading your projects...</p>
-                </div>
+                <DegenLoadingState text="Loading your projects..." />
             ) : projectsError ? (
-                <div className="bg-red-500/10 border border-red-500/50 rounded-xl p-6 text-center">
-                    <p className="text-red-400">Error loading projects: {projectsError}</p>
-                </div>
+                <DegenCard variant="feature" padding="md">
+                    <p className="text-white text-center">Error loading projects: {projectsError}</p>
+                </DegenCard>
             ) : projects.length === 0 ? (
-                <div className="bg-white/5 border border-white/10 rounded-xl p-12 text-center">
-                    <div className="text-6xl mb-4">🎲</div>
-                    <h2 className="text-white text-2xl font-bold mb-2">
-                        No Projects Yet
-                    </h2>
-                    <p className="text-gray-400 mb-6">
-                        Create your first lootbox project to get started!
-                    </p>
-                    <Link
-                        href="/dashboard/create"
-                        className="inline-block px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors"
-                    >
-                        Create Your First Project
-                    </Link>
-                </div>
+                <DegenEmptyState
+                    title="No Projects Yet"
+                    description="Create your first lootbox project to get started!"
+                    action="Create Your First Project"
+                    actionHref="/dashboard/create"
+                />
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {projects.map((project) => (
@@ -166,7 +154,7 @@ function MyProjectsTab({ projects, projectsLoading, projectsError, config }) {
 }
 
 function MyBoxesTab({ walletAddress, config }) {
-    const { publicKey, sendTransaction } = useWallet();
+    const { publicKey, sendTransaction, signTransaction } = useWallet();
     const { connection } = useConnection();
     const [boxesData, setBoxesData] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -210,49 +198,40 @@ function MyBoxesTab({ walletAddress, config }) {
     }, [walletAddress, refreshKey]);
 
     if (loading) {
-        return (
-            <div className="text-center py-12">
-                <div className="text-2xl mb-2">...</div>
-                <p className="text-gray-400">Loading your boxes...</p>
-            </div>
-        );
+        return <DegenLoadingState text="Loading your boxes..." />;
     }
 
     if (error) {
         return (
-            <div className="bg-red-500/10 border border-red-500/50 rounded-xl p-6 text-center">
-                <p className="text-red-400">Error: {error}</p>
-            </div>
+            <DegenCard variant="feature" padding="md">
+                <p className="text-white text-center">Error: {error}</p>
+            </DegenCard>
         );
     }
 
     if (!boxesData || boxesData.totalBoxes === 0) {
         return (
-            <div className="bg-white/5 border border-white/10 rounded-xl p-12 text-center">
-                <div className="text-6xl mb-4">📦</div>
-                <h2 className="text-white text-2xl font-bold mb-2">
-                    No Boxes Yet
-                </h2>
-                <p className="text-gray-400 mb-6">
-                    You haven&apos;t purchased any lootboxes yet. Browse projects to get started!
-                </p>
-            </div>
+            <DegenEmptyState
+                icon="📦"
+                title="No Boxes Yet"
+                description="You haven't purchased any lootboxes yet. Browse projects to get started!"
+            />
         );
     }
 
     return (
         <div className="space-y-8">
             {/* Summary */}
-            <div className="bg-white/5 border border-white/10 rounded-xl p-6">
+            <DegenCard variant="default" padding="md">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h2 className="text-white text-xl font-bold">Your Collection</h2>
-                        <p className="text-gray-400 text-sm">
+                        <h2 className="text-degen-black text-xl font-medium uppercase tracking-wider">Your Collection</h2>
+                        <p className="text-degen-text-muted text-sm">
                             {boxesData.totalBoxes} box{boxesData.totalBoxes !== 1 ? 'es' : ''} across {boxesData.projectCount} project{boxesData.projectCount !== 1 ? 's' : ''}
                         </p>
                     </div>
                 </div>
-            </div>
+            </DegenCard>
 
             {/* Projects with Boxes */}
             {boxesData.projectsWithBoxes.map((projectGroup) => (
@@ -263,6 +242,7 @@ function MyBoxesTab({ walletAddress, config }) {
                     walletAddress={walletAddress}
                     publicKey={publicKey}
                     sendTransaction={sendTransaction}
+                    signTransaction={signTransaction}
                     connection={connection}
                     onRefresh={refreshBoxes}
                 />
@@ -271,7 +251,7 @@ function MyBoxesTab({ walletAddress, config }) {
     );
 }
 
-function ProjectBoxesGroup({ projectGroup, platformDomain, walletAddress, publicKey, sendTransaction, connection, onRefresh }) {
+function ProjectBoxesGroup({ projectGroup, platformDomain, walletAddress, publicKey, sendTransaction, signTransaction, connection, onRefresh }) {
     const { project, boxes } = projectGroup;
 
     const projectUrl = typeof window !== 'undefined' && window.location.hostname.includes('localhost')
@@ -283,28 +263,28 @@ function ProjectBoxesGroup({ projectGroup, platformDomain, walletAddress, public
     const revealedBoxes = boxes.filter(b => b.box_result !== 0).length;
 
     return (
-        <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
+        <DegenCard variant="default" padding="none" className="overflow-hidden">
             {/* Project Header */}
-            <div className="p-6 border-b border-white/10 flex items-center justify-between">
+            <div className="p-6 border-b border-degen-black flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-full bg-purple-600/30 flex items-center justify-center text-xl">
+                    <div className="w-12 h-12 bg-degen-black flex items-center justify-center text-xl text-degen-white">
                         🎲
                     </div>
                     <div>
-                        <h3 className="text-white text-lg font-bold">{project.project_name}</h3>
+                        <h3 className="text-degen-black text-lg font-medium uppercase tracking-wider">{project.project_name}</h3>
                         <a
                             href={projectUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-purple-400 hover:text-purple-300 text-sm transition-colors"
+                            className="text-degen-blue hover:underline text-sm"
                         >
                             {project.subdomain}.{platformDomain}
                         </a>
                     </div>
                 </div>
                 <div className="text-right">
-                    <p className="text-white font-bold">{boxes.length} box{boxes.length !== 1 ? 'es' : ''}</p>
-                    <p className="text-gray-400 text-sm">
+                    <p className="text-degen-black font-medium">{boxes.length} box{boxes.length !== 1 ? 'es' : ''}</p>
+                    <p className="text-degen-text-muted text-sm">
                         {pendingBoxes} pending, {revealedBoxes} revealed
                     </p>
                 </div>
@@ -321,17 +301,18 @@ function ProjectBoxesGroup({ projectGroup, platformDomain, walletAddress, public
                             walletAddress={walletAddress}
                             publicKey={publicKey}
                             sendTransaction={sendTransaction}
+                            signTransaction={signTransaction}
                             connection={connection}
                             onRefresh={onRefresh}
                         />
                     ))}
                 </div>
             </div>
-        </div>
+        </DegenCard>
     );
 }
 
-function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, connection, onRefresh }) {
+function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, signTransaction, connection, onRefresh, network = 'devnet' }) {
     const [isProcessing, setIsProcessing] = useState(false);
     const [revealResult, setRevealResult] = useState(null);
     const [error, setError] = useState(null);
@@ -347,6 +328,74 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, conn
         ? (box.payout_amount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
         : '0';
 
+    // Solscan URLs (more user-friendly than Solana Explorer)
+    const getSolscanTxUrl = (signature) => {
+        const base = 'https://solscan.io/tx';
+        return network === 'mainnet-beta'
+            ? `${base}/${signature}`
+            : `${base}/${signature}?cluster=${network}`;
+    };
+
+    const getSolscanAccountUrl = (address) => {
+        const base = 'https://solscan.io/account';
+        return network === 'mainnet-beta'
+            ? `${base}/${address}`
+            : `${base}/${address}?cluster=${network}`;
+    };
+
+    // Build menu items for on-chain proof
+    const getMenuItems = () => {
+        const items = [];
+
+        // Purchase transaction
+        if (box.purchase_tx_signature) {
+            items.push({
+                label: 'Purchase Tx',
+                onClick: () => window.open(getSolscanTxUrl(box.purchase_tx_signature), '_blank'),
+            });
+        }
+
+        // Reveal transaction (if revealed)
+        if (box.reveal_tx_signature) {
+            items.push({
+                label: 'Reveal Tx',
+                onClick: () => window.open(getSolscanTxUrl(box.reveal_tx_signature), '_blank'),
+            });
+        }
+
+        // Settle/Claim transaction (if claimed)
+        if (box.settle_tx_signature) {
+            items.push({
+                label: 'Claim Tx',
+                onClick: () => window.open(getSolscanTxUrl(box.settle_tx_signature), '_blank'),
+            });
+        }
+
+        // Box PDA account (if we have it)
+        if (box.box_pda) {
+            items.push({
+                label: 'Box Account',
+                onClick: () => window.open(getSolscanAccountUrl(box.box_pda), '_blank'),
+            });
+        }
+
+        // If revealed, show the result details
+        if (isRevealed && (box.luck_value !== undefined || box.random_percentage !== undefined)) {
+            items.push({
+                label: `Luck: ${box.luck_value || '?'}/${box.max_luck || '?'}`,
+                onClick: () => {},
+            });
+            if (box.random_percentage !== undefined) {
+                items.push({
+                    label: `Random: ${box.random_percentage?.toFixed(2) || '?'}%`,
+                    onClick: () => {},
+                });
+            }
+        }
+
+        return items;
+    };
+
     // Get tier name from result
     const getTierName = (result) => {
         switch (result) {
@@ -361,7 +410,7 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, conn
 
     // Handle reveal box
     const handleReveal = async () => {
-        if (!publicKey || !sendTransaction) return;
+        if (!publicKey || !signTransaction) return;
 
         setIsProcessing(true);
         setError(null);
@@ -385,26 +434,28 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, conn
                 throw new Error(buildResult.details || buildResult.error);
             }
 
-            // Store the reward info for display
-            setRevealResult(buildResult.reward);
-
-            // Step 2: Deserialize and sign transaction
+            // Step 2: Deserialize transaction
             const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
             const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
             transaction.recentBlockhash = blockhash;
             transaction.lastValidBlockHeight = lastValidBlockHeight;
+            transaction.feePayer = publicKey;
 
-            // Step 3: Send transaction
-            const signature = await sendTransaction(transaction, connection, {
-                skipPreflight: false,
+            // Step 3: Sign with user's wallet
+            const signedTransaction = await signTransaction(transaction);
+
+            // Step 4: Send the signed transaction
+            // Skip preflight to get actual on-chain error if simulation fails
+            const signature = await connection.sendRawTransaction(signedTransaction.serialize(), {
+                skipPreflight: true,
                 preflightCommitment: 'confirmed',
             });
 
-            // Step 4: Wait for confirmation
+            // Step 5: Wait for confirmation
             await connection.confirmTransaction(signature, 'confirmed');
 
-            // Step 5: Confirm with backend
-            await fetch(`${backendUrl}/api/program/confirm-reveal`, {
+            // Step 6: Confirm with backend to read on-chain reward
+            const confirmResponse = await fetch(`${backendUrl}/api/program/confirm-reveal`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -412,16 +463,29 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, conn
                     boxId: box.box_number,
                     ownerWallet: walletAddress,
                     signature,
-                    reward: buildResult.reward,
                 }),
             });
+
+            const confirmResult = await confirmResponse.json();
+            if (confirmResult.success && confirmResult.reward) {
+                setRevealResult(confirmResult.reward);
+            }
 
             // Refresh boxes list
             if (onRefresh) onRefresh();
 
         } catch (err) {
             console.error('Error revealing box:', err);
-            setError(err.message);
+            // Try to extract more useful error message
+            let errorMessage = err.message;
+            if (err.logs) {
+                console.error('Transaction logs:', err.logs);
+                errorMessage = err.logs.join('\n');
+            }
+            if (err.message?.includes('custom program error')) {
+                errorMessage = `Program error: ${err.message}`;
+            }
+            setError(errorMessage);
             setRevealResult(null);
         } finally {
             setIsProcessing(false);
@@ -492,44 +556,60 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, conn
         }
     };
 
-    // Get box styling based on state
-    const getBoxStyling = () => {
-        if (isPending) return 'bg-yellow-500/10 border-yellow-500/30 hover:bg-yellow-500/20';
-        if (isJackpot) return 'bg-gradient-to-br from-yellow-500/20 to-purple-500/20 border-yellow-400/50 animate-pulse';
-        if (hasReward) return 'bg-green-500/10 border-green-500/30 hover:bg-green-500/20';
-        return 'bg-gray-500/10 border-gray-500/30 hover:bg-gray-500/20';
-    };
-
     // Get box icon
     const getBoxIcon = () => {
-        if (isPending) return '📦';
-        if (isJackpot) return '🎰';
-        if (box.box_result === 4) return '💰'; // Profit
-        if (hasReward) return '🎁';
-        return '📭'; // Dud
+        if (isPending) return '';
+        if (isJackpot) return '';
+        if (box.box_result === 4) return ''; // Profit
+        if (hasReward) return '';
+        return ''; // Dud
     };
 
+    // Get badge variant for tier
+    const getTierBadgeVariant = () => {
+        if (isJackpot) return 'warning';
+        if (hasReward) return 'success';
+        return 'default';
+    };
+
+    const menuItems = getMenuItems();
+
     return (
-        <div className={`relative p-4 rounded-lg border text-center transition-all ${getBoxStyling()}`}>
+        <div
+            className={`
+                relative p-4 text-center transition-all duration-100
+                border
+                ${isPending ? 'bg-degen-yellow/10 border-degen-yellow hover:bg-degen-yellow/20' : ''}
+                ${isJackpot ? 'bg-degen-yellow/20 border-degen-yellow' : ''}
+                ${hasReward && !isJackpot ? 'bg-degen-green/10 border-degen-green hover:bg-degen-green/20' : ''}
+                ${!isPending && !hasReward ? 'bg-degen-container border-degen-black hover:bg-degen-white' : ''}
+            `}
+        >
+            {/* Proof Menu Dropdown */}
+            {menuItems.length > 0 && (
+                <div className="absolute top-1 right-1">
+                    <CardDropdown items={menuItems} />
+                </div>
+            )}
+
             {/* Box Icon */}
             <div className="text-2xl mb-2">
                 {isProcessing ? '⏳' : getBoxIcon()}
             </div>
-            <p className="text-white font-bold">Box #{box.box_number}</p>
+            <p className="text-degen-black font-medium">Box #{box.box_number}</p>
 
             {/* Status / Result */}
             {isPending ? (
-                <p className="text-yellow-400 text-xs mt-1">Ready to Open</p>
+                <DegenBadge variant="warning" size="sm" className="mt-2">
+                    Ready to Open
+                </DegenBadge>
             ) : (
-                <div className="mt-1">
-                    <p className={`text-xs font-medium ${
-                        isJackpot ? 'text-yellow-400' :
-                        hasReward ? 'text-green-400' : 'text-gray-400'
-                    }`}>
+                <div className="mt-2">
+                    <DegenBadge variant={getTierBadgeVariant()} size="sm">
                         {getTierName(box.box_result)}
-                    </p>
+                    </DegenBadge>
                     {hasReward && (
-                        <p className="text-green-400 text-xs">
+                        <p className="text-degen-black text-xs mt-1 font-medium">
                             {payoutFormatted} {project.payment_token_symbol}
                         </p>
                     )}
@@ -538,7 +618,7 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, conn
 
             {/* Error Display */}
             {error && (
-                <p className="text-red-400 text-xs mt-1 truncate" title={error}>
+                <p className="text-degen-feature text-xs mt-1 truncate font-medium" title={error}>
                     Error
                 </p>
             )}
@@ -546,30 +626,34 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, conn
             {/* Action Button */}
             <div className="mt-3">
                 {isPending ? (
-                    <button
+                    <DegenButton
                         onClick={handleReveal}
                         disabled={isProcessing}
-                        className="w-full px-3 py-1.5 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
+                        variant="primary"
+                        size="sm"
+                        fullWidth
                     >
                         {isProcessing ? 'Opening...' : 'Open Box'}
-                    </button>
+                    </DegenButton>
                 ) : hasReward && !box.settled_at ? (
-                    <button
+                    <DegenButton
                         onClick={handleClaim}
                         disabled={isProcessing}
-                        className="w-full px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white text-xs font-medium rounded transition-colors"
+                        variant="success"
+                        size="sm"
+                        fullWidth
                     >
                         {isProcessing ? 'Claiming...' : 'Claim'}
-                    </button>
+                    </DegenButton>
                 ) : hasReward ? (
-                    <span className="text-green-400 text-xs">Claimed</span>
+                    <DegenBadge variant="success" size="sm">Claimed</DegenBadge>
                 ) : (
-                    <span className="text-gray-500 text-xs">No reward</span>
+                    <span className="text-degen-text-muted text-xs">No reward</span>
                 )}
             </div>
 
             {/* Purchase Date */}
-            <p className="text-gray-500 text-xs mt-2">
+            <p className="text-degen-text-light text-xs mt-2">
                 {new Date(box.created_at).toLocaleDateString()}
             </p>
         </div>
@@ -621,11 +705,13 @@ function ProjectCard({ project, config }) {
     }, [project.project_numeric_id]);
 
     return (
-        <div className="bg-white/5 border border-white/10 rounded-xl p-6 hover:bg-white/10 transition-all">
+        <DegenCard variant="white" hover className="flex flex-col">
             {/* Network Badge */}
             {isDevnet && (
-                <div className="inline-block mb-3 bg-yellow-500/20 text-yellow-500 px-3 py-1 rounded text-xs font-bold">
-                    DEVNET
+                <div className="mb-3">
+                    <DegenBadge variant="warning" size="sm">
+                        DEVNET
+                    </DegenBadge>
                 </div>
             )}
 
@@ -634,74 +720,78 @@ function ProjectCard({ project, config }) {
                 <img
                     src={project.logo_url}
                     alt={project.name}
-                    className="w-16 h-16 rounded-full mb-4"
+                    className="w-16 h-16 mb-4 border border-degen-black"
                 />
             )}
 
             {/* Project Name */}
-            <h3 className="text-white text-xl font-bold mb-2">{project.name}</h3>
+            <h3 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-2">{project.name}</h3>
 
             {/* Description */}
             {project.description && (
-                <p className="text-gray-400 text-sm mb-4 line-clamp-2">
+                <p className="text-degen-text-muted text-sm mb-4 line-clamp-2">
                     {project.description}
                 </p>
             )}
 
             {/* Stats */}
             <div className="grid grid-cols-2 gap-3 mb-4">
-                <div className="text-center">
-                    <p className="text-gray-500 text-xs">Boxes</p>
-                    <p className="text-white font-bold">{project.total_boxes_created || 0}</p>
+                <div className="text-center bg-degen-bg p-2 border border-degen-black">
+                    <p className="text-degen-text-muted text-xs uppercase">Boxes</p>
+                    <p className="text-degen-black font-medium">{project.total_boxes_created || 0}</p>
                 </div>
-                <div className="text-center">
-                    <p className="text-gray-500 text-xs">Jackpots</p>
-                    <p className="text-white font-bold">{project.total_jackpots_hit || 0}</p>
+                <div className="text-center bg-degen-bg p-2 border border-degen-black">
+                    <p className="text-degen-text-muted text-xs uppercase">Jackpots</p>
+                    <p className="text-degen-black font-medium">{project.total_jackpots_hit || 0}</p>
                 </div>
-                <div className="text-center">
-                    <p className="text-gray-500 text-xs">Vault Balance</p>
-                    <p className="text-green-400 font-bold">
+                <div className="text-center bg-degen-bg p-2 border border-degen-black">
+                    <p className="text-degen-text-muted text-xs uppercase">Vault Balance</p>
+                    <p className="text-degen-black font-medium">
                         {balanceLoading
-                            ? 'Loading...'
+                            ? '...'
                             : `${(vaultBalance / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)} ${project.payment_token_symbol || 'tokens'}`}
                     </p>
                 </div>
-                <div className="text-center">
-                    <p className="text-gray-500 text-xs">Status</p>
-                    <p className={`font-bold ${project.is_active ? 'text-green-400' : 'text-red-400'}`}>
+                <div className="text-center bg-degen-bg p-2 border border-degen-black">
+                    <p className="text-degen-text-muted text-xs uppercase">Status</p>
+                    <DegenBadge variant={project.is_active ? 'success' : 'danger'} size="sm" dot>
                         {project.is_active ? 'Active' : 'Paused'}
-                    </p>
+                    </DegenBadge>
                 </div>
             </div>
 
             {/* Subdomain */}
-            <div className="mb-4 p-3 bg-black/30 rounded-lg">
-                <p className="text-gray-500 text-xs mb-1">Your Subdomain</p>
+            <div className="mb-4 p-3 bg-degen-bg border border-degen-black">
+                <p className="text-degen-text-muted text-xs uppercase mb-1">Your Subdomain</p>
                 <a
                     href={projectUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-purple-400 hover:text-purple-300 text-sm break-all transition-colors"
+                    className="text-degen-blue hover:underline text-sm break-all font-medium"
                 >
                     {project.subdomain}.{platformDomain}
                 </a>
             </div>
 
             {/* Actions */}
-            <div className="flex gap-2">
-                <button
+            <div className="flex gap-2 mt-auto">
+                <DegenButton
                     onClick={() => window.open(projectUrl, '_blank')}
-                    className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition-colors"
+                    variant="blue"
+                    size="sm"
+                    className="flex-1"
                 >
                     Visit Site
-                </button>
-                <button
+                </DegenButton>
+                <DegenButton
                     onClick={() => router.push(`/dashboard/manage/${project.id}`)}
-                    className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg transition-colors"
+                    variant="secondary"
+                    size="sm"
+                    className="flex-1"
                 >
                     Manage
-                </button>
+                </DegenButton>
             </div>
-        </div>
+        </DegenCard>
     );
 }

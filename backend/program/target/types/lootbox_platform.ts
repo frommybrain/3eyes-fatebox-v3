@@ -17,7 +17,8 @@ export type LootboxPlatform = {
       "name": "createBox",
       "docs": [
         "Create a new box (user purchases box)",
-        "Transfers payment from buyer to vault"
+        "Transfers payment from buyer to vault",
+        "Stores the Switchboard randomness account for later reveal"
       ],
       "discriminator": [
         108,
@@ -84,6 +85,10 @@ export type LootboxPlatform = {
         {
           "name": "projectId",
           "type": "u64"
+        },
+        {
+          "name": "randomnessAccount",
+          "type": "pubkey"
         }
       ]
     },
@@ -213,6 +218,7 @@ export type LootboxPlatform = {
       "name": "revealBox",
       "docs": [
         "Reveal box with Switchboard VRF randomness",
+        "Reads randomness from Switchboard on-demand account",
         "Calculates luck based on hold time and determines reward"
       ],
       "discriminator": [
@@ -279,6 +285,9 @@ export type LootboxPlatform = {
         },
         {
           "name": "vaultTokenAccount"
+        },
+        {
+          "name": "randomnessAccount"
         }
       ],
       "args": [
@@ -667,6 +676,16 @@ export type LootboxPlatform = {
       "code": 6012,
       "name": "randomnessNotReady",
       "msg": "Randomness not ready"
+    },
+    {
+      "code": 6013,
+      "name": "randomnessNotCommitted",
+      "msg": "Randomness not committed for this box"
+    },
+    {
+      "code": 6014,
+      "name": "invalidRandomnessAccount",
+      "msg": "Invalid randomness account"
     }
   ],
   "types": [
@@ -718,6 +737,14 @@ export type LootboxPlatform = {
           {
             "name": "rewardTier",
             "type": "u8"
+          },
+          {
+            "name": "randomnessAccount",
+            "type": "pubkey"
+          },
+          {
+            "name": "randomnessCommitted",
+            "type": "bool"
           }
         ]
       }

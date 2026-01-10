@@ -8,6 +8,13 @@ import { useRouter } from 'next/navigation';
 import useNetworkStore from '@/store/useNetworkStore';
 import useProjectStore from '@/store/useProjectStore';
 import { supabase } from '@/lib/supabase';
+import {
+    DegenButton,
+    DegenCard,
+    DegenBadge,
+    DegenInput,
+    DegenLoadingState,
+} from '@/components/ui';
 
 export default function AdminDashboard() {
     const router = useRouter();
@@ -146,11 +153,8 @@ export default function AdminDashboard() {
 
     if (!mounted || configLoading) {
         return (
-            <div className="min-h-screen flex items-center justify-center">
-                <div className="text-center">
-                    <div className="text-4xl mb-4">👁️👁️👁️</div>
-                    <p className="text-white text-lg">Loading...</p>
-                </div>
+            <div className="min-h-screen flex items-center justify-center bg-degen-bg">
+                <DegenLoadingState text="Loading admin dashboard..." />
             </div>
         );
     }
@@ -160,198 +164,166 @@ export default function AdminDashboard() {
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 pt-24 pb-12 px-6">
+        <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-6">
             <div className="max-w-7xl mx-auto">
                 {/* Header */}
                 <div className="mb-8">
                     <div className="flex items-center gap-3 mb-2">
-                        <h1 className="text-white text-4xl font-bold">🔧 Admin Dashboard</h1>
-                        <div className="bg-purple-500 text-white px-3 py-1 rounded text-sm font-bold">
-                            SUPER ADMIN
-                        </div>
+                        <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider">Admin Dashboard</h1>
+                        <DegenBadge variant="feature">SUPER ADMIN</DegenBadge>
                     </div>
-                    <p className="text-gray-400 text-lg">
+                    <p className="text-degen-text-muted text-lg">
                         Platform management and configuration
                     </p>
                 </div>
 
                 {/* Network Status */}
-                <div className="mb-6 p-6 bg-white/5 border border-white/10 rounded-xl">
+                <DegenCard variant="white" padding="lg" className="mb-6">
                     <div className="flex items-center justify-between">
                         <div>
-                            <p className="text-gray-400 text-sm mb-1">Current Network</p>
-                            <p className="text-white text-2xl font-bold">
-                                {config.network === 'devnet' ? '🧪 Devnet' : '🚀 Mainnet'}
+                            <p className="text-degen-text-muted text-sm uppercase tracking-wider mb-1">Current Network</p>
+                            <p className="text-degen-black text-2xl font-medium">
+                                {config.network === 'devnet' ? 'Devnet' : 'Mainnet'}
                             </p>
                         </div>
                         <div>
-                            <p className="text-gray-400 text-sm mb-1">Production Mode</p>
-                            <p className={`text-xl font-bold ${config.isProduction ? 'text-red-400' : 'text-yellow-400'}`}>
-                                {config.isProduction ? '✓ LIVE' : '⚠️ Testing'}
-                            </p>
+                            <p className="text-degen-text-muted text-sm uppercase tracking-wider mb-1">Production Mode</p>
+                            <DegenBadge variant={config.isProduction ? 'error' : 'warning'}>
+                                {config.isProduction ? 'LIVE' : 'TESTING'}
+                            </DegenBadge>
                         </div>
                         <div>
-                            <p className="text-gray-400 text-sm mb-1">RPC URL</p>
-                            <p className="text-white text-sm font-mono">{config.rpcUrl.slice(0, 30)}...</p>
+                            <p className="text-degen-text-muted text-sm uppercase tracking-wider mb-1">RPC URL</p>
+                            <p className="text-degen-black text-sm font-mono">{config.rpcUrl.slice(0, 30)}...</p>
                         </div>
                     </div>
-                </div>
+                </DegenCard>
 
                 {/* Tabs */}
-                <div className="flex gap-4 mb-6">
-                    <button
+                <div className="flex gap-2 mb-6">
+                    <DegenButton
                         onClick={() => setActiveTab('projects')}
-                        className={`px-6 py-3 font-medium rounded-lg transition-colors ${
-                            activeTab === 'projects'
-                                ? 'bg-purple-600 text-white'
-                                : 'bg-white/5 text-gray-400 hover:text-white'
-                        }`}
+                        variant={activeTab === 'projects' ? 'primary' : 'secondary'}
                     >
                         All Projects ({projects.length})
-                    </button>
-                    <button
+                    </DegenButton>
+                    <DegenButton
                         onClick={() => setActiveTab('config')}
-                        className={`px-6 py-3 font-medium rounded-lg transition-colors ${
-                            activeTab === 'config'
-                                ? 'bg-purple-600 text-white'
-                                : 'bg-white/5 text-gray-400 hover:text-white'
-                        }`}
+                        variant={activeTab === 'config' ? 'primary' : 'secondary'}
                     >
                         Platform Config
-                    </button>
+                    </DegenButton>
                 </div>
 
                 {/* Projects Tab */}
                 {activeTab === 'projects' && (
-                    <div className="bg-white/5 border border-white/10 rounded-xl p-6">
-                        <h2 className="text-white text-2xl font-bold mb-6">All Projects</h2>
+                    <DegenCard variant="white" padding="lg">
+                        <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-6">All Projects</h2>
 
                         {projects.length === 0 ? (
                             <div className="text-center py-12">
-                                <p className="text-gray-400">No projects yet</p>
+                                <p className="text-degen-text-muted">No projects yet</p>
                             </div>
                         ) : (
                             <div className="space-y-4">
                                 {projects.map((project) => (
                                     <div
                                         key={project.id}
-                                        className="p-4 bg-black/30 border border-white/10 rounded-lg flex items-center justify-between"
+                                        className="p-4 bg-degen-bg border border-degen-black flex items-center justify-between"
                                     >
                                         <div className="flex-1">
                                             <div className="flex items-center gap-3 mb-2">
-                                                <h3 className="text-white font-bold">{project.project_name}</h3>
-                                                <span className={`px-2 py-1 rounded text-xs font-bold ${
-                                                    project.is_active
-                                                        ? 'bg-green-500/20 text-green-500'
-                                                        : 'bg-red-500/20 text-red-500'
-                                                }`}>
+                                                <h3 className="text-degen-black font-medium">{project.project_name}</h3>
+                                                <DegenBadge variant={project.is_active ? 'success' : 'error'}>
                                                     {project.is_active ? 'ACTIVE' : 'INACTIVE'}
-                                                </span>
-                                                <span className={`px-2 py-1 rounded text-xs font-bold ${
-                                                    project.is_paused
-                                                        ? 'bg-yellow-500/20 text-yellow-500'
-                                                        : 'bg-blue-500/20 text-blue-500'
-                                                }`}>
+                                                </DegenBadge>
+                                                <DegenBadge variant={project.is_paused ? 'warning' : 'info'}>
                                                     {project.is_paused ? 'PAUSED' : 'RUNNING'}
-                                                </span>
+                                                </DegenBadge>
                                             </div>
-                                            <p className="text-gray-400 text-sm mb-2">{project.subdomain}.degenbox.fun</p>
+                                            <p className="text-degen-text-muted text-sm mb-2">{project.subdomain}.degenbox.fun</p>
                                             <div className="flex gap-6 text-sm">
-                                                <span className="text-gray-500">Owner: {project.owner_wallet.slice(0, 8)}...</span>
-                                                <span className="text-gray-500">Boxes: {project.boxes_created || 0}</span>
+                                                <span className="text-degen-text-muted">Owner: {project.owner_wallet.slice(0, 8)}...</span>
+                                                <span className="text-degen-text-muted">Boxes: {project.boxes_created || 0}</span>
                                             </div>
                                         </div>
                                         <div className="flex gap-2">
-                                            <button
+                                            <DegenButton
                                                 onClick={() => toggleProjectActive(project.id, project.is_active)}
-                                                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                                                    project.is_active
-                                                        ? 'bg-red-600 hover:bg-red-700 text-white'
-                                                        : 'bg-green-600 hover:bg-green-700 text-white'
-                                                }`}
+                                                variant={project.is_active ? 'warning' : 'success'}
+                                                size="sm"
                                             >
-                                                {project.is_active ? '✗ Deactivate' : '✓ Activate'}
-                                            </button>
-                                            <button
+                                                {project.is_active ? 'Deactivate' : 'Activate'}
+                                            </DegenButton>
+                                            <DegenButton
                                                 onClick={() => toggleProjectPaused(project.id, project.is_paused)}
-                                                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                                                    project.is_paused
-                                                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                                                        : 'bg-yellow-600 hover:bg-yellow-700 text-white'
-                                                }`}
+                                                variant={project.is_paused ? 'blue' : 'feature'}
+                                                size="sm"
                                             >
-                                                {project.is_paused ? '▶ Unpause' : '⏸ Pause'}
-                                            </button>
+                                                {project.is_paused ? 'Unpause' : 'Pause'}
+                                            </DegenButton>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         )}
-                    </div>
+                    </DegenCard>
                 )}
 
                 {/* Config Tab */}
                 {activeTab === 'config' && (
-                    <div className="bg-white/5 border border-white/10 rounded-xl p-8">
-                        <h2 className="text-white text-2xl font-bold mb-6">Platform Configuration</h2>
+                    <DegenCard variant="white" padding="lg">
+                        <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-6">Platform Configuration</h2>
 
                         {/* Token Addresses Section */}
-                        <div className="mb-8 p-6 bg-purple-500/10 border border-purple-500/30 rounded-xl">
-                            <h3 className="text-white text-xl font-bold mb-4">🪙 Token Addresses</h3>
+                        <div className="mb-8 p-6 bg-degen-bg border border-degen-black">
+                            <h3 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-4">Token Addresses</h3>
 
                             {/* $3EYES Token Mint */}
                             <div className="mb-6">
-                                <label className="block text-white font-medium mb-2">
-                                    $3EYES Token Mint Address
-                                </label>
-                                <input
-                                    type="text"
+                                <DegenInput
+                                    label="$3EYES Token Mint Address"
                                     value={configForm.threeEyesMint}
                                     onChange={(e) => setConfigForm({ ...configForm, threeEyesMint: e.target.value })}
                                     placeholder="Enter token mint address"
-                                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-purple-500"
+                                    className="font-mono text-sm"
                                 />
-                                <p className="text-gray-400 text-sm mt-1">
+                                <p className="text-degen-text-muted text-sm mt-1">
                                     Platform token used for launch fees and withdrawal fees
                                 </p>
                                 {config.network === 'devnet' && (
-                                    <p className="text-yellow-500 text-sm mt-1">
-                                        🧪 Use devnet test token address for testing
+                                    <p className="text-degen-warning text-sm mt-1">
+                                        Use devnet test token address for testing
                                     </p>
                                 )}
                             </div>
 
                             {/* Lootbox Program ID */}
                             <div className="mb-6">
-                                <label className="block text-white font-medium mb-2">
-                                    Lootbox Program ID
-                                </label>
-                                <input
-                                    type="text"
+                                <DegenInput
+                                    label="Lootbox Program ID"
                                     value={configForm.lootboxProgramId || ''}
                                     onChange={(e) => setConfigForm({ ...configForm, lootboxProgramId: e.target.value })}
                                     placeholder={config.lootboxProgramId?.toString() || "Enter program ID (after deployment)"}
-                                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-purple-500"
+                                    className="font-mono text-sm"
                                 />
-                                <p className="text-gray-400 text-sm mt-1">
+                                <p className="text-degen-text-muted text-sm mt-1">
                                     On-chain program address (same on devnet and mainnet if using same deploy wallet)
                                 </p>
                             </div>
                         </div>
 
                         {/* Game Settings Section */}
-                        <div className="mb-8 p-6 bg-orange-500/10 border border-orange-500/30 rounded-xl">
-                            <h3 className="text-white text-xl font-bold mb-4">🎮 Game Settings</h3>
-                            <p className="text-orange-400 text-sm mb-4">
-                                ⚠️ REMINDER: Change luck interval to 10800 (3 hours) before mainnet launch!
+                        <div className="mb-8 p-6 bg-degen-yellow border border-degen-black">
+                            <h3 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-4">Game Settings</h3>
+                            <p className="text-degen-black text-sm mb-4">
+                                REMINDER: Change luck interval to 10800 (3 hours) before mainnet launch!
                             </p>
 
                             {/* Luck Interval */}
                             <div className="mb-6">
-                                <label className="block text-white font-medium mb-2">
-                                    Luck Interval (seconds)
-                                </label>
-                                <input
+                                <DegenInput
+                                    label="Luck Interval (seconds)"
                                     type="number"
                                     value={configForm.luckIntervalSeconds ?? 3}
                                     onChange={(e) => {
@@ -360,49 +332,50 @@ export default function AdminDashboard() {
                                     }}
                                     min="1"
                                     step="1"
-                                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white focus:outline-none focus:border-orange-500"
                                 />
-                                <p className="text-gray-500 text-sm mt-1">
+                                <p className="text-degen-text-muted text-sm mt-1">
                                     How often luck increases by 1 point. Dev: 3 seconds | Production: 10800 seconds (3 hours)
                                 </p>
                                 <div className="mt-2 flex gap-2">
-                                    <button
+                                    <DegenButton
                                         type="button"
                                         onClick={() => setConfigForm({ ...configForm, luckIntervalSeconds: 3 })}
-                                        className="px-3 py-1 bg-yellow-600 hover:bg-yellow-700 text-white text-xs rounded"
+                                        variant="warning"
+                                        size="sm"
                                     >
                                         Set Dev Mode (3s)
-                                    </button>
-                                    <button
+                                    </DegenButton>
+                                    <DegenButton
                                         type="button"
                                         onClick={() => setConfigForm({ ...configForm, luckIntervalSeconds: 10800 })}
-                                        className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded"
+                                        variant="success"
+                                        size="sm"
                                     >
                                         Set Production (3 hours)
-                                    </button>
+                                    </DegenButton>
                                 </div>
                             </div>
 
                             {/* Current Luck Setting Display */}
-                            <div className="p-3 bg-black/30 rounded-lg">
-                                <p className="text-gray-400 text-xs">Current Setting:</p>
-                                <p className={`font-bold ${(config.luckIntervalSeconds ?? 3) === 10800 ? 'text-green-400' : 'text-yellow-400'}`}>
+                            <div className="p-3 bg-degen-white border border-degen-black">
+                                <p className="text-degen-text-muted text-xs uppercase tracking-wider">Current Setting:</p>
+                                <p className="text-degen-black font-medium">
                                     {config.luckIntervalSeconds ?? 3} seconds
-                                    ({(config.luckIntervalSeconds ?? 3) === 10800 ? '✓ Production mode' : '⚠️ Dev/Testing mode'})
+                                    <DegenBadge variant={(config.luckIntervalSeconds ?? 3) === 10800 ? 'success' : 'warning'} className="ml-2">
+                                        {(config.luckIntervalSeconds ?? 3) === 10800 ? 'Production mode' : 'Dev/Testing mode'}
+                                    </DegenBadge>
                                 </p>
                             </div>
                         </div>
 
                         {/* Project Creation Settings Section */}
-                        <div className="mb-8 p-6 bg-blue-500/10 border border-blue-500/30 rounded-xl">
-                            <h3 className="text-white text-xl font-bold mb-4">🏗️ Project Creation Settings</h3>
+                        <div className="mb-8 p-6 bg-degen-bg border border-degen-black">
+                            <h3 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-4">Project Creation Settings</h3>
 
                             {/* Vault Fund Amount */}
                             <div className="mb-6">
-                                <label className="block text-white font-medium mb-2">
-                                    Required Vault Funding (tokens)
-                                </label>
-                                <input
+                                <DegenInput
+                                    label="Required Vault Funding (tokens)"
                                     type="number"
                                     value={configForm.vaultFundAmount ?? 50000000}
                                     onChange={(e) => {
@@ -411,49 +384,48 @@ export default function AdminDashboard() {
                                     }}
                                     min="0"
                                     step="1000000"
-                                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500"
                                 />
-                                <p className="text-gray-500 text-sm mt-1">
+                                <p className="text-degen-text-muted text-sm mt-1">
                                     Amount of tokens project creators must transfer to fund their vault on project creation.
                                     This ensures there are funds to pay out rewards.
                                 </p>
                                 <div className="mt-2 flex gap-2">
-                                    <button
+                                    <DegenButton
                                         type="button"
                                         onClick={() => setConfigForm({ ...configForm, vaultFundAmount: 1000 })}
-                                        className="px-3 py-1 bg-yellow-600 hover:bg-yellow-700 text-white text-xs rounded"
+                                        variant="warning"
+                                        size="sm"
                                     >
                                         Set Dev Mode (1K)
-                                    </button>
-                                    <button
+                                    </DegenButton>
+                                    <DegenButton
                                         type="button"
                                         onClick={() => setConfigForm({ ...configForm, vaultFundAmount: 50000000 })}
-                                        className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded"
+                                        variant="success"
+                                        size="sm"
                                     >
                                         Set Production (50M)
-                                    </button>
+                                    </DegenButton>
                                 </div>
                             </div>
 
                             {/* Current Vault Fund Setting Display */}
-                            <div className="p-3 bg-black/30 rounded-lg">
-                                <p className="text-gray-400 text-xs">Current Setting:</p>
-                                <p className="text-white font-bold">
+                            <div className="p-3 bg-degen-white border border-degen-black">
+                                <p className="text-degen-text-muted text-xs uppercase tracking-wider">Current Setting:</p>
+                                <p className="text-degen-black font-medium">
                                     {(config.vaultFundAmount ? (Number(config.vaultFundAmount) / 1e9).toLocaleString() : '50,000,000')} tokens
                                 </p>
                             </div>
                         </div>
 
                         {/* Fees Section */}
-                        <div className="mb-8">
-                            <h3 className="text-white text-xl font-bold mb-4">💰 Platform Fees</h3>
+                        <div className="mb-8 p-6 bg-degen-bg border border-degen-black">
+                            <h3 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-4">Platform Fees</h3>
 
                             {/* Launch Fee */}
                             <div className="mb-6">
-                                <label className="block text-white font-medium mb-2">
-                                    Launch Fee (in $3EYES tokens)
-                                </label>
-                                <input
+                                <DegenInput
+                                    label="Launch Fee (in $3EYES tokens)"
                                     type="number"
                                     value={configForm.launchFeeAmount}
                                     onChange={(e) => {
@@ -462,19 +434,16 @@ export default function AdminDashboard() {
                                     }}
                                     min="0"
                                     step="1"
-                                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white focus:outline-none focus:border-purple-500"
                                 />
-                                <p className="text-gray-500 text-sm mt-1">
+                                <p className="text-degen-text-muted text-sm mt-1">
                                     Fee users must pay to create a new project
                                 </p>
                             </div>
 
                             {/* Withdrawal Fee */}
                             <div className="mb-6">
-                                <label className="block text-white font-medium mb-2">
-                                    Withdrawal Fee (percentage)
-                                </label>
-                                <input
+                                <DegenInput
+                                    label="Withdrawal Fee (percentage)"
                                     type="number"
                                     value={configForm.withdrawalFeePercentage}
                                     onChange={(e) => {
@@ -484,61 +453,62 @@ export default function AdminDashboard() {
                                     min="0"
                                     max="100"
                                     step="0.1"
-                                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white focus:outline-none focus:border-purple-500"
                                 />
-                                <p className="text-gray-500 text-sm mt-1">
+                                <p className="text-degen-text-muted text-sm mt-1">
                                     Fee creators pay when withdrawing earnings (in $3EYES)
                                 </p>
                             </div>
                         </div>
 
                         {/* Current Values Display */}
-                        <div className="mb-6 p-4 bg-black/30 rounded-lg">
-                            <p className="text-gray-400 text-sm mb-2">Current Configuration:</p>
+                        <div className="mb-6 p-4 bg-degen-bg border border-degen-black">
+                            <p className="text-degen-text-muted text-sm uppercase tracking-wider mb-2">Current Configuration:</p>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <p className="text-gray-500 text-xs">$3EYES Token</p>
-                                    <p className="text-white font-mono text-xs break-all">
+                                    <p className="text-degen-text-muted text-xs uppercase tracking-wider">$3EYES Token</p>
+                                    <p className="text-degen-black font-mono text-xs break-all">
                                         {config.threeEyesMint?.toString() ?
                                             `${config.threeEyesMint.toString().slice(0, 20)}...` :
                                             'Not set'}
                                     </p>
                                 </div>
                                 <div>
-                                    <p className="text-gray-500 text-xs">Program ID</p>
-                                    <p className="text-white font-mono text-xs break-all">
+                                    <p className="text-degen-text-muted text-xs uppercase tracking-wider">Program ID</p>
+                                    <p className="text-degen-black font-mono text-xs break-all">
                                         {config.lootboxProgramId?.toString() ?
                                             `${config.lootboxProgramId.toString().slice(0, 20)}...` :
                                             'Not set'}
                                     </p>
                                 </div>
                                 <div>
-                                    <p className="text-gray-500 text-xs">Launch Fee</p>
-                                    <p className="text-white font-bold">{config.launchFeeAmount / 1e9} $3EYES</p>
+                                    <p className="text-degen-text-muted text-xs uppercase tracking-wider">Launch Fee</p>
+                                    <p className="text-degen-black font-medium">{config.launchFeeAmount / 1e9} $3EYES</p>
                                 </div>
                                 <div>
-                                    <p className="text-gray-500 text-xs">Withdrawal Fee</p>
-                                    <p className="text-white font-bold">{config.withdrawalFeePercentage}%</p>
+                                    <p className="text-degen-text-muted text-xs uppercase tracking-wider">Withdrawal Fee</p>
+                                    <p className="text-degen-black font-medium">{config.withdrawalFeePercentage}%</p>
                                 </div>
                             </div>
                         </div>
 
                         {/* Save Button */}
-                        <button
+                        <DegenButton
                             onClick={handleSaveConfig}
                             disabled={saving}
-                            className="w-full px-8 py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-lg font-bold rounded-xl shadow-lg transform transition-all hover:scale-105 active:scale-95"
+                            variant="primary"
+                            size="lg"
+                            className="w-full"
                         >
                             {saving ? 'Saving...' : 'Save Configuration'}
-                        </button>
+                        </DegenButton>
 
                         {/* Warning */}
-                        <div className="mt-6 p-4 bg-yellow-500/10 border border-yellow-500/50 rounded-lg">
-                            <p className="text-yellow-500 text-sm">
-                                ⚠️ <strong>Note:</strong> Configuration changes take effect immediately for all new operations.
+                        <div className="mt-6 p-4 bg-degen-yellow border border-degen-black">
+                            <p className="text-degen-black text-sm">
+                                <strong>Note:</strong> Configuration changes take effect immediately for all new operations.
                             </p>
                         </div>
-                    </div>
+                    </DegenCard>
                 )}
             </div>
         </div>

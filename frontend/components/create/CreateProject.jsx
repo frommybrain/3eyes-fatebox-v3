@@ -8,6 +8,14 @@ import { Transaction } from '@solana/web3.js';
 import useNetworkStore from '@/store/useNetworkStore';
 import { checkSubdomainAvailability, generateSubdomain } from '@/lib/getNetworkConfig';
 import { supabase } from '@/lib/supabase';
+import {
+    DegenButton,
+    DegenCard,
+    DegenBadge,
+    DegenInput,
+    DegenTextarea,
+    DegenLoadingState,
+} from '@/components/ui';
 
 export default function CreateProject() {
     const router = useRouter();
@@ -125,7 +133,7 @@ export default function CreateProject() {
             if (dbError) throw dbError;
             projectData = tempProject;
 
-            console.log('✅ Project created in database:', projectData);
+            console.log('Project created in database:', projectData);
 
             if (!projectData.project_numeric_id) {
                 throw new Error('Project numeric ID not assigned. Please check database configuration.');
@@ -149,7 +157,7 @@ export default function CreateProject() {
                 throw new Error(buildResult.details || 'Failed to build transaction');
             }
 
-            console.log('✅ Transaction built:', buildResult);
+            console.log('Transaction built:', buildResult);
 
             // Step 3: Deserialize transaction
             const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
@@ -159,7 +167,7 @@ export default function CreateProject() {
             transaction.recentBlockhash = blockhash;
             transaction.lastValidBlockHeight = lastValidBlockHeight;
 
-            console.log('🔑 Sending transaction for signing...');
+            console.log('Sending transaction for signing...');
 
             // Step 4: Sign and send transaction
             const signature = await sendTransaction(transaction, connection, {
@@ -167,7 +175,7 @@ export default function CreateProject() {
                 preflightCommitment: 'confirmed',
             });
 
-            console.log('📤 Transaction sent:', signature);
+            console.log('Transaction sent:', signature);
 
             // Step 5: Wait for confirmation
             const confirmation = await connection.confirmTransaction(signature, 'confirmed');
@@ -176,7 +184,7 @@ export default function CreateProject() {
                 throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
             }
 
-            console.log('✅ Transaction confirmed!');
+            console.log('Transaction confirmed!');
 
             // Step 6: Update database with PDAs and vault funding status
             const confirmResponse = await fetch(`${backendUrl}/api/program/confirm-project-init`, {
@@ -186,7 +194,7 @@ export default function CreateProject() {
                     projectId: projectData.project_numeric_id,
                     signature,
                     pdas: buildResult.pdas,
-                    vaultFunding: buildResult.vaultFunding, // Include vault funding info
+                    vaultFunding: buildResult.vaultFunding,
                 }),
             });
 
@@ -198,7 +206,7 @@ export default function CreateProject() {
 
             // Success!
             alert(
-                `Project "${formData.name}" created successfully! 🎉\n\n` +
+                `Project "${formData.name}" created successfully!\n\n` +
                 `Subdomain: ${fullSubdomain}.degenbox.fun\n` +
                 `Transaction: ${signature}\n\n` +
                 `View on Solana Explorer: ${confirmResult.explorerUrl || `https://explorer.solana.com/tx/${signature}?cluster=${config.network}`}`
@@ -210,27 +218,21 @@ export default function CreateProject() {
 
             // Clean up: delete the project from database if on-chain init failed
             if (projectData?.id) {
-                console.log('🧹 Cleaning up failed project from database...');
-                console.log('   Project ID:', projectData.id);
-                console.log('   Numeric ID:', projectData.project_numeric_id);
+                console.log('Cleaning up failed project from database...');
                 try {
-                    const { data: deleteData, error: deleteError, count } = await supabase
+                    const { data: deleteData, error: deleteError } = await supabase
                         .from('projects')
                         .delete()
                         .eq('id', projectData.id)
-                        .select(); // Add select() to get confirmation of what was deleted
-
-                    console.log('Delete response:', { deleteData, deleteError, count });
+                        .select();
 
                     if (deleteError) {
-                        console.error('❌ Failed to clean up project:', deleteError);
-                    } else if (!deleteData || deleteData.length === 0) {
-                        console.warn('⚠️ Delete succeeded but no rows were affected - possible RLS policy blocking');
+                        console.error('Failed to clean up project:', deleteError);
                     } else {
-                        console.log('✅ Failed project removed from database:', deleteData);
+                        console.log('Failed project removed from database');
                     }
                 } catch (cleanupError) {
-                    console.error('❌ Error during cleanup:', cleanupError);
+                    console.error('Error during cleanup:', cleanupError);
                 }
             }
 
@@ -241,11 +243,8 @@ export default function CreateProject() {
 
     if (!mounted || configLoading) {
         return (
-            <div className="min-h-screen flex items-center justify-center">
-                <div className="text-center">
-                    <div className="text-4xl mb-4">👁️👁️👁️</div>
-                    <p className="text-white text-lg">Loading...</p>
-                </div>
+            <div className="min-h-screen flex items-center justify-center bg-degen-bg">
+                <DegenLoadingState text="Loading..." />
             </div>
         );
     }
@@ -255,57 +254,55 @@ export default function CreateProject() {
     }
 
     const isDevnet = config?.network === 'devnet';
-    const launchFee = config?.launchFeeAmount ? config.launchFeeAmount / 1e9 : 100; // Simplified for display
-    const vaultFundAmount = config?.vaultFundAmount ? Number(config.vaultFundAmount) / 1e9 : 50000000; // Default 50M
+    const launchFee = config?.launchFeeAmount ? config.launchFeeAmount / 1e9 : 100;
+    const vaultFundAmount = config?.vaultFundAmount ? Number(config.vaultFundAmount) / 1e9 : 50000000;
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 pt-24 pb-12 px-6">
+        <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-6">
             <div className="max-w-3xl mx-auto">
                 {/* Network Badge */}
                 {isDevnet && (
-                    <div className="mb-6 inline-block bg-yellow-500 text-black px-4 py-2 rounded-lg font-bold">
-                        🧪 DEVNET MODE - Testing
+                    <div className="mb-6">
+                        <DegenBadge variant="warning" size="lg">
+                            DEVNET MODE
+                        </DegenBadge>
                     </div>
                 )}
 
                 {/* Header */}
                 <div className="mb-8">
-                    <h1 className="text-white text-4xl font-bold mb-2">Create New Project</h1>
-                    <p className="text-gray-400 text-lg">
+                    <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">Create New Project</h1>
+                    <p className="text-degen-text-muted text-lg">
                         Launch your own lootbox platform
                     </p>
                 </div>
 
                 {/* Progress Steps */}
-                <div className="flex mb-8 gap-4">
-                    <div className={`flex-1 h-2 rounded-full ${step >= 1 ? 'bg-purple-600' : 'bg-gray-700'}`} />
-                    <div className={`flex-1 h-2 rounded-full ${step >= 2 ? 'bg-purple-600' : 'bg-gray-700'}`} />
-                    <div className={`flex-1 h-2 rounded-full ${step >= 3 ? 'bg-purple-600' : 'bg-gray-700'}`} />
+                <div className="flex mb-8 gap-2">
+                    <div className={`flex-1 h-1 ${step >= 1 ? 'bg-degen-black' : 'bg-degen-text-light'}`} />
+                    <div className={`flex-1 h-1 ${step >= 2 ? 'bg-degen-black' : 'bg-degen-text-light'}`} />
+                    <div className={`flex-1 h-1 ${step >= 3 ? 'bg-degen-black' : 'bg-degen-text-light'}`} />
                 </div>
 
                 {/* Step 1: Project Details */}
                 {step === 1 && (
-                    <div className="bg-white/5 border border-white/10 rounded-xl p-8">
-                        <h2 className="text-white text-2xl font-bold mb-6">Project Details</h2>
+                    <DegenCard variant="white" padding="lg">
+                        <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-6">Project Details</h2>
 
                         {/* Project Name */}
                         <div className="mb-6">
-                            <label className="block text-white font-medium mb-2">
-                                Project Name *
-                            </label>
-                            <input
-                                type="text"
+                            <DegenInput
+                                label="Project Name *"
                                 value={formData.name}
                                 onChange={handleNameChange}
                                 placeholder="Lucky Cat Boxes"
-                                className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                                error={errors.name}
                             />
-                            {errors.name && <p className="text-red-400 text-sm mt-1">{errors.name}</p>}
                         </div>
 
                         {/* Subdomain */}
                         <div className="mb-6">
-                            <label className="block text-white font-medium mb-2">
+                            <label className="block text-degen-black font-medium text-sm uppercase tracking-wider mb-2">
                                 Subdomain *
                             </label>
                             <div className="flex gap-2">
@@ -319,122 +316,102 @@ export default function CreateProject() {
                                         }}
                                         onBlur={checkSubdomain}
                                         placeholder="luckycat"
-                                        className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                                        className="w-full px-3 py-2 bg-degen-white text-degen-black placeholder:text-degen-text-muted border border-degen-black outline-none transition-colors duration-100 focus:bg-degen-container"
                                     />
                                     {subdomainChecking && (
-                                        <div className="absolute right-3 top-3 text-gray-400">⏳</div>
+                                        <div className="absolute right-3 top-2 text-degen-text-muted">...</div>
                                     )}
                                     {subdomainAvailable === true && (
-                                        <div className="absolute right-3 top-3 text-green-400">✓</div>
+                                        <div className="absolute right-3 top-2 text-degen-green">OK</div>
                                     )}
                                     {subdomainAvailable === false && (
-                                        <div className="absolute right-3 top-3 text-red-400">✗</div>
+                                        <div className="absolute right-3 top-2 text-degen-feature">X</div>
                                     )}
                                 </div>
-                                <div className="flex items-center text-gray-400">.degenbox.fun</div>
+                                <div className="flex items-center text-degen-text-muted text-sm">.degenbox.fun</div>
                             </div>
                             {isDevnet && (
-                                <p className="text-yellow-500 text-sm mt-1">
+                                <p className="text-degen-warning text-xs mt-1">
                                     Devnet projects will have "devnet-" prefix
                                 </p>
                             )}
-                            {errors.subdomain && <p className="text-red-400 text-sm mt-1">{errors.subdomain}</p>}
+                            {errors.subdomain && <p className="text-degen-feature text-sm mt-1">{errors.subdomain}</p>}
                         </div>
 
                         {/* Description */}
                         <div className="mb-6">
-                            <label className="block text-white font-medium mb-2">
-                                Description
-                            </label>
-                            <textarea
+                            <DegenTextarea
+                                label="Description"
                                 value={formData.description}
                                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                                 placeholder="Try your luck with adorable cat-themed lootboxes!"
                                 rows={3}
-                                className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
                             />
                         </div>
 
                         {/* Payment Token */}
                         <div className="mb-6">
-                            <label className="block text-white font-medium mb-2">
-                                Payment Token Mint Address *
-                            </label>
-                            <input
-                                type="text"
+                            <DegenInput
+                                label="Payment Token Mint Address *"
                                 value={formData.paymentTokenMint}
                                 onChange={(e) => setFormData({ ...formData, paymentTokenMint: e.target.value })}
                                 placeholder="So11111111111111111111111111111111111111112"
-                                className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-500 font-mono text-sm"
+                                hint="The SPL token users will pay with (e.g., SOL, USDC, your token)"
+                                error={errors.paymentTokenMint}
+                                className="font-mono text-sm"
                             />
-                            <p className="text-gray-500 text-sm mt-1">
-                                The SPL token users will pay with (e.g., SOL, USDC, your token)
-                            </p>
-                            {errors.paymentTokenMint && <p className="text-red-400 text-sm mt-1">{errors.paymentTokenMint}</p>}
                         </div>
 
                         {/* Token Symbol & Decimals */}
                         <div className="grid grid-cols-2 gap-4 mb-6">
-                            <div>
-                                <label className="block text-white font-medium mb-2">
-                                    Token Symbol
-                                </label>
-                                <input
-                                    type="text"
-                                    value={formData.paymentTokenSymbol}
-                                    onChange={(e) => setFormData({ ...formData, paymentTokenSymbol: e.target.value.toUpperCase() })}
-                                    placeholder="SOL"
-                                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-white font-medium mb-2">
-                                    Decimals
-                                </label>
-                                <input
-                                    type="number"
-                                    value={formData.paymentTokenDecimals}
-                                    onChange={(e) => setFormData({ ...formData, paymentTokenDecimals: parseInt(e.target.value) })}
-                                    min="0"
-                                    max="9"
-                                    className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
-                                />
-                            </div>
+                            <DegenInput
+                                label="Token Symbol"
+                                value={formData.paymentTokenSymbol}
+                                onChange={(e) => setFormData({ ...formData, paymentTokenSymbol: e.target.value.toUpperCase() })}
+                                placeholder="SOL"
+                            />
+                            <DegenInput
+                                label="Decimals"
+                                type="number"
+                                value={formData.paymentTokenDecimals}
+                                onChange={(e) => setFormData({ ...formData, paymentTokenDecimals: parseInt(e.target.value) })}
+                                min="0"
+                                max="9"
+                            />
                         </div>
 
                         {/* Box Price */}
                         <div className="mb-6">
-                            <label className="block text-white font-medium mb-2">
-                                Box Price (in tokens) *
-                            </label>
-                            <input
+                            <DegenInput
+                                label="Box Price (in tokens) *"
                                 type="number"
                                 value={formData.boxPrice}
                                 onChange={(e) => setFormData({ ...formData, boxPrice: e.target.value })}
                                 placeholder="1.0"
                                 step="0.000000001"
                                 min="0"
-                                className="w-full px-4 py-3 bg-black/30 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                                error={errors.boxPrice}
                             />
-                            {errors.boxPrice && <p className="text-red-400 text-sm mt-1">{errors.boxPrice}</p>}
                         </div>
 
                         {/* Continue Button */}
-                        <button
+                        <DegenButton
                             onClick={() => {
                                 if (validateStep1()) setStep(2);
                             }}
-                            className="w-full px-8 py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white text-lg font-bold rounded-xl shadow-lg transform transition-all hover:scale-105 active:scale-95"
+                            variant="primary"
+                            size="lg"
+                            fullWidth
                         >
-                            Continue →
-                        </button>
-                    </div>
+                            Continue
+                        </DegenButton>
+                    </DegenCard>
                 )}
 
                 {/* Step 2: Review */}
                 {step === 2 && (
-                    <div className="bg-white/5 border border-white/10 rounded-xl p-8">
-                        <h2 className="text-white text-2xl font-bold mb-6">Review & Confirm</h2>
+                    <DegenCard variant="white" padding="lg">
+                        <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-6">Review & Confirm</h2>
 
                         <div className="space-y-4 mb-8">
                             <ReviewItem label="Project Name" value={formData.name} />
@@ -450,52 +427,55 @@ export default function CreateProject() {
                         </div>
 
                         {/* Launch Fee & Vault Funding Notice */}
-                        <div className="bg-purple-500/10 border border-purple-500/50 rounded-xl p-6 mb-6">
-                            <h3 className="text-white font-bold mb-3">⚠️ Required Payments</h3>
+                        <DegenCard variant="yellow" padding="md" className="mb-6">
+                            <h3 className="text-degen-black font-medium uppercase tracking-wider mb-3">Required Payments</h3>
 
                             <div className="space-y-3 mb-4">
                                 <div className="flex justify-between items-center">
-                                    <span className="text-gray-300">Launch Fee ($3EYES)</span>
-                                    <span className="text-white font-bold">{launchFee.toLocaleString()} $3EYES</span>
+                                    <span className="text-degen-black">Launch Fee ($3EYES)</span>
+                                    <span className="text-degen-black font-medium">{launchFee.toLocaleString()} $3EYES</span>
                                 </div>
                                 <div className="flex justify-between items-center">
-                                    <span className="text-gray-300">Vault Funding ({formData.paymentTokenSymbol || 'tokens'})</span>
-                                    <span className="text-white font-bold">{vaultFundAmount.toLocaleString()} {formData.paymentTokenSymbol || 'tokens'}</span>
+                                    <span className="text-degen-black">Vault Funding ({formData.paymentTokenSymbol || 'tokens'})</span>
+                                    <span className="text-degen-black font-medium">{vaultFundAmount.toLocaleString()} {formData.paymentTokenSymbol || 'tokens'}</span>
                                 </div>
                             </div>
 
-                            <p className="text-gray-400 text-sm">
+                            <p className="text-degen-black/70 text-sm">
                                 {isDevnet
                                     ? "This is DEVNET - no real tokens required for testing!"
                                     : "The vault funding ensures there are tokens available to pay out rewards to winners."}
                             </p>
-                        </div>
+                        </DegenCard>
 
                         {/* Buttons */}
                         <div className="flex gap-4">
-                            <button
+                            <DegenButton
                                 onClick={() => setStep(1)}
-                                className="flex-1 px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white font-medium rounded-lg transition-colors"
+                                variant="secondary"
+                                size="lg"
+                                className="flex-1"
                             >
-                                ← Back
-                            </button>
-                            <button
+                                Back
+                            </DegenButton>
+                            <DegenButton
                                 onClick={handleSubmit}
-                                className="flex-1 px-8 py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white text-lg font-bold rounded-xl shadow-lg transform transition-all hover:scale-105 active:scale-95"
+                                variant="primary"
+                                size="lg"
+                                className="flex-1"
                             >
-                                Create Project 🚀
-                            </button>
+                                Create Project
+                            </DegenButton>
                         </div>
-                    </div>
+                    </DegenCard>
                 )}
 
                 {/* Step 3: Creating */}
                 {step === 3 && (
-                    <div className="bg-white/5 border border-white/10 rounded-xl p-12 text-center">
-                        <div className="text-6xl mb-4 animate-bounce">🎲</div>
-                        <h2 className="text-white text-2xl font-bold mb-2">Creating Your Project...</h2>
-                        <p className="text-gray-400">Please wait while we set everything up</p>
-                    </div>
+                    <DegenCard variant="white" padding="lg" className="text-center">
+                        <DegenLoadingState text="Creating Your Project..." />
+                        <p className="text-degen-text-muted mt-2">Please wait and approve the transaction in your wallet</p>
+                    </DegenCard>
                 )}
             </div>
         </div>
@@ -504,9 +484,9 @@ export default function CreateProject() {
 
 function ReviewItem({ label, value }) {
     return (
-        <div className="flex justify-between py-3 border-b border-white/10">
-            <span className="text-gray-400">{label}</span>
-            <span className="text-white font-medium">{value}</span>
+        <div className="flex justify-between py-3 border-b border-degen-black">
+            <span className="text-degen-text-muted">{label}</span>
+            <span className="text-degen-black font-medium">{value}</span>
         </div>
     );
 }

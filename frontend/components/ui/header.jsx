@@ -11,20 +11,20 @@ export default function Header() {
   const isAdmin = publicKey && config && publicKey.toString() === config.adminWallet.toString();
 
   return (
-    <header className="fixed top-0 left-0 w-full h-16 flex items-center justify-between px-6 backdrop-blur-sm bg-black/30 z-50 border-b border-white/10">
+    <header className="relative w-full h-14 flex items-center justify-between px-4 bg-degen-black border-b border-degen-black z-50">
       {/* Logo / Brand */}
-      <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-        <div className="text-2xl">👁️👁️👁️</div>
-        <span className="text-white font-bold text-xl">DegenBox</span>
+      <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+        <div className="text-xl">👁️👁️👁️</div>
+        <span className="text-degen-white font-medium text-lg uppercase tracking-wider">DegenBox</span>
       </Link>
 
       {/* Navigation & Wallet */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center">
         {publicKey && (
           <>
             <Link
               href="/dashboard"
-              className="text-white/80 hover:text-white transition-colors font-medium"
+              className="px-4 py-2 text-degen-white/80 hover:text-degen-white hover:bg-degen-white/10 transition-colors font-medium text-sm uppercase tracking-wider"
             >
               My Projects
             </Link>
@@ -32,15 +32,17 @@ export default function Header() {
             {isAdmin && (
               <Link
                 href="/admin"
-                className="text-purple-400 hover:text-purple-300 transition-colors font-medium"
+                className="px-4 py-2 text-degen-feature hover:bg-degen-feature/10 transition-colors font-medium text-sm uppercase tracking-wider"
               >
-                🔧 Admin
+                Admin
               </Link>
             )}
           </>
         )}
 
-        <WalletButton />
+        <div className="ml-2 border-l border-degen-white/20 pl-4">
+          <WalletButton />
+        </div>
       </div>
     </header>
   );

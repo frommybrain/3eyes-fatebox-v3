@@ -1,8 +1,46 @@
 @import "tailwindcss";
 
+/*
+ * DEGEN-CORE THEME
+ * ================
+ * MSCHF-inspired - Brutalist, bold, edge-to-edge, anti-design
+ * Edit colors in /lib/theme.js - this file mirrors those values for CSS.
+ * Keep both files in sync when making changes.
+ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #e7e7e8;
+  --foreground: #000000;
+
+  /* Base palette - stark, minimal */
+  --degen-bg: #e7e7e8;
+  --degen-container: #e8e8e8;
+  --degen-white: #ffffff;
+  --degen-black: #000000;
+
+  /* Feature colors - bold pops */
+  --degen-feature: #ff0000;
+  --degen-blue: #0000ff;
+  --degen-yellow: #ffff00;
+  --degen-green: #00ff00;
+  --degen-magenta: #ff00ff;
+
+  /* Text */
+  --degen-text: #000000;
+  --degen-text-muted: #666666;
+  --degen-text-light: #999999;
+
+  /* Semantic colors */
+  --degen-success: #00ff00;
+  --degen-error: #ff0000;
+  --degen-warning: #ffff00;
+  --degen-info: #0000ff;
+
+  /* Styling tokens - brutalist, no frills */
+  --degen-border-width: 1px;
+  --degen-border-width-thick: 2px;
+  --degen-border-radius: 0px;
+  --degen-grid-gap: 1px;
 }
 
 @theme inline {
@@ -10,17 +48,34 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* Expose degen colors to Tailwind */
+  --color-degen-bg: #e7e7e8;
+  --color-degen-container: #e8e8e8;
+  --color-degen-white: #ffffff;
+  --color-degen-black: #000000;
+  --color-degen-feature: #ff0000;
+  --color-degen-blue: #0000ff;
+  --color-degen-yellow: #ffff00;
+  --color-degen-green: #00ff00;
+  --color-degen-magenta: #ff00ff;
+  --color-degen-text: #000000;
+  --color-degen-text-muted: #666666;
+  --color-degen-text-light: #999999;
+  --color-degen-success: #00ff00;
+  --color-degen-error: #ff0000;
+  --color-degen-warning: #ffff00;
+  --color-degen-info: #0000ff;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--degen-bg);
+  color: var(--degen-text);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Brutalist selection */
+::selection {
+  background: var(--degen-feature);
+  color: var(--degen-white);
 }

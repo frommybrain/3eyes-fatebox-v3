@@ -18,6 +18,15 @@ import {
 } from '../lib/pdaHelpers.js';
 import { getNetworkConfig } from '../lib/getNetworkConfig.js';
 import { createClient } from '@supabase/supabase-js';
+import {
+    createRandomnessAccount,
+    createCommitInstruction,
+    createRevealInstruction,
+    loadRandomness,
+    serializeKeypair,
+    getSwitchboardConstants,
+    getSwitchboardProgram
+} from '../lib/switchboard.js';
 
 const router = express.Router();
 
@@ -686,11 +695,21 @@ router.post('/derive-pdas', async (req, res) => {
 
 /**
  * POST /api/program/build-create-box-tx
- * Build transaction for purchasing a lootbox
+ * Build transaction for purchasing a lootbox with Switchboard VRF randomness
+ *
+ * The transaction includes:
+ * 1. Create Switchboard randomness account (buyer pays)
+ * 2. Commit to randomness request
+ * 3. Create box with randomness account reference
  *
  * Body:
  * - projectId: number - Numeric project ID
  * - buyerWallet: string - Buyer's wallet address
+ *
+ * Returns:
+ * - transaction: Serialized transaction for buyer to sign
+ * - randomnessKeypair: Serialized keypair that must be included as signer
+ * - randomnessAccount: Public key of the randomness account
  */
 router.post('/build-create-box-tx', async (req, res) => {
     try {
@@ -704,11 +723,11 @@ router.post('/build-create-box-tx', async (req, res) => {
             });
         }
 
-        console.log(`\n🎲 Building create box transaction for project ${projectId}...`);
+        console.log(`\n🎲 Building create box transaction with Switchboard VRF for project ${projectId}...`);
         console.log(`   Buyer: ${buyerWallet}`);
 
         // Get Anchor program and network config
-        const { program, connection, programId } = await getAnchorProgram();
+        const { program, provider, connection, programId } = await getAnchorProgram();
         const config = await getNetworkConfig();
 
         // Fetch project from database
@@ -731,7 +750,7 @@ router.post('/build-create-box-tx', async (req, res) => {
         }
 
         console.log(`   Project: ${project.project_name}`);
-        console.log(`   Box price: ${project.box_price / Math.pow(10, project.payment_token_decimals)  } ${project.payment_token_symbol}`);
+        console.log(`   Box price: ${project.box_price / Math.pow(10, project.payment_token_decimals)} ${project.payment_token_symbol}`);
 
         // Fetch on-chain project config to get current box count
         const [projectConfigPDA] = deriveProjectConfigPDAStandalone(new PublicKey(config.programId), projectId);
@@ -777,28 +796,29 @@ router.post('/build-create-box-tx', async (req, res) => {
             console.log(`   ⚠️  Vault token account doesn't exist - will create it`);
         }
 
-        // Convert to BN
-        const projectIdBN = new BN(projectId);
+        // ========================================
+        // SWITCHBOARD VRF: Create randomness account and commit
+        // ========================================
+        console.log(`\n🎰 Setting up Switchboard VRF randomness...`);
 
-        // Build transaction (only pass projectId, not boxId)
-        const boxPurchaseTx = await program.methods
-            .createBox(projectIdBN)
-            .accounts({
-                buyer: buyerPubkey,
-                projectConfig: projectConfigPDA,
-                boxInstance: boxInstancePDA,
-                vaultAuthority: vaultAuthorityPDA,
-                vaultTokenAccount: vaultTokenAccount,
-                buyerTokenAccount: buyerTokenAccount,
-                paymentTokenMint: paymentTokenMintPubkey,
-                systemProgram: SystemProgram.programId,
-                tokenProgram: TOKEN_PROGRAM_ID,
-                rent: SYSVAR_RENT_PUBKEY,
-            })
-            .transaction();
+        // Create Switchboard randomness account - pass buyer as payer so they pay the fees
+        const { keypair: rngKeypair, randomness, createInstruction: createRandomnessIx, publicKey: randomnessAccountPubkey } =
+            await createRandomnessAccount(provider, config.network, buyerPubkey);
 
-        // If vault doesn't exist, prepend instruction to create it
-        let transaction;
+        console.log(`   Randomness account: ${randomnessAccountPubkey.toString()}`);
+        console.log(`   Randomness keypair generated (will be returned for signing)`);
+
+        // Create commit instruction - pass buyer as authority to avoid loading non-existent account
+        const commitIx = await createCommitInstruction(randomness, config.network, buyerPubkey);
+
+        // ========================================
+        // BUILD COMBINED TRANSACTION
+        // ========================================
+        console.log(`\n📝 Building combined transaction...`);
+
+        const transaction = new Transaction();
+
+        // 1. Create vault ATA if needed (buyer pays)
         if (vaultNeedsCreation) {
             const createVaultIx = createAssociatedTokenAccountInstruction(
                 buyerPubkey, // payer
@@ -806,30 +826,58 @@ router.post('/build-create-box-tx', async (req, res) => {
                 vaultAuthorityPDA, // owner
                 paymentTokenMintPubkey // mint
             );
-
-            transaction = new anchor.web3.Transaction();
             transaction.add(createVaultIx);
-            transaction.add(...boxPurchaseTx.instructions);
-        } else {
-            transaction = boxPurchaseTx;
+            console.log(`   Added: Create vault ATA instruction`);
         }
+
+        // 2. Create Switchboard randomness account (buyer pays)
+        transaction.add(createRandomnessIx);
+        console.log(`   Added: Create randomness account instruction`);
+
+        // 3. Commit to randomness (request VRF)
+        transaction.add(commitIx);
+        console.log(`   Added: Commit to randomness instruction`);
+
+        // 4. Create box with randomness account reference
+        const projectIdBN = new BN(projectId);
+        const boxPurchaseTx = await program.methods
+            .createBox(projectIdBN, randomnessAccountPubkey)
+            .accounts({
+                buyer: buyerPubkey,
+                projectConfig: projectConfigPDA,
+                boxInstance: boxInstancePDA,
+                vaultTokenAccount: vaultTokenAccount,
+                buyerTokenAccount: buyerTokenAccount,
+                tokenProgram: TOKEN_PROGRAM_ID,
+                systemProgram: SystemProgram.programId,
+            })
+            .transaction();
+
+        transaction.add(...boxPurchaseTx.instructions);
+        console.log(`   Added: Create box instruction with randomness reference`);
 
         // Get recent blockhash
         const { blockhash } = await connection.getLatestBlockhash();
         transaction.recentBlockhash = blockhash;
         transaction.feePayer = buyerPubkey;
 
-        // Serialize transaction
+        // Serialize transaction (without signatures - buyer and randomness keypair will sign on frontend)
         const serializedTransaction = transaction.serialize({
             requireAllSignatures: false,
             verifySignatures: false,
         }).toString('base64');
 
-        console.log(`✅ Transaction built successfully`);
+        // Serialize the randomness keypair so frontend can include it as signer
+        const serializedRandomnessKeypair = serializeKeypair(rngKeypair);
+
+        console.log(`\n✅ Transaction built successfully with Switchboard VRF!`);
+        console.log(`   Total instructions: ${transaction.instructions.length}`);
 
         return res.json({
             success: true,
             transaction: serializedTransaction,
+            randomnessKeypair: serializedRandomnessKeypair,
+            randomnessAccount: randomnessAccountPubkey.toString(),
             boxId: nextBoxId,
             boxInstancePDA: boxInstancePDA.toString(),
             projectId,
@@ -856,10 +904,11 @@ router.post('/build-create-box-tx', async (req, res) => {
  * - buyerWallet: string - Buyer's wallet address
  * - signature: string - Transaction signature
  * - boxInstancePDA: string - Box instance PDA address
+ * - randomnessAccount: string - Switchboard randomness account address
  */
 router.post('/confirm-box-creation', async (req, res) => {
     try {
-        const { projectId, boxId, buyerWallet, signature, boxInstancePDA } = req.body;
+        const { projectId, boxId, buyerWallet, signature, boxInstancePDA, randomnessAccount } = req.body;
 
         if (!projectId || boxId === undefined || !buyerWallet || !signature || !boxInstancePDA) {
             return res.status(400).json({
@@ -870,6 +919,9 @@ router.post('/confirm-box-creation', async (req, res) => {
 
         console.log(`\n✅ Confirming box ${boxId} creation for project ${projectId}...`);
         console.log(`   Transaction: ${signature}`);
+        if (randomnessAccount) {
+            console.log(`   Randomness account: ${randomnessAccount}`);
+        }
 
         // Fetch project from database to get UUID
         const { data: project, error: projectError } = await supabase
@@ -882,7 +934,7 @@ router.post('/confirm-box-creation', async (req, res) => {
             throw new Error('Project not found');
         }
 
-        // Insert box record into database
+        // Insert box record into database (with randomness account if provided)
         const { error: insertError } = await supabase
             .from('boxes')
             .insert({
@@ -893,6 +945,11 @@ router.post('/confirm-box-creation', async (req, res) => {
                 payout_amount: 0,
                 opened_at: null,
                 created_at: new Date().toISOString(),
+                randomness_account: randomnessAccount || null,
+                randomness_committed: !!randomnessAccount,
+                // New verification columns
+                purchase_tx_signature: signature,
+                box_pda: boxInstancePDA,
             });
 
         if (insertError) {
@@ -1014,7 +1071,11 @@ function calculateLuckScore(holdTimeSeconds, luckIntervalSeconds) {
 
 /**
  * POST /api/program/build-reveal-box-tx
- * Build transaction for revealing a lootbox (determines reward)
+ * Build transaction for revealing a lootbox with Switchboard VRF randomness
+ *
+ * The transaction includes:
+ * 1. Switchboard revealIx (reveals the committed randomness)
+ * 2. reveal_box instruction (reads randomness and calculates reward)
  *
  * Body:
  * - projectId: number - Numeric project ID
@@ -1033,13 +1094,13 @@ router.post('/build-reveal-box-tx', async (req, res) => {
             });
         }
 
-        console.log(`\n🎰 Building reveal box transaction...`);
+        console.log(`\n🎰 Building reveal box transaction with Switchboard VRF...`);
         console.log(`   Project ID: ${projectId}`);
         console.log(`   Box ID: ${boxId}`);
         console.log(`   Owner: ${ownerWallet}`);
 
         // Get Anchor program and network config
-        const { program, connection, programId } = await getAnchorProgram();
+        const { program, provider, connection, programId } = await getAnchorProgram();
         const config = await getNetworkConfig();
 
         // Fetch project from database
@@ -1082,9 +1143,20 @@ router.post('/build-reveal-box-tx', async (req, res) => {
             });
         }
 
+        // Verify randomness was committed
+        if (!box.randomness_account) {
+            return res.status(400).json({
+                success: false,
+                error: 'Box does not have a randomness account committed. Please create a new box.',
+            });
+        }
+
+        console.log(`   Randomness account: ${box.randomness_account}`);
+
         // Convert addresses to PublicKeys
         const ownerPubkey = new PublicKey(ownerWallet);
         const paymentTokenMintPubkey = new PublicKey(project.payment_token_mint);
+        const randomnessAccountPubkey = new PublicKey(box.randomness_account);
 
         // Derive PDAs
         const [projectConfigPDA] = deriveProjectConfigPDAStandalone(new PublicKey(config.programId), projectId);
@@ -1137,64 +1209,59 @@ router.post('/build-reveal-box-tx', async (req, res) => {
         console.log(`   Luck interval: ${luckIntervalSeconds} seconds`);
         console.log(`   Calculated luck: ${calculatedLuck}/60`);
 
-        // Generate random percentage (0-100)
-        // TODO: In production, integrate Switchboard VRF for provable randomness
-        // For now, using crypto.randomInt for testing
-        const crypto = await import('crypto');
-        const randomPercentage = crypto.randomInt(0, 10001) / 100; // 0.00 to 100.00
+        // ========================================
+        // SWITCHBOARD VRF: Create reveal instruction
+        // ========================================
+        console.log(`\n🎰 Creating Switchboard VRF reveal instruction...`);
 
-        console.log(`   Random percentage: ${randomPercentage.toFixed(2)}%`);
+        // Load the existing randomness account
+        const randomness = await loadRandomness(provider, randomnessAccountPubkey, config.network);
 
-        // Calculate reward based on luck and randomness
-        const { rewardAmount, tierName, tierId } = calculateRewardTier(
-            calculatedLuck,
-            randomPercentage,
-            parseInt(project.box_price)
-        );
+        // Create Switchboard reveal instruction - pass owner as payer and network for crossbar fallback
+        const revealIx = await createRevealInstruction(randomness, ownerPubkey, config.network);
 
-        console.log(`   Tier: ${tierName} (ID: ${tierId})`);
-        console.log(`   Reward: ${rewardAmount} (${rewardAmount / Math.pow(10, project.payment_token_decimals)} ${project.payment_token_symbol})`);
+        // ========================================
+        // BUILD COMBINED TRANSACTION
+        // ========================================
+        console.log(`\n📝 Building combined reveal transaction...`);
 
-        // Check vault balance for non-dud rewards
-        if (rewardAmount > 0) {
-            const vaultAccountInfo = await connection.getAccountInfo(vaultTokenAccount);
-            if (vaultAccountInfo) {
-                // Use BigInt to handle large token amounts safely (avoids 53-bit limit)
-                const vaultBalanceBN = new BN(vaultAccountInfo.data.subarray(64, 72), 'le');
-                const rewardBN = new BN(rewardAmount);
-                if (vaultBalanceBN.lt(rewardBN)) {
-                    console.warn(`   ⚠️  Vault balance (${vaultBalanceBN.toString()}) less than reward (${rewardAmount})`);
-                    // Don't fail - the smart contract will handle this
-                }
-            }
-        }
+        const transaction = new Transaction();
 
-        // Build reveal transaction
+        // 1. Switchboard reveal instruction (reveals the committed randomness)
+        transaction.add(revealIx);
+        console.log(`   Added: Switchboard reveal instruction`);
+
+        // 2. Our program's reveal_box instruction (reads randomness from account)
         const projectIdBN = new BN(projectId);
         const boxIdBN = new BN(boxId);
 
-        const revealTx = await program.methods
+        const revealBoxTx = await program.methods
             .revealBox(projectIdBN, boxIdBN)
             .accounts({
                 owner: ownerPubkey,
                 projectConfig: projectConfigPDA,
                 boxInstance: boxInstancePDA,
                 vaultTokenAccount: vaultTokenAccount,
+                randomnessAccount: randomnessAccountPubkey,
             })
             .transaction();
 
+        transaction.add(...revealBoxTx.instructions);
+        console.log(`   Added: reveal_box instruction with randomness account`);
+
         // Get recent blockhash
         const { blockhash } = await connection.getLatestBlockhash();
-        revealTx.recentBlockhash = blockhash;
-        revealTx.feePayer = ownerPubkey;
+        transaction.recentBlockhash = blockhash;
+        transaction.feePayer = ownerPubkey;
 
         // Serialize transaction
-        const serializedTransaction = revealTx.serialize({
+        const serializedTransaction = transaction.serialize({
             requireAllSignatures: false,
             verifySignatures: false,
         }).toString('base64');
 
-        console.log(`✅ Reveal transaction built successfully`);
+        console.log(`\n✅ Reveal transaction built successfully with Switchboard VRF!`);
+        console.log(`   Total instructions: ${transaction.instructions.length}`);
 
         return res.json({
             success: true,
@@ -1202,17 +1269,11 @@ router.post('/build-reveal-box-tx', async (req, res) => {
             projectId,
             boxId,
             boxInstancePDA: boxInstancePDA.toString(),
+            randomnessAccount: box.randomness_account,
             luckScore: calculatedLuck,
             holdTimeSeconds,
-            randomPercentage,
-            reward: {
-                amount: rewardAmount,
-                formatted: rewardAmount / Math.pow(10, project.payment_token_decimals),
-                symbol: project.payment_token_symbol,
-                tierName,
-                tierId,
-            },
             network: config.network,
+            message: 'Randomness will be read from Switchboard VRF on-chain. Reward calculated after reveal.',
         });
 
     } catch (error) {
@@ -1328,6 +1389,11 @@ router.post('/confirm-reveal', async (req, res) => {
                 box_result: rewardTier + 1, // 1=dud, 2=rebate, 3=break-even, 4=profit, 5=jackpot
                 payout_amount: rewardAmount,
                 opened_at: new Date().toISOString(),
+                // New verification columns
+                reveal_tx_signature: signature,
+                luck_value: luck,
+                max_luck: 60, // Max luck score is always 60
+                random_percentage: randomPercentage * 100, // Store as percentage (0-100)
             })
             .eq('project_id', project.id)
             .eq('box_number', boxId);
@@ -1630,11 +1696,12 @@ router.post('/confirm-settle', async (req, res) => {
             throw new Error('Box not found');
         }
 
-        // Update box settled_at timestamp
+        // Update box settled_at timestamp and settle transaction signature
         const { error: boxUpdateError } = await supabase
             .from('boxes')
             .update({
                 settled_at: new Date().toISOString(),
+                settle_tx_signature: signature,
             })
             .eq('project_id', project.id)
             .eq('box_number', boxId);

@@ -123,7 +123,7 @@ Get project details by ID.
     "vault_authority_pda": "AuthorityPdaAddress...",
     "vault_token_account": "TokenAccountAddress...",
     "box_price": 1000000000,
-    "max_boxes": 1000,
+    "max_boxes": 99999,
     "boxes_created": 0,
     "is_active": true,
     "is_paused": false,

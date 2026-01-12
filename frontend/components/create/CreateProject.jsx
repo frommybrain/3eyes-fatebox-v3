@@ -15,10 +15,12 @@ import {
     DegenInput,
     DegenTextarea,
     DegenLoadingState,
+    useToast,
 } from '@/components/ui';
 
 export default function CreateProject() {
     const router = useRouter();
+    const { toast } = useToast();
     const { publicKey, connected, sendTransaction } = useWallet();
     const { connection } = useConnection();
     const { config, configLoading } = useNetworkStore();
@@ -120,7 +122,7 @@ export default function CreateProject() {
                     description: formData.description,
                     vault_wallet: publicKey.toString(),
                     box_price: Math.floor(parseFloat(formData.boxPrice) * Math.pow(10, formData.paymentTokenDecimals)),
-                    max_boxes: 1000,
+                    max_boxes: 99999,
                     is_active: true,
                     payment_token_mint: formData.paymentTokenMint,
                     payment_token_symbol: formData.paymentTokenSymbol,
@@ -205,12 +207,10 @@ export default function CreateProject() {
             }
 
             // Success!
-            alert(
-                `Project "${formData.name}" created successfully!\n\n` +
-                `Subdomain: ${fullSubdomain}.degenbox.fun\n` +
-                `Transaction: ${signature}\n\n` +
-                `View on Solana Explorer: ${confirmResult.explorerUrl || `https://explorer.solana.com/tx/${signature}?cluster=${config.network}`}`
-            );
+            toast.success(`Project "${formData.name}" created successfully!`, {
+                title: 'Project Created',
+                duration: 6000,
+            });
             router.push('/dashboard');
 
         } catch (error) {
@@ -236,7 +236,10 @@ export default function CreateProject() {
                 }
             }
 
-            alert(`Failed to create project: ${error.message}\n\nPlease try again.`);
+            toast.error(error.message || 'Failed to create project. Please try again.', {
+                title: 'Creation Failed',
+                duration: 6000,
+            });
             setStep(2);
         }
     };

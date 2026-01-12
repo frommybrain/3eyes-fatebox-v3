@@ -32,10 +32,12 @@ app.get('/health', (req, res) => {
 import projectRoutes from './routes/projects.js';
 import vaultRoutes from './routes/vault.js';
 import programRoutes from './routes/program.js';
+import adminRoutes from './routes/admin.js';
 
 app.use('/api/projects', projectRoutes);
 app.use('/api/vault', vaultRoutes);
 app.use('/api/program', programRoutes);
+app.use('/api/admin', adminRoutes);
 
 // 404 handler
 app.use((req, res) => {

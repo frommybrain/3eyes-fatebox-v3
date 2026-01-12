@@ -3,6 +3,7 @@ import "./globals.css";
 import Header from "@/components/ui/header";
 import WalletProvider from "@/components/wallet/WalletProvider";
 import NetworkInitializer from "@/components/providers/NetworkInitializer";
+import { DegenToastProvider } from "@/components/ui";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,8 +28,10 @@ export default function RootLayout({ children }) {
       >
         <NetworkInitializer>
           <WalletProvider>
-            <Header />
-            {children}
+            <DegenToastProvider>
+              <Header />
+              {children}
+            </DegenToastProvider>
           </WalletProvider>
         </NetworkInitializer>
       </body>

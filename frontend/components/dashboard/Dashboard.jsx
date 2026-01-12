@@ -1,7 +1,7 @@
 // components/dashboard/Dashboard.jsx
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useTransition, useOptimistic } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { Transaction } from '@solana/web3.js';
@@ -23,6 +23,7 @@ import {
     DegenLoadingState,
     DegenEmptyState,
     CardDropdown,
+    useToast,
 } from '@/components/ui';
 
 export default function Dashboard() {
@@ -154,48 +155,51 @@ function MyProjectsTab({ projects, projectsLoading, projectsError, config }) {
 }
 
 function MyBoxesTab({ walletAddress, config }) {
-    const { publicKey, sendTransaction, signTransaction } = useWallet();
+    const { publicKey, signTransaction } = useWallet();
     const { connection } = useConnection();
     const [boxesData, setBoxesData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [refreshKey, setRefreshKey] = useState(0);
+    const [isPending, startTransition] = useTransition();
 
     const platformDomain = config?.network === 'devnet' ? 'degenbox.fun' : 'degenbox.fun';
 
-    // Refresh boxes data
-    const refreshBoxes = useCallback(() => {
-        setRefreshKey(prev => prev + 1);
-    }, []);
-
-    useEffect(() => {
-        async function fetchUserBoxes() {
-            if (!walletAddress) {
-                setLoading(false);
-                return;
-            }
-
-            setLoading(true);
-            try {
-                const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
-                const response = await fetch(`${backendUrl}/api/projects/boxes/by-owner/${walletAddress}`);
-                const data = await response.json();
-
-                if (data.success) {
-                    setBoxesData(data);
-                } else {
-                    setError(data.error || 'Failed to fetch boxes');
-                }
-            } catch (err) {
-                console.error('Error fetching boxes:', err);
-                setError('Failed to connect to server');
-            } finally {
-                setLoading(false);
-            }
+    // Fetch boxes data
+    const fetchUserBoxes = useCallback(async () => {
+        if (!walletAddress) {
+            setLoading(false);
+            return;
         }
 
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+            const response = await fetch(`${backendUrl}/api/projects/boxes/by-owner/${walletAddress}`);
+            const data = await response.json();
+
+            if (data.success) {
+                setBoxesData(data);
+            } else {
+                setError(data.error || 'Failed to fetch boxes');
+            }
+        } catch (err) {
+            console.error('Error fetching boxes:', err);
+            setError('Failed to connect to server');
+        } finally {
+            setLoading(false);
+        }
+    }, [walletAddress]);
+
+    // Refresh boxes with transition (non-blocking update)
+    const refreshBoxes = useCallback(() => {
+        startTransition(() => {
+            fetchUserBoxes();
+        });
+    }, [fetchUserBoxes]);
+
+    // Initial load
+    useEffect(() => {
         fetchUserBoxes();
-    }, [walletAddress, refreshKey]);
+    }, [fetchUserBoxes]);
 
     if (loading) {
         return <DegenLoadingState text="Loading your boxes..." />;
@@ -220,7 +224,7 @@ function MyBoxesTab({ walletAddress, config }) {
     }
 
     return (
-        <div className="space-y-8">
+        <div className={`space-y-8 transition-opacity duration-150 ${isPending ? 'opacity-70' : 'opacity-100'}`}>
             {/* Summary */}
             <DegenCard variant="default" padding="md">
                 <div className="flex items-center justify-between">
@@ -230,6 +234,11 @@ function MyBoxesTab({ walletAddress, config }) {
                             {boxesData.totalBoxes} box{boxesData.totalBoxes !== 1 ? 'es' : ''} across {boxesData.projectCount} project{boxesData.projectCount !== 1 ? 's' : ''}
                         </p>
                     </div>
+                    {isPending && (
+                        <div className="text-degen-text-muted text-sm animate-pulse">
+                            Updating...
+                        </div>
+                    )}
                 </div>
             </DegenCard>
 
@@ -241,7 +250,6 @@ function MyBoxesTab({ walletAddress, config }) {
                     platformDomain={platformDomain}
                     walletAddress={walletAddress}
                     publicKey={publicKey}
-                    sendTransaction={sendTransaction}
                     signTransaction={signTransaction}
                     connection={connection}
                     onRefresh={refreshBoxes}
@@ -251,7 +259,7 @@ function MyBoxesTab({ walletAddress, config }) {
     );
 }
 
-function ProjectBoxesGroup({ projectGroup, platformDomain, walletAddress, publicKey, sendTransaction, signTransaction, connection, onRefresh }) {
+function ProjectBoxesGroup({ projectGroup, platformDomain, walletAddress, publicKey, signTransaction, connection, onRefresh }) {
     const { project, boxes } = projectGroup;
 
     const projectUrl = typeof window !== 'undefined' && window.location.hostname.includes('localhost')
@@ -292,7 +300,7 @@ function ProjectBoxesGroup({ projectGroup, platformDomain, walletAddress, public
 
             {/* Boxes Grid */}
             <div className="p-6">
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                     {boxes.map((box) => (
                         <BoxCard
                             key={box.id}
@@ -300,7 +308,6 @@ function ProjectBoxesGroup({ projectGroup, platformDomain, walletAddress, public
                             project={project}
                             walletAddress={walletAddress}
                             publicKey={publicKey}
-                            sendTransaction={sendTransaction}
                             signTransaction={signTransaction}
                             connection={connection}
                             onRefresh={onRefresh}
@@ -312,16 +319,165 @@ function ProjectBoxesGroup({ projectGroup, platformDomain, walletAddress, public
     );
 }
 
-function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, signTransaction, connection, onRefresh, network = 'devnet' }) {
+// Pie clock timer component for expiry countdown
+function ExpiryPieClock({ expiryCountdown, formatExpiryTime }) {
+    const [showTooltip, setShowTooltip] = useState(false);
+
+    // Calculate remaining time as a fraction (1 = full, 0 = empty)
+    const totalSeconds = 60 * 60; // 1 hour
+    const remaining = expiryCountdown > 0 ? (expiryCountdown / totalSeconds) : 0;
+
+    // SVG arc calculation for pie slice
+    const size = 20;
+    const center = size / 2;
+    const radius = 7;
+
+    // Calculate the arc path for REMAINING time (black portion)
+    // Starts at 12 o'clock, draws counter-clockwise to show remaining time
+    // 60 mins = full black circle, 30 mins = left half black, 15 mins = top-left quarter black
+    const getRemainingArcPath = () => {
+        if (remaining <= 0) return '';
+        if (remaining >= 1) {
+            // Full circle
+            return `M ${center} ${center - radius} A ${radius} ${radius} 0 1 1 ${center - 0.001} ${center - radius} Z`;
+        }
+
+        // Draw arc counter-clockwise from 12 o'clock for remaining time
+        // This makes the black portion shrink clockwise as time passes
+        const angle = remaining * 360;
+        const radians = (-angle - 90) * (Math.PI / 180); // Negative for counter-clockwise
+        const x = center + radius * Math.cos(radians);
+        const y = center + radius * Math.sin(radians);
+        const largeArc = angle > 180 ? 1 : 0;
+
+        // Draw counter-clockwise (sweep-flag = 0)
+        return `M ${center} ${center} L ${center} ${center - radius} A ${radius} ${radius} 0 ${largeArc} 0 ${x} ${y} Z`;
+    };
+
+    const handleClick = (e) => {
+        e.stopPropagation();
+        setShowTooltip(prev => !prev);
+    };
+
+    const handleClose = (e) => {
+        e.stopPropagation();
+        setShowTooltip(false);
+    };
+
+    return (
+        <div className="relative">
+            <button
+                onClick={handleClick}
+                className="w-5 h-5 flex items-center justify-center cursor-pointer"
+            >
+                <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+                    {/* Background circle - white (elapsed/empty time) */}
+                    <circle
+                        cx={center}
+                        cy={center}
+                        r={radius}
+                        fill="#ffffff"
+                    />
+                    {/* Remaining time pie slice - black, shrinks clockwise as time passes */}
+                    <path
+                        d={getRemainingArcPath()}
+                        fill="#1a1a1a"
+                    />
+                    {/* Border circle */}
+                    <circle
+                        cx={center}
+                        cy={center}
+                        r={radius}
+                        fill="none"
+                        stroke="#1a1a1a"
+                        strokeWidth="1"
+                    />
+                </svg>
+            </button>
+            {showTooltip && (
+                <>
+                    <div className="fixed inset-0 z-10" onClick={handleClose} />
+                    <div className="absolute right-0 top-full mt-1 z-20 min-w-[100px] bg-degen-white border border-degen-black shadow-sm">
+                        <div className="px-3 py-2 text-sm text-degen-black">
+                            {formatExpiryTime(expiryCountdown)} remaining
+                        </div>
+                    </div>
+                </>
+            )}
+        </div>
+    );
+}
+
+function BoxCard({ box, project, walletAddress, publicKey, signTransaction, connection, onRefresh, network = 'devnet' }) {
+    const { toast } = useToast();
     const [isProcessing, setIsProcessing] = useState(false);
+    const [processingStep, setProcessingStep] = useState(null); // 'commit' | 'reveal' | 'claim'
     const [revealResult, setRevealResult] = useState(null);
     const [error, setError] = useState(null);
+    const [revealCountdown, setRevealCountdown] = useState(null); // seconds until reveal enabled
+    const [expiryCountdown, setExpiryCountdown] = useState(null); // seconds until commit expires
+    const [, startBoxTransition] = useTransition();
 
-    const isPending = box.box_result === 0;
-    // box_result: 1=dud, 2=rebate, 3=break-even, 4=profit, 5=jackpot
-    const isRevealed = box.box_result > 0;
-    const hasReward = box.payout_amount > 0;
-    const isJackpot = box.box_result === 5;
+    // Optimistic box state for instant UI feedback
+    const [optimisticBox, setOptimisticBox] = useOptimistic(
+        box,
+        (currentBox, update) => ({ ...currentBox, ...update })
+    );
+
+    // Use optimistic state for rendering
+    const displayBox = optimisticBox;
+
+    // Box states (using optimistic state)
+    const isRevealed = displayBox.box_result > 0;
+    const isCommitted = displayBox.randomness_committed && !isRevealed;
+    const isPending = displayBox.box_result === 0 && !displayBox.randomness_committed;
+    const hasReward = displayBox.payout_amount > 0;
+    const isJackpot = displayBox.box_result === 5;
+
+    // Check if commit has expired (1 hour limit)
+    const isExpired = isCommitted && box.committed_at &&
+        (Date.now() - new Date(box.committed_at).getTime() > 60 * 60 * 1000);
+
+    // Countdown timers for committed boxes
+    useEffect(() => {
+        if (!isCommitted || !box.committed_at) return;
+
+        const committedTime = new Date(box.committed_at).getTime();
+        const REVEAL_DELAY = 30 * 1000; // 30 seconds before reveal enabled (oracles need time to process)
+        const EXPIRY_TIME = 60 * 60 * 1000; // 1 hour
+
+        const updateCountdowns = () => {
+            const now = Date.now();
+            const timeSinceCommit = now - committedTime;
+
+            // Reveal countdown (10 seconds after commit)
+            if (timeSinceCommit < REVEAL_DELAY) {
+                setRevealCountdown(Math.ceil((REVEAL_DELAY - timeSinceCommit) / 1000));
+            } else {
+                setRevealCountdown(0);
+            }
+
+            // Expiry countdown
+            const timeUntilExpiry = EXPIRY_TIME - timeSinceCommit;
+            if (timeUntilExpiry > 0) {
+                setExpiryCountdown(Math.ceil(timeUntilExpiry / 1000));
+            } else {
+                setExpiryCountdown(0);
+            }
+        };
+
+        updateCountdowns();
+        const interval = setInterval(updateCountdowns, 1000);
+        return () => clearInterval(interval);
+    }, [isCommitted, box.committed_at]);
+
+    // Format expiry countdown as MM:SS
+    const formatExpiryTime = (seconds) => {
+        if (seconds <= 0) return 'Expired';
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
 
     // Format payout amount
     const payoutFormatted = box.payout_amount
@@ -408,18 +564,24 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, sign
         }
     };
 
-    // Handle reveal box
-    const handleReveal = async () => {
+    // Handle commit box (Open Box - step 1)
+    const handleCommit = async () => {
         if (!publicKey || !signTransaction) return;
 
         setIsProcessing(true);
+        setProcessingStep('commit');
         setError(null);
+
+        // Optimistic update: immediately show as "committed" state (wrapped in transition)
+        startBoxTransition(() => {
+            setOptimisticBox({ randomness_committed: true, committed_at: new Date().toISOString() });
+        });
 
         try {
             const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
 
-            // Step 1: Build reveal transaction
-            const buildResponse = await fetch(`${backendUrl}/api/program/build-reveal-box-tx`, {
+            // Step 1: Build commit transaction
+            const buildResponse = await fetch(`${backendUrl}/api/program/build-commit-box-tx`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -436,6 +598,106 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, sign
 
             // Step 2: Deserialize transaction
             const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
+
+            // Step 3: Add randomness keypair as signer (base64 encoded from backend)
+            const { Keypair } = await import('@solana/web3.js');
+            const secretKeyBytes = Buffer.from(buildResult.randomnessKeypair, 'base64');
+            const randomnessKeypair = Keypair.fromSecretKey(secretKeyBytes);
+
+            // Get fresh blockhash
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            transaction.recentBlockhash = blockhash;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+            transaction.feePayer = publicKey;
+
+            // Partially sign with randomness keypair first
+            transaction.partialSign(randomnessKeypair);
+
+            // Step 4: Sign with user's wallet
+            const signedTransaction = await signTransaction(transaction);
+
+            // Step 5: Send the signed transaction
+            const signature = await connection.sendRawTransaction(signedTransaction.serialize(), {
+                skipPreflight: true,
+                preflightCommitment: 'confirmed',
+            });
+
+            // Step 6: Wait for confirmation
+            await connection.confirmTransaction(signature, 'confirmed');
+
+            // Step 7: Confirm with backend
+            await fetch(`${backendUrl}/api/program/confirm-commit`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    signature,
+                    randomnessAccount: buildResult.randomnessAccount,
+                }),
+            });
+
+            // Refresh boxes list to show committed state
+            if (onRefresh) onRefresh();
+
+        } catch (err) {
+            console.error('Error committing box:', err);
+            let errorMessage = err.message;
+            if (err.logs) {
+                console.error('Transaction logs:', err.logs);
+            }
+            setError(errorMessage);
+        } finally {
+            setIsProcessing(false);
+            setProcessingStep(null);
+        }
+    };
+
+    // Handle reveal box (step 2 - after commit)
+    const handleReveal = async () => {
+        if (!publicKey || !signTransaction) return;
+
+        // Check if reveal is too soon (need to wait ~10 seconds for oracle)
+        if (revealCountdown > 0) {
+            setError(`Please wait ${revealCountdown} seconds for oracle...`);
+            return;
+        }
+
+        setIsProcessing(true);
+        setProcessingStep('reveal');
+        setError(null);
+
+        // Note: We don't optimistically update reveal since we don't know the result yet
+        // The result comes from the blockchain/mock, so we wait for the actual response
+
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+
+            // Step 1: Build reveal transaction
+            const buildResponse = await fetch(`${backendUrl}/api/program/build-reveal-box-tx`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    ownerWallet: walletAddress,
+                }),
+            });
+
+            const buildResult = await buildResponse.json();
+
+            if (!buildResult.success) {
+                // Check if expired
+                if (buildResult.expired) {
+                    setError('Reveal window expired - box is now a Dud');
+                    if (onRefresh) onRefresh();
+                    return;
+                }
+                throw new Error(buildResult.details || buildResult.error);
+            }
+
+            // Step 2: Deserialize transaction
+            const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
             const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
             transaction.recentBlockhash = blockhash;
             transaction.lastValidBlockHeight = lastValidBlockHeight;
@@ -445,14 +707,19 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, sign
             const signedTransaction = await signTransaction(transaction);
 
             // Step 4: Send the signed transaction
-            // Skip preflight to get actual on-chain error if simulation fails
             const signature = await connection.sendRawTransaction(signedTransaction.serialize(), {
-                skipPreflight: true,
+                skipPreflight: false, // Enable preflight to catch errors early
                 preflightCommitment: 'confirmed',
             });
 
-            // Step 5: Wait for confirmation
-            await connection.confirmTransaction(signature, 'confirmed');
+            // Step 5: Wait for confirmation and check for errors
+            const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+
+            // Check if transaction actually succeeded
+            if (confirmation.value?.err) {
+                console.error('Transaction failed:', confirmation.value.err);
+                throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+            }
 
             // Step 6: Confirm with backend to read on-chain reward
             const confirmResponse = await fetch(`${backendUrl}/api/program/confirm-reveal`, {
@@ -468,6 +735,14 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, sign
 
             const confirmResult = await confirmResponse.json();
             if (confirmResult.success && confirmResult.reward) {
+                // Optimistic update with reveal result (wrapped in transition)
+                startBoxTransition(() => {
+                    setOptimisticBox({
+                        box_result: confirmResult.reward?.tier || 1,
+                        payout_amount: confirmResult.reward?.payoutAmount || 0,
+                        randomness_committed: false
+                    });
+                });
                 setRevealResult(confirmResult.reward);
             }
 
@@ -476,7 +751,7 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, sign
 
         } catch (err) {
             console.error('Error revealing box:', err);
-            // Try to extract more useful error message
+
             let errorMessage = err.message;
             if (err.logs) {
                 console.error('Transaction logs:', err.logs);
@@ -485,19 +760,30 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, sign
             if (err.message?.includes('custom program error')) {
                 errorMessage = `Program error: ${err.message}`;
             }
+            // Provide helpful message for Switchboard errors
+            if (err.message?.includes('0x1780') || err.message?.includes('InvalidSecpSignature')) {
+                errorMessage = 'Switchboard oracle error. Please wait a few seconds and try again.';
+            }
             setError(errorMessage);
             setRevealResult(null);
         } finally {
             setIsProcessing(false);
+            setProcessingStep(null);
         }
     };
 
     // Handle claim reward (settle)
     const handleClaim = async () => {
-        if (!publicKey || !sendTransaction) return;
+        if (!publicKey || !signTransaction) return;
 
         setIsProcessing(true);
+        setProcessingStep('claim');
         setError(null);
+
+        // Optimistic update: immediately show as "claimed" state (wrapped in transition)
+        startBoxTransition(() => {
+            setOptimisticBox({ settled_at: new Date().toISOString() });
+        });
 
         try {
             const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
@@ -514,26 +800,36 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, sign
             });
 
             const buildResult = await buildResponse.json();
+
             if (!buildResult.success) {
                 throw new Error(buildResult.details || buildResult.error);
             }
 
-            // Step 2: Deserialize and sign transaction
+            // Step 2: Deserialize transaction and update blockhash
             const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
             const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
             transaction.recentBlockhash = blockhash;
             transaction.lastValidBlockHeight = lastValidBlockHeight;
 
-            // Step 3: Send transaction
-            const signature = await sendTransaction(transaction, connection, {
+            // Step 3: Sign with user's wallet
+            const signedTransaction = await signTransaction(transaction);
+
+            // Step 4: Send the signed transaction
+            const signature = await connection.sendRawTransaction(signedTransaction.serialize(), {
                 skipPreflight: false,
                 preflightCommitment: 'confirmed',
             });
 
-            // Step 4: Wait for confirmation
-            await connection.confirmTransaction(signature, 'confirmed');
+            // Step 5: Wait for confirmation and check for errors
+            const confirmation = await connection.confirmTransaction(signature, 'confirmed');
 
-            // Step 5: Confirm with backend
+            // Check if transaction actually succeeded
+            if (confirmation.value?.err) {
+                console.error('Transaction failed:', confirmation.value.err);
+                throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+            }
+
+            // Step 6: Confirm with backend
             await fetch(`${backendUrl}/api/program/confirm-settle`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -545,24 +841,37 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, sign
             });
 
             // Show success and refresh
-            alert(`Successfully claimed ${payoutFormatted} ${project.payment_token_symbol}!`);
+            toast.success(`Successfully claimed ${payoutFormatted} ${project.payment_token_symbol}!`);
             if (onRefresh) onRefresh();
 
         } catch (err) {
             console.error('Error claiming reward:', err);
-            setError(err.message);
+            // Extract more detailed error info if available
+            let errorMessage = err.message;
+            if (err.logs) {
+                console.error('Transaction logs:', err.logs);
+                errorMessage = err.logs.join('\n');
+            }
+            if (err.message?.includes('custom program error')) {
+                errorMessage = `Program error: ${err.message}`;
+            }
+            setError(errorMessage);
         } finally {
             setIsProcessing(false);
+            setProcessingStep(null);
         }
     };
 
-    // Get box icon
-    const getBoxIcon = () => {
-        if (isPending) return '';
-        if (isJackpot) return '';
-        if (box.box_result === 4) return ''; // Profit
-        if (hasReward) return '';
-        return ''; // Dud
+    // Get box status text (no emojis)
+    const getBoxStatusText = () => {
+        if (isProcessing) return 'Processing';
+        if (isExpired) return 'Expired';
+        if (isCommitted) return 'Opened';
+        if (isPending) return 'Sealed';
+        if (isJackpot) return 'JACKPOT';
+        if (box.box_result === 4) return 'Profit';
+        if (hasReward) return 'Winner';
+        return 'Dud';
     };
 
     // Get badge variant for tier
@@ -574,27 +883,39 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, sign
 
     const menuItems = getMenuItems();
 
+    // Calculate reveal button progress (for the loading bar effect) - 30 second delay
+    const revealProgress = revealCountdown !== null && revealCountdown > 0
+        ? ((30 - revealCountdown) / 30) * 100
+        : 100;
+
     return (
         <div
             className={`
                 relative p-4 text-center transition-all duration-100
                 border
                 ${isPending ? 'bg-degen-yellow/10 border-degen-yellow hover:bg-degen-yellow/20' : ''}
+                ${isCommitted && !isExpired ? 'bg-degen-yellow/10 border-degen-yellow hover:bg-degen-yellow/20' : ''}
+                ${isExpired ? 'bg-degen-feature/10 border-degen-feature' : ''}
                 ${isJackpot ? 'bg-degen-yellow/20 border-degen-yellow' : ''}
                 ${hasReward && !isJackpot ? 'bg-degen-green/10 border-degen-green hover:bg-degen-green/20' : ''}
-                ${!isPending && !hasReward ? 'bg-degen-container border-degen-black hover:bg-degen-white' : ''}
+                ${isRevealed && !hasReward ? 'bg-degen-container border-degen-black hover:bg-degen-white' : ''}
             `}
         >
-            {/* Proof Menu Dropdown */}
-            {menuItems.length > 0 && (
-                <div className="absolute top-1 right-1">
+            {/* Top right icons: Pie clock (for committed) + Proof Menu Dropdown */}
+            <div className="absolute top-1 right-1 flex items-center gap-1">
+                {/* Pie clock for committed boxes */}
+                {isCommitted && !isExpired && expiryCountdown !== null && expiryCountdown > 0 && (
+                    <ExpiryPieClock expiryCountdown={expiryCountdown} formatExpiryTime={formatExpiryTime} />
+                )}
+                {/* Proof Menu Dropdown */}
+                {menuItems.length > 0 && (
                     <CardDropdown items={menuItems} />
-                </div>
-            )}
+                )}
+            </div>
 
-            {/* Box Icon */}
-            <div className="text-2xl mb-2">
-                {isProcessing ? '⏳' : getBoxIcon()}
+            {/* Box Status Text (no emojis) */}
+            <div className="text-sm font-medium text-degen-text-muted mb-1 mt-2">
+                {getBoxStatusText()}
             </div>
             <p className="text-degen-black font-medium">Box #{box.box_number}</p>
 
@@ -603,6 +924,16 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, sign
                 <DegenBadge variant="warning" size="sm" className="mt-2">
                     Ready to Open
                 </DegenBadge>
+            ) : isExpired ? (
+                <DegenBadge variant="danger" size="sm" className="mt-2">
+                    Expired - Dud
+                </DegenBadge>
+            ) : isCommitted ? (
+                <div className="mt-2">
+                    <DegenBadge variant="warning" size="sm">
+                        Awaiting Reveal
+                    </DegenBadge>
+                </div>
             ) : (
                 <div className="mt-2">
                     <DegenBadge variant={getTierBadgeVariant()} size="sm">
@@ -626,16 +957,50 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, sign
             {/* Action Button */}
             <div className="mt-3">
                 {isPending ? (
+                    // Step 1: Open Box (commit randomness)
                     <DegenButton
-                        onClick={handleReveal}
+                        onClick={handleCommit}
                         disabled={isProcessing}
                         variant="primary"
                         size="sm"
                         fullWidth
                     >
-                        {isProcessing ? 'Opening...' : 'Open Box'}
+                        {isProcessing && processingStep === 'commit' ? 'Opening...' : 'Open Box'}
                     </DegenButton>
+                ) : isExpired ? (
+                    // Expired - show dud state
+                    <span className="text-degen-text-muted text-xs">Reveal window expired</span>
+                ) : isCommitted ? (
+                    // Step 2: Reveal Box (after commit) - with progress bar
+                    <div className="relative w-full">
+                        <button
+                            onClick={handleReveal}
+                            disabled={isProcessing || revealCountdown > 0}
+                            className={`
+                                relative w-full px-4 py-2 text-sm font-medium uppercase tracking-wider
+                                border border-degen-black overflow-hidden
+                                transition-all duration-100
+                                ${revealCountdown > 0 ? 'bg-degen-container text-degen-text-muted cursor-not-allowed' : 'bg-degen-yellow text-degen-black hover:bg-degen-black hover:text-degen-white'}
+                            `}
+                        >
+                            {/* Progress bar that fills from left to right */}
+                            {revealCountdown > 0 && (
+                                <div
+                                    className="absolute inset-y-0 left-0 bg-degen-yellow/60 transition-all duration-1000 ease-linear"
+                                    style={{ width: `${revealProgress}%` }}
+                                />
+                            )}
+                            <span className="relative z-10">
+                                {isProcessing && processingStep === 'reveal'
+                                    ? 'Revealing...'
+                                    : revealCountdown > 0
+                                        ? `Reveal in ${revealCountdown}s`
+                                        : 'Reveal Box'}
+                            </span>
+                        </button>
+                    </div>
                 ) : hasReward && !box.settled_at ? (
+                    // Revealed with reward - claim button
                     <DegenButton
                         onClick={handleClaim}
                         disabled={isProcessing}
@@ -643,11 +1008,13 @@ function BoxCard({ box, project, walletAddress, publicKey, sendTransaction, sign
                         size="sm"
                         fullWidth
                     >
-                        {isProcessing ? 'Claiming...' : 'Claim'}
+                        {isProcessing && processingStep === 'claim' ? 'Claiming...' : 'Claim'}
                     </DegenButton>
                 ) : hasReward ? (
+                    // Already claimed
                     <DegenBadge variant="success" size="sm">Claimed</DegenBadge>
                 ) : (
+                    // Revealed but no reward (dud)
                     <span className="text-degen-text-muted text-xs">No reward</span>
                 )}
             </div>

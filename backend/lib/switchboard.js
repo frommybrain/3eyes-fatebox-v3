@@ -3,20 +3,11 @@
 
 import { PublicKey, Keypair } from '@solana/web3.js';
 import * as anchor from '@coral-xyz/anchor';
-import { Queue, Randomness, State } from '@switchboard-xyz/on-demand';
-import { CrossbarClient, CrossbarNetwork, Gateway } from '@switchboard-xyz/common';
-import { getAssociatedTokenAddressSync } from '@solana/spl-token';
-import bs58 from 'bs58';
+import { Queue, Randomness } from '@switchboard-xyz/on-demand';
 import { getNetworkConfig } from './getNetworkConfig.js';
 
-// SPL Token constants
-const SOL_NATIVE_MINT = new PublicKey('So11111111111111111111111111111111111111112');
-const SPL_TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-const SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
-const SPL_SYSVAR_SLOT_HASHES_ID = new PublicKey('SysvarS1otHashes111111111111111111111111111');
-
 // Switchboard On-Demand Program IDs and Queues
-// Updated from: https://docs.switchboard.xyz/docs/switchboard/on-demand-randomness
+// From: https://docs.switchboard.xyz/docs/switchboard/on-demand-randomness
 const SWITCHBOARD_CONSTANTS = {
     devnet: {
         programId: new PublicKey('Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2'),
@@ -41,7 +32,10 @@ export function getSwitchboardConstants(network = 'devnet') {
     console.log(`   Program ID: ${constants.programId.toString()}`);
     console.log(`   Queue: ${constants.queue.toString()}`);
 
-    return constants;
+    return {
+        programId: constants.programId,
+        queue: constants.queue,
+    };
 }
 
 /**
@@ -119,7 +113,10 @@ export async function createCommitInstruction(randomness, network = 'devnet', au
 /**
  * Create a reveal instruction for revealing randomness
  * This should be called after waiting 5-10 seconds for oracles to process
- * Uses crossbar service as fallback when oracle's gateway is unavailable
+ * Uses SDK method which contacts the specific oracle that committed the randomness.
+ *
+ * NOTE: Devnet oracles can be unreliable (503 errors, timeouts). The function
+ * includes retry logic with exponential backoff for transient failures.
  *
  * @param {Object} randomness - Switchboard Randomness instance
  * @param {PublicKey} payer - The payer for the reveal transaction (buyer's wallet)
@@ -137,26 +134,37 @@ export async function createRevealInstruction(randomness, payer, network = 'devn
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            // Try the standard SDK method first
+            // IMPORTANT: Only use SDK method (revealIx) - DO NOT use crossbar fallback!
+            // The crossbar fetches from a DIFFERENT oracle than the one that committed,
+            // which causes InvalidSecpSignature errors (0x1780).
+            // The SDK method uses the original oracle that committed the randomness.
             let revealIx;
-            try {
-                console.log(`   Attempt ${attempt}: Trying standard revealIx...`);
-                revealIx = await randomness.revealIx(payer);
-            } catch (sdkError) {
-                // If the SDK method fails due to gateway issues, use crossbar fallback
-                const isGatewayError = sdkError.code === 'ECONNREFUSED' ||
-                    sdkError.code === 'ETIMEDOUT' ||
-                    sdkError.code === 'ENOTFOUND' ||
-                    sdkError.message?.includes('connect') ||
-                    sdkError.message?.includes('timeout') ||
-                    sdkError.message?.includes('fetchRandomnessReveal');
+            console.log(`   Attempt ${attempt}/${maxRetries}: Trying SDK revealIx...`);
 
-                if (isGatewayError) {
-                    console.log(`   Standard SDK failed (${sdkError.message}), trying crossbar fallback...`);
-                    revealIx = await createRevealInstructionWithCrossbar(randomness, payer, network);
-                } else {
-                    throw sdkError;
+            try {
+                revealIx = await randomness.revealIx(payer);
+                console.log(`   SDK revealIx succeeded!`);
+            } catch (sdkError) {
+                // Log the error but DON'T use crossbar - it will cause InvalidSecpSignature
+                console.log(`   SDK failed: ${sdkError.message}`);
+
+                // If it's a 503 or timeout, we should retry the SDK method with exponential backoff
+                const isRetryable = sdkError.message?.includes('503') ||
+                    sdkError.message?.includes('timeout') ||
+                    sdkError.message?.includes('ETIMEDOUT') ||
+                    sdkError.message?.includes('ECONNREFUSED') ||
+                    sdkError.message?.includes('Service Unavailable') ||
+                    sdkError.message?.includes('ENOTFOUND');
+
+                if (isRetryable && attempt < maxRetries) {
+                    // Delays for devnet: 3s, 6s, 9s
+                    const delayMs = attempt * 3000;
+                    console.log(`   Oracle unavailable. Waiting ${delayMs/1000}s before retry ${attempt + 1}/${maxRetries}...`);
+                    await new Promise(resolve => setTimeout(resolve, delayMs));
+                    continue; // Go to next attempt
                 }
+
+                throw sdkError;
             }
 
             // Replace any signer that matches the backend wallet with the buyer's wallet
@@ -189,17 +197,18 @@ export async function createRevealInstruction(randomness, payer, network = 'devn
                 error.code === 'ETIMEDOUT' ||
                 error.code === 'ENOTFOUND' ||
                 error.message?.includes('connect') ||
-                error.message?.includes('timeout');
+                error.message?.includes('timeout') ||
+                error.message?.includes('503') ||
+                error.message?.includes('Service Unavailable');
 
             if (isNetworkError && attempt < maxRetries) {
-                const delayMs = attempt * 2000;
+                const delayMs = attempt * 3000;
                 console.log(`[Switchboard] Network error (attempt ${attempt}/${maxRetries}), retrying in ${delayMs/1000}s...`);
-                console.log(`   Error: ${error.message}`);
                 await new Promise(resolve => setTimeout(resolve, delayMs));
             } else {
-                console.error(`[Switchboard] Error creating reveal instruction (attempt ${attempt}):`, error.message);
+                console.error(`[Switchboard] Error creating reveal instruction:`, error.message);
                 if (attempt >= maxRetries) {
-                    throw new Error(`Switchboard reveal failed after ${maxRetries} attempts. (${error.message})`);
+                    throw new Error(`Switchboard oracle unavailable after ${maxRetries} attempts. (${error.message})`);
                 }
                 throw error;
             }
@@ -207,86 +216,6 @@ export async function createRevealInstruction(randomness, payer, network = 'devn
     }
 
     throw lastError;
-}
-
-/**
- * Create reveal instruction using crossbar service as gateway
- * This is a fallback when the oracle's direct gateway is unavailable
- *
- * @param {Object} randomness - Switchboard Randomness instance
- * @param {PublicKey} payer - The payer for the transaction
- * @param {string} network - Network name
- * @returns {Promise<TransactionInstruction>} Reveal instruction
- */
-async function createRevealInstructionWithCrossbar(randomness, payer, network = 'devnet') {
-    console.log(`[Switchboard] Using crossbar fallback for reveal...`);
-
-    // Get crossbar gateway
-    const crossbar = CrossbarClient.default();
-    const crossbarNetwork = network === 'mainnet' || network === 'mainnet-beta'
-        ? CrossbarNetwork.SolanaMainnet
-        : CrossbarNetwork.SolanaDevnet;
-    crossbar.setNetwork(crossbarNetwork);
-
-    console.log(`   Fetching gateway from crossbar for ${crossbarNetwork}...`);
-    const gateway = await crossbar.fetchGateway();
-    console.log(`   Using gateway: ${gateway.gatewayUrl}`);
-
-    // Load randomness account data
-    const data = await randomness.loadData();
-    console.log(`   Randomness data loaded:`);
-    console.log(`     - Oracle: ${data.oracle.toString()}`);
-    console.log(`     - Queue: ${data.queue.toString()}`);
-    console.log(`     - Seed slot: ${data.seedSlot.toNumber()}`);
-
-    // Fetch reveal from crossbar gateway
-    const rpcEndpoint = randomness.program.provider.connection.rpcEndpoint;
-    console.log(`   Fetching reveal from gateway with RPC: ${rpcEndpoint}`);
-
-    const gatewayRevealResponse = await gateway.fetchRandomnessReveal({
-        randomnessAccount: randomness.pubkey,
-        slothash: bs58.encode(data.seedSlothash),
-        slot: data.seedSlot.toNumber(),
-        rpc: rpcEndpoint,
-    });
-
-    console.log(`   Gateway reveal response received`);
-    console.log(`     - Signature length: ${gatewayRevealResponse.signature?.length || 0}`);
-    console.log(`     - Recovery ID: ${gatewayRevealResponse.recovery_id}`);
-
-    // Build the reveal instruction manually
-    const stats = PublicKey.findProgramAddressSync(
-        [Buffer.from('OracleRandomnessStats'), data.oracle.toBuffer()],
-        randomness.program.programId
-    )[0];
-
-    const revealIx = randomness.program.instruction.randomnessReveal(
-        {
-            signature: Buffer.from(gatewayRevealResponse.signature, 'base64'),
-            recoveryId: gatewayRevealResponse.recovery_id,
-            value: gatewayRevealResponse.value,
-        },
-        {
-            accounts: {
-                randomness: randomness.pubkey,
-                oracle: data.oracle,
-                queue: data.queue,
-                stats,
-                authority: data.authority,
-                payer: payer || data.authority,
-                recentSlothashes: SPL_SYSVAR_SLOT_HASHES_ID,
-                systemProgram: anchor.web3.SystemProgram.programId,
-                rewardEscrow: getAssociatedTokenAddressSync(SOL_NATIVE_MINT, randomness.pubkey),
-                tokenProgram: SPL_TOKEN_PROGRAM_ID,
-                associatedTokenProgram: SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID,
-                wrappedSolMint: SOL_NATIVE_MINT,
-                programState: State.keyFromSeed(randomness.program),
-            },
-        }
-    );
-
-    console.log(`   Crossbar reveal instruction built successfully`);
-    return revealIx;
 }
 
 /**
@@ -309,9 +238,19 @@ export async function loadRandomness(provider, randomnessAccountPubkey, network 
 /**
  * Read randomness value from a revealed Switchboard account
  *
+ * Switchboard RandomnessAccountData structure (with 8-byte discriminator):
+ * - 0-8: discriminator (8 bytes)
+ * - 8-40: authority (32 bytes)
+ * - 40-72: queue (32 bytes)
+ * - 72-104: seed_slothash (32 bytes)
+ * - 104-112: seed_slot (8 bytes)
+ * - 112-144: oracle (32 bytes)
+ * - 144-152: reveal_slot (8 bytes)
+ * - 152-184: value (32 bytes) <- THIS IS THE ACTUAL RANDOMNESS
+ *
  * @param {Connection} connection - Solana connection
  * @param {PublicKey} randomnessAccountPubkey - Randomness account
- * @returns {Promise<Object>} { randomBytes, randomU32, randomPercentage }
+ * @returns {Promise<Object>} { randomBytes, randomU32, randomPercentage, revealSlot }
  */
 export async function readRandomnessValue(connection, randomnessAccountPubkey) {
     console.log(`[Switchboard] Reading randomness value from: ${randomnessAccountPubkey.toString()}`);
@@ -322,19 +261,29 @@ export async function readRandomnessValue(connection, randomnessAccountPubkey) {
         throw new Error('Randomness account not found');
     }
 
-    if (accountInfo.data.length < 40) {
-        throw new Error('Randomness not ready - account data too short');
+    if (accountInfo.data.length < 184) {
+        throw new Error('Randomness not ready - account data too short (need 184 bytes)');
     }
 
-    // Extract randomness bytes (after 8-byte discriminator)
-    const randomBytes = accountInfo.data.slice(8, 40); // 32 bytes of randomness
+    // Check reveal_slot at offset 144-152 (8 bytes, u64 little-endian)
+    const revealSlotBuffer = accountInfo.data.slice(144, 152);
+    const revealSlot = revealSlotBuffer.readBigUInt64LE(0);
 
-    // Convert first 4 bytes to u32 for percentage calculation
+    if (revealSlot === 0n) {
+        throw new Error('Randomness not revealed yet - reveal_slot is 0');
+    }
+
+    // Extract randomness value at offset 152-184 (32 bytes)
+    const randomBytes = accountInfo.data.slice(152, 184);
+
+    // Convert first 4 bytes to u32 for percentage calculation (matches on-chain logic)
     const randomU32 = Buffer.from(randomBytes.slice(0, 4)).readUInt32LE(0);
 
     // Convert to percentage (0.0 to 1.0)
     const randomPercentage = randomU32 / 0xFFFFFFFF;
 
+    console.log(`   Reveal slot: ${revealSlot}`);
+    console.log(`   Random bytes (first 8): ${randomBytes.slice(0, 8).toString('hex')}`);
     console.log(`   Random u32: ${randomU32}`);
     console.log(`   Random percentage: ${(randomPercentage * 100).toFixed(4)}%`);
 
@@ -342,6 +291,7 @@ export async function readRandomnessValue(connection, randomnessAccountPubkey) {
         randomBytes,
         randomU32,
         randomPercentage,
+        revealSlot: Number(revealSlot),
     };
 }
 
@@ -369,11 +319,10 @@ export async function waitForRandomness(
         try {
             const result = await readRandomnessValue(connection, randomnessAccountPubkey);
 
-            // Check if the randomness is actually revealed (non-zero)
-            if (result.randomU32 !== 0) {
-                console.log(`[Switchboard] Randomness revealed after ${(Date.now() - startTime) / 1000}s`);
-                return result;
-            }
+            // readRandomnessValue already checks reveal_slot > 0, so if we get here it's valid
+            // Note: randomU32 could legitimately be 0 (though extremely rare: 1 in 4 billion)
+            console.log(`[Switchboard] Randomness revealed after ${(Date.now() - startTime) / 1000}s`);
+            return result;
         } catch (error) {
             // Continue polling if not ready
             console.log(`   Still waiting... (${Math.floor((Date.now() - startTime) / 1000)}s)`);

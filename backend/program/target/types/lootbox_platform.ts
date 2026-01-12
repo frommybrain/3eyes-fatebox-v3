@@ -14,11 +14,183 @@ export type LootboxPlatform = {
   },
   "instructions": [
     {
+      "name": "closeProject",
+      "docs": [
+        "Close a project and reclaim rent (only if no pending boxes)"
+      ],
+      "discriminator": [
+        117,
+        209,
+        53,
+        106,
+        93,
+        55,
+        112,
+        49
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "projectConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  106,
+                  101,
+                  99,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "projectId"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vaultTokenAccount",
+          "docs": [
+            "Vault must be empty to close"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "projectId",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "commitBox",
+      "docs": [
+        "Commit randomness for a box (user opens box)",
+        "Called when user decides to open their box",
+        "Freezes luck at commit time and stores Switchboard randomness account"
+      ],
+      "discriminator": [
+        95,
+        86,
+        24,
+        152,
+        175,
+        101,
+        147,
+        191
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true
+        },
+        {
+          "name": "platformConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "projectConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  106,
+                  101,
+                  99,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "projectId"
+              }
+            ]
+          }
+        },
+        {
+          "name": "boxInstance",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  120
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "projectId"
+              },
+              {
+                "kind": "arg",
+                "path": "boxId"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "projectId",
+          "type": "u64"
+        },
+        {
+          "name": "boxId",
+          "type": "u64"
+        },
+        {
+          "name": "randomnessAccount",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
       "name": "createBox",
       "docs": [
         "Create a new box (user purchases box)",
         "Transfers payment from buyer to vault",
-        "Stores the Switchboard randomness account for later reveal"
+        "Box is created in \"pending\" state - randomness committed later when user opens"
       ],
       "discriminator": [
         108,
@@ -35,6 +207,33 @@ export type LootboxPlatform = {
           "name": "buyer",
           "writable": true,
           "signer": true
+        },
+        {
+          "name": "platformConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "projectConfig",
@@ -85,10 +284,68 @@ export type LootboxPlatform = {
         {
           "name": "projectId",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initializePlatformConfig",
+      "docs": [
+        "Initialize the platform configuration (one-time setup by admin)",
+        "This creates a global config PDA that stores all tunable parameters"
+      ],
+      "discriminator": [
+        23,
+        52,
+        237,
+        53,
+        176,
+        235,
+        3,
+        187
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
         },
         {
-          "name": "randomnessAccount",
-          "type": "pubkey"
+          "name": "platformConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "luckTimeInterval",
+          "type": "i64"
         }
       ]
     },
@@ -113,6 +370,33 @@ export type LootboxPlatform = {
           "name": "owner",
           "writable": true,
           "signer": true
+        },
+        {
+          "name": "platformConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "projectConfig",
@@ -219,7 +503,7 @@ export type LootboxPlatform = {
       "docs": [
         "Reveal box with Switchboard VRF randomness",
         "Reads randomness from Switchboard on-demand account",
-        "Calculates luck based on hold time and determines reward"
+        "Uses luck that was frozen at commit time"
       ],
       "discriminator": [
         73,
@@ -237,7 +521,35 @@ export type LootboxPlatform = {
           "signer": true
         },
         {
+          "name": "platformConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "projectConfig",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -423,6 +735,253 @@ export type LootboxPlatform = {
       ]
     },
     {
+      "name": "transferPlatformAdmin",
+      "docs": [
+        "Transfer platform admin to new wallet (safety feature)"
+      ],
+      "discriminator": [
+        202,
+        249,
+        158,
+        13,
+        232,
+        161,
+        17,
+        72
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "platformConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "newAdmin",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "updatePlatformConfig",
+      "docs": [
+        "Update platform configuration (admin only)",
+        "Allows adjusting probabilities and payouts without redeploying"
+      ],
+      "discriminator": [
+        195,
+        60,
+        76,
+        129,
+        146,
+        45,
+        67,
+        143
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "platformConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "baseLuck",
+          "type": {
+            "option": "u8"
+          }
+        },
+        {
+          "name": "maxLuck",
+          "type": {
+            "option": "u8"
+          }
+        },
+        {
+          "name": "luckTimeInterval",
+          "type": {
+            "option": "i64"
+          }
+        },
+        {
+          "name": "payoutDud",
+          "type": {
+            "option": "u32"
+          }
+        },
+        {
+          "name": "payoutRebate",
+          "type": {
+            "option": "u32"
+          }
+        },
+        {
+          "name": "payoutBreakeven",
+          "type": {
+            "option": "u32"
+          }
+        },
+        {
+          "name": "payoutProfit",
+          "type": {
+            "option": "u32"
+          }
+        },
+        {
+          "name": "payoutJackpot",
+          "type": {
+            "option": "u32"
+          }
+        },
+        {
+          "name": "tier1MaxLuck",
+          "type": {
+            "option": "u8"
+          }
+        },
+        {
+          "name": "tier1Dud",
+          "type": {
+            "option": "u16"
+          }
+        },
+        {
+          "name": "tier1Rebate",
+          "type": {
+            "option": "u16"
+          }
+        },
+        {
+          "name": "tier1Breakeven",
+          "type": {
+            "option": "u16"
+          }
+        },
+        {
+          "name": "tier1Profit",
+          "type": {
+            "option": "u16"
+          }
+        },
+        {
+          "name": "tier2MaxLuck",
+          "type": {
+            "option": "u8"
+          }
+        },
+        {
+          "name": "tier2Dud",
+          "type": {
+            "option": "u16"
+          }
+        },
+        {
+          "name": "tier2Rebate",
+          "type": {
+            "option": "u16"
+          }
+        },
+        {
+          "name": "tier2Breakeven",
+          "type": {
+            "option": "u16"
+          }
+        },
+        {
+          "name": "tier2Profit",
+          "type": {
+            "option": "u16"
+          }
+        },
+        {
+          "name": "tier3Dud",
+          "type": {
+            "option": "u16"
+          }
+        },
+        {
+          "name": "tier3Rebate",
+          "type": {
+            "option": "u16"
+          }
+        },
+        {
+          "name": "tier3Breakeven",
+          "type": {
+            "option": "u16"
+          }
+        },
+        {
+          "name": "tier3Profit",
+          "type": {
+            "option": "u16"
+          }
+        },
+        {
+          "name": "paused",
+          "type": {
+            "option": "bool"
+          }
+        }
+      ]
+    },
+    {
       "name": "updateProject",
       "docs": [
         "Update project settings (pause/resume, change box price)"
@@ -490,7 +1049,7 @@ export type LootboxPlatform = {
       "name": "withdrawEarnings",
       "docs": [
         "Project owner withdraws earnings from vault",
-        "Pays withdrawal fee in $DEGENBOX to platform"
+        "Available balance is calculated off-chain (vault balance minus reserved for unopened boxes)"
       ],
       "discriminator": [
         6,
@@ -598,6 +1157,19 @@ export type LootboxPlatform = {
       ]
     },
     {
+      "name": "platformConfig",
+      "discriminator": [
+        160,
+        78,
+        128,
+        0,
+        248,
+        83,
+        230,
+        160
+      ]
+    },
+    {
       "name": "projectConfig",
       "discriminator": [
         187,
@@ -649,18 +1221,18 @@ export type LootboxPlatform = {
     },
     {
       "code": 6007,
+      "name": "notPlatformAdmin",
+      "msg": "Not platform admin"
+    },
+    {
+      "code": 6008,
       "name": "insufficientVaultBalance",
       "msg": "Insufficient vault balance"
     },
     {
-      "code": 6008,
-      "name": "withdrawalExceedsAvailable",
-      "msg": "Withdrawal amount exceeds available balance"
-    },
-    {
       "code": 6009,
       "name": "insufficientFeeBalance",
-      "msg": "Insufficient $DEGENBOX for withdrawal fee"
+      "msg": "Insufficient platform token balance for withdrawal fee"
     },
     {
       "code": 6010,
@@ -684,8 +1256,28 @@ export type LootboxPlatform = {
     },
     {
       "code": 6014,
+      "name": "randomnessAlreadyCommitted",
+      "msg": "Randomness already committed for this box"
+    },
+    {
+      "code": 6015,
       "name": "invalidRandomnessAccount",
       "msg": "Invalid randomness account"
+    },
+    {
+      "code": 6016,
+      "name": "platformPaused",
+      "msg": "Platform is paused"
+    },
+    {
+      "code": 6017,
+      "name": "vaultNotEmpty",
+      "msg": "Vault is not empty - withdraw funds first"
+    },
+    {
+      "code": 6018,
+      "name": "revealWindowExpired",
+      "msg": "Reveal window expired"
     }
   ],
   "types": [
@@ -708,6 +1300,10 @@ export type LootboxPlatform = {
           },
           {
             "name": "createdAt",
+            "type": "i64"
+          },
+          {
+            "name": "committedAt",
             "type": "i64"
           },
           {
@@ -745,6 +1341,118 @@ export type LootboxPlatform = {
           {
             "name": "randomnessCommitted",
             "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "platformConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "initialized",
+            "type": "bool"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "baseLuck",
+            "type": "u8"
+          },
+          {
+            "name": "maxLuck",
+            "type": "u8"
+          },
+          {
+            "name": "luckTimeInterval",
+            "type": "i64"
+          },
+          {
+            "name": "payoutDud",
+            "type": "u32"
+          },
+          {
+            "name": "payoutRebate",
+            "type": "u32"
+          },
+          {
+            "name": "payoutBreakeven",
+            "type": "u32"
+          },
+          {
+            "name": "payoutProfit",
+            "type": "u32"
+          },
+          {
+            "name": "payoutJackpot",
+            "type": "u32"
+          },
+          {
+            "name": "tier1MaxLuck",
+            "type": "u8"
+          },
+          {
+            "name": "tier1Dud",
+            "type": "u16"
+          },
+          {
+            "name": "tier1Rebate",
+            "type": "u16"
+          },
+          {
+            "name": "tier1Breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "tier1Profit",
+            "type": "u16"
+          },
+          {
+            "name": "tier2MaxLuck",
+            "type": "u8"
+          },
+          {
+            "name": "tier2Dud",
+            "type": "u16"
+          },
+          {
+            "name": "tier2Rebate",
+            "type": "u16"
+          },
+          {
+            "name": "tier2Breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "tier2Profit",
+            "type": "u16"
+          },
+          {
+            "name": "tier3Dud",
+            "type": "u16"
+          },
+          {
+            "name": "tier3Rebate",
+            "type": "u16"
+          },
+          {
+            "name": "tier3Breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "tier3Profit",
+            "type": "u16"
+          },
+          {
+            "name": "updatedAt",
+            "type": "i64"
           }
         ]
       }

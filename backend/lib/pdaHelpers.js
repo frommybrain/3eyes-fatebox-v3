@@ -7,6 +7,19 @@ import { getAssociatedTokenAddress } from '@solana/spl-token';
 import BN from 'bn.js';
 
 /**
+ * Derive platform config PDA (global singleton for tunable parameters)
+ * @param {PublicKey} programId - Program ID
+ * @returns {[PublicKey, number]} - [PDA address, bump seed]
+ */
+export function derivePlatformConfigPDA(programId) {
+    const [pda, bump] = PublicKey.findProgramAddressSync(
+        [Buffer.from('platform_config')],
+        programId
+    );
+    return [pda, bump];
+}
+
+/**
  * Derive project config PDA
  * @param {PublicKey} programId - Program ID
  * @param {number} projectId - Numeric project ID
@@ -94,11 +107,16 @@ export async function deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMin
  * @returns {Promise<Object>} - All PDA addresses
  */
 export async function deriveAllPDAs(programId, projectId, paymentTokenMint) {
+    const [platformConfigPDA, platformConfigBump] = derivePlatformConfigPDA(programId);
     const [projectConfigPDA, projectConfigBump] = deriveProjectConfigPDA(programId, projectId);
     const [vaultAuthorityPDA, vaultAuthorityBump] = deriveVaultAuthorityPDA(programId, projectId, paymentTokenMint);
     const vaultTokenAccount = await deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMint);
 
     return {
+        platformConfig: {
+            address: platformConfigPDA,
+            bump: platformConfigBump,
+        },
         projectConfig: {
             address: projectConfigPDA,
             bump: projectConfigBump,

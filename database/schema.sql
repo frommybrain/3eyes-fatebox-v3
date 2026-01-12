@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS projects (
 
     -- Box configuration
     box_price BIGINT NOT NULL, -- in lamports
-    max_boxes INTEGER NOT NULL DEFAULT 1000,
+    max_boxes INTEGER NOT NULL DEFAULT 99999,
     boxes_created INTEGER DEFAULT 0,
 
     -- Project status
@@ -130,7 +130,9 @@ CREATE TABLE IF NOT EXISTS boxes (
     -- Ownership
     owner_wallet TEXT NOT NULL,
 
-    -- Box result (0=pending, 1=loss, 2=small_win, 3=profit, 4=jackpot)
+    -- Box result (DB: 0=pending, 1-5=results; On-chain uses 0-4 for tiers)
+    -- DB value = on-chain tier + 1 (to reserve 0 for pending)
+    -- Mapping: 0=pending, 1=dud, 2=rebate, 3=break-even, 4=profit, 5=jackpot
     box_result INTEGER DEFAULT 0,
     payout_amount BIGINT DEFAULT 0, -- in lamports
 
@@ -144,7 +146,7 @@ CREATE TABLE IF NOT EXISTS boxes (
     created_at TIMESTAMP DEFAULT NOW(),
 
     -- Constraints
-    CONSTRAINT valid_box_result CHECK (box_result BETWEEN 0 AND 4),
+    CONSTRAINT valid_box_result CHECK (box_result BETWEEN 0 AND 5),
     CONSTRAINT unique_box_per_project UNIQUE (project_id, box_number)
 );
 
@@ -244,7 +246,7 @@ BEGIN
     RETURN QUERY
     SELECT
         COUNT(*)::INTEGER as total_boxes,
-        COUNT(*) FILTER (WHERE box_result > 0)::INTEGER as total_opened,
+        COUNT(*) FILTER (WHERE box_result > 0)::INTEGER as total_opened, -- box_result > 0 means revealed (0=pending)
         COALESCE(SUM(payout_amount), 0)::BIGINT as total_payout,
         (COUNT(*) * (SELECT box_price FROM projects WHERE id = p_project_id))::BIGINT as total_revenue
     FROM boxes

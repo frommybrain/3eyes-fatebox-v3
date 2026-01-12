@@ -1,7 +1,7 @@
 // components/project/ProjectPage.jsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useTransition, useOptimistic } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { Transaction, Keypair } from '@solana/web3.js';
@@ -13,12 +13,15 @@ import {
     DegenCard,
     DegenBadge,
     DegenLoadingState,
+    useToast,
 } from '@/components/ui';
 
 export default function ProjectPage({ subdomain }) {
     const router = useRouter();
+    const { toast } = useToast();
     const [mounted, setMounted] = useState(false);
     const [purchasing, setPurchasing] = useState(false);
+    const [isPending, startTransition] = useTransition();
 
     // Wallet hooks
     const { publicKey, connected, signTransaction } = useWallet();
@@ -35,6 +38,15 @@ export default function ProjectPage({ subdomain }) {
     } = useProjectStore();
 
     const { config, configLoading, loadConfig } = useNetworkStore();
+
+    // Optimistic project stats for instant UI feedback after purchase
+    const [optimisticProject, setOptimisticProject] = useOptimistic(
+        currentProject,
+        (current, update) => current ? { ...current, ...update } : current
+    );
+
+    // Use optimistic state for rendering
+    const displayProject = optimisticProject || currentProject;
 
     // Load network config and project data on mount
     useEffect(() => {
@@ -69,12 +81,12 @@ export default function ProjectPage({ subdomain }) {
     // Handle box purchase
     const handleBuyBox = async () => {
         if (!connected || !publicKey) {
-            alert('Please connect your wallet first to purchase a box');
+            toast.warning('Please connect your wallet first to purchase a box');
             return;
         }
 
         if (!currentProject?.project_numeric_id) {
-            alert('Project data not loaded. Please refresh and try again.');
+            toast.error('Project data not loaded. Please refresh and try again.');
             return;
         }
 
@@ -167,18 +179,37 @@ export default function ProjectPage({ subdomain }) {
             }
 
             // Success!
-            alert(
-                `Box #${buildResult.boxId} purchased successfully! 🎉\n\n` +
-                `Transaction: ${signature}\n\n` +
-                `View on Solana Explorer: ${confirmResult.explorerUrl || `https://explorer.solana.com/tx/${signature}?cluster=${config.network}`}`
+            const explorerUrl = confirmResult.explorerUrl || `https://explorer.solana.com/tx/${signature}?cluster=${config.network}`;
+            toast.success(`Box #${buildResult.boxId} purchased!`, {
+                title: 'Purchase Complete',
+                duration: 8000,
+            });
+            // Show a second toast with the transaction link
+            toast.info(
+                <span>
+                    <a href={explorerUrl} target="_blank" rel="noopener noreferrer" className="underline hover:no-underline">
+                        View transaction on Solana Explorer
+                    </a>
+                </span>,
+                { duration: 10000 }
             );
 
-            // Reload project to update stats
-            await loadProjectBySubdomain(subdomain);
+            // Optimistic update + reload wrapped in transition for smooth update
+            startTransition(() => {
+                // Optimistic update: increment boxes created immediately
+                setOptimisticProject({
+                    total_boxes_created: (currentProject.total_boxes_created || 0) + 1
+                });
+                // Reload project to sync with server
+                loadProjectBySubdomain(subdomain);
+            });
 
         } catch (error) {
             console.error('❌ Box purchase failed:', error);
-            alert(`Failed to purchase box: ${error.message}\n\nPlease try again.`);
+            toast.error(error.message || 'Failed to purchase box. Please try again.', {
+                title: 'Purchase Failed',
+                duration: 6000,
+            });
         } finally {
             setPurchasing(false);
         }
@@ -217,7 +248,7 @@ export default function ProjectPage({ subdomain }) {
     }
 
     // Check if project is active
-    if (!currentProject.is_active || currentProject.is_paused) {
+    if (!displayProject.is_active || displayProject.is_paused) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-degen-bg">
                 <DegenCard variant="white" padding="lg" className="max-w-md mx-auto text-center">
@@ -226,7 +257,7 @@ export default function ProjectPage({ subdomain }) {
                         Project Paused
                     </h1>
                     <p className="text-degen-text-muted mb-6">
-                        {currentProject.project_name} is currently paused by the creator.
+                        {displayProject.project_name} is currently paused by the creator.
                         Check back later!
                     </p>
                     <DegenButton
@@ -253,23 +284,23 @@ export default function ProjectPage({ subdomain }) {
             )}
 
             {/* Project UI Overlay */}
-            <div className="fixed top-0 left-0 w-screen h-screen z-10 pointer-events-none">
+            <div className={`fixed top-0 left-0 w-screen h-screen z-10 pointer-events-none transition-opacity duration-150 ${isPending ? 'opacity-80' : 'opacity-100'}`}>
                 <div className="flex flex-col items-center justify-center h-full pointer-events-auto">
                     {/* Project Header */}
                     <div className="text-center mb-8">
-                        {currentProject.logo_url && (
+                        {displayProject.logo_url && (
                             <img
-                                src={currentProject.logo_url}
-                                alt={currentProject.project_name}
+                                src={displayProject.logo_url}
+                                alt={displayProject.project_name}
                                 className="w-24 h-24 mx-auto mb-4 border-2 border-degen-black"
                             />
                         )}
                         <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">
-                            {currentProject.project_name}
+                            {displayProject.project_name}
                         </h1>
-                        {currentProject.description && (
+                        {displayProject.description && (
                             <p className="text-degen-text-muted text-lg max-w-md mx-auto">
-                                {currentProject.description}
+                                {displayProject.description}
                             </p>
                         )}
                     </div>
@@ -279,18 +310,18 @@ export default function ProjectPage({ subdomain }) {
                         <div className="text-center">
                             <p className="text-degen-text-muted text-sm uppercase tracking-wider mb-1">Box Price</p>
                             <div className="flex items-center justify-center gap-2">
-                                {currentProject.payment_token_logo && (
+                                {displayProject.payment_token_logo && (
                                     <img
-                                        src={currentProject.payment_token_logo}
-                                        alt={currentProject.payment_token_symbol}
+                                        src={displayProject.payment_token_logo}
+                                        alt={displayProject.payment_token_symbol}
                                         className="w-6 h-6 border border-degen-black"
                                     />
                                 )}
                                 <p className="text-degen-black text-3xl font-medium">
-                                    {(currentProject.box_price / Math.pow(10, currentProject.payment_token_decimals || 9)).toLocaleString()}
+                                    {(displayProject.box_price / Math.pow(10, displayProject.payment_token_decimals || 9)).toLocaleString()}
                                 </p>
                                 <p className="text-degen-text-muted text-xl">
-                                    {currentProject.payment_token_symbol || 'TOKEN'}
+                                    {displayProject.payment_token_symbol || 'TOKEN'}
                                 </p>
                             </div>
                         </div>

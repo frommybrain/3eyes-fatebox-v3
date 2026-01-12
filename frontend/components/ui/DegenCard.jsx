@@ -51,7 +51,7 @@ function CardDropdown({ items = [], onSelect }) {
         <div className="relative">
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="w-6 h-6 flex items-center justify-center text-degen-text-muted hover:text-degen-black hover:bg-degen-black/5 transition-colors"
+                className="w-6 h-6 flex items-center justify-center text-degen-text-muted hover:text-degen-black hover:bg-degen-black/5 transition-colors cursor-pointer"
             >
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                     <circle cx="8" cy="3" r="1.5" />

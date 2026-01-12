@@ -13,6 +13,7 @@ import {
     DegenCard,
     DegenBadge,
     DegenLoadingState,
+    useToast,
 } from '@/components/ui';
 import { DegenWarningMessage } from '@/components/ui/DegenMessage';
 import { DegenTabs, DegenTabsList, DegenTabsTrigger, DegenTabsContent } from '@/components/ui/DegenTabs';
@@ -21,6 +22,7 @@ const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333
 
 export default function ManageProject({ projectId }) {
     const router = useRouter();
+    const { toast } = useToast();
     const { publicKey, connected, signTransaction } = useWallet();
     const { connection } = useConnection();
     const [project, setProject] = useState(null);
@@ -63,7 +65,7 @@ export default function ManageProject({ projectId }) {
 
             // Check ownership
             if (data.owner_wallet !== publicKey.toString()) {
-                alert('You do not own this project');
+                toast.error('You do not own this project');
                 router.push('/dashboard');
                 return;
             }
@@ -71,7 +73,7 @@ export default function ManageProject({ projectId }) {
             setProject(data);
         } catch (error) {
             console.error('Error loading project:', error);
-            alert('Failed to load project');
+            toast.error('Failed to load project');
             router.push('/dashboard');
         } finally {
             setLoading(false);
@@ -88,11 +90,11 @@ export default function ManageProject({ projectId }) {
 
             if (error) throw error;
 
-            alert('Project updated successfully!');
+            toast.success('Project updated successfully!');
             loadProject();
         } catch (error) {
             console.error('Error updating project:', error);
-            alert('Failed to update project');
+            toast.error('Failed to update project');
         } finally {
             setSaving(false);
         }
@@ -231,7 +233,7 @@ export default function ManageProject({ projectId }) {
             await loadWithdrawalHistory();
 
             const formattedAmount = parseFloat(withdrawalInfo.withdrawable.profitOnly.formatted).toLocaleString(undefined, { maximumFractionDigits: 4 });
-            alert(`Successfully withdrew ${formattedAmount} ${project.payment_token_symbol} profit!`);
+            toast.success(`Successfully withdrew ${formattedAmount} ${project.payment_token_symbol} profit!`);
 
         } catch (error) {
             console.error('Withdrawal error:', error);
@@ -305,7 +307,7 @@ export default function ManageProject({ projectId }) {
             await loadWithdrawalInfo();
             await loadWithdrawalHistory();
             setShowCloseConfirmation(false);
-            alert('Project closed successfully! All funds have been withdrawn.');
+            toast.success('Project closed successfully! All funds have been withdrawn.');
 
         } catch (error) {
             console.error('Close project error:', error);

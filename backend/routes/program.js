@@ -11,6 +11,7 @@ import {
 } from '../lib/anchorClient.js';
 import {
     deriveAllPDAs,
+    derivePlatformConfigPDA,
     deriveProjectConfigPDA as deriveProjectConfigPDAStandalone,
     deriveBoxInstancePDA,
     deriveVaultAuthorityPDA,
@@ -695,12 +696,13 @@ router.post('/derive-pdas', async (req, res) => {
 
 /**
  * POST /api/program/build-create-box-tx
- * Build transaction for purchasing a lootbox with Switchboard VRF randomness
+ * Build transaction for purchasing a lootbox (payment only, no randomness)
  *
  * The transaction includes:
- * 1. Create Switchboard randomness account (buyer pays)
- * 2. Commit to randomness request
- * 3. Create box with randomness account reference
+ * 1. Create vault ATA if needed
+ * 2. Create box (payment transfer to vault)
+ *
+ * Box is created in "pending" state. User must later call commit_box to open it.
  *
  * Body:
  * - projectId: number - Numeric project ID
@@ -708,8 +710,8 @@ router.post('/derive-pdas', async (req, res) => {
  *
  * Returns:
  * - transaction: Serialized transaction for buyer to sign
- * - randomnessKeypair: Serialized keypair that must be included as signer
- * - randomnessAccount: Public key of the randomness account
+ * - boxId: The ID of the box being created
+ * - boxInstancePDA: PDA address of the box
  */
 router.post('/build-create-box-tx', async (req, res) => {
     try {
@@ -723,7 +725,7 @@ router.post('/build-create-box-tx', async (req, res) => {
             });
         }
 
-        console.log(`\n🎲 Building create box transaction with Switchboard VRF for project ${projectId}...`);
+        console.log(`\n🎲 Building create box transaction for project ${projectId}...`);
         console.log(`   Buyer: ${buyerWallet}`);
 
         // Get Anchor program and network config
@@ -797,24 +799,9 @@ router.post('/build-create-box-tx', async (req, res) => {
         }
 
         // ========================================
-        // SWITCHBOARD VRF: Create randomness account and commit
+        // BUILD TRANSACTION (no Switchboard - that happens at commit time)
         // ========================================
-        console.log(`\n🎰 Setting up Switchboard VRF randomness...`);
-
-        // Create Switchboard randomness account - pass buyer as payer so they pay the fees
-        const { keypair: rngKeypair, randomness, createInstruction: createRandomnessIx, publicKey: randomnessAccountPubkey } =
-            await createRandomnessAccount(provider, config.network, buyerPubkey);
-
-        console.log(`   Randomness account: ${randomnessAccountPubkey.toString()}`);
-        console.log(`   Randomness keypair generated (will be returned for signing)`);
-
-        // Create commit instruction - pass buyer as authority to avoid loading non-existent account
-        const commitIx = await createCommitInstruction(randomness, config.network, buyerPubkey);
-
-        // ========================================
-        // BUILD COMBINED TRANSACTION
-        // ========================================
-        console.log(`\n📝 Building combined transaction...`);
+        console.log(`\n📝 Building purchase transaction...`);
 
         const transaction = new Transaction();
 
@@ -830,18 +817,10 @@ router.post('/build-create-box-tx', async (req, res) => {
             console.log(`   Added: Create vault ATA instruction`);
         }
 
-        // 2. Create Switchboard randomness account (buyer pays)
-        transaction.add(createRandomnessIx);
-        console.log(`   Added: Create randomness account instruction`);
-
-        // 3. Commit to randomness (request VRF)
-        transaction.add(commitIx);
-        console.log(`   Added: Commit to randomness instruction`);
-
-        // 4. Create box with randomness account reference
+        // 2. Create box (no randomness - will be committed when user opens)
         const projectIdBN = new BN(projectId);
         const boxPurchaseTx = await program.methods
-            .createBox(projectIdBN, randomnessAccountPubkey)
+            .createBox(projectIdBN)
             .accounts({
                 buyer: buyerPubkey,
                 projectConfig: projectConfigPDA,
@@ -854,30 +833,26 @@ router.post('/build-create-box-tx', async (req, res) => {
             .transaction();
 
         transaction.add(...boxPurchaseTx.instructions);
-        console.log(`   Added: Create box instruction with randomness reference`);
+        console.log(`   Added: Create box instruction (pending state)`);
 
         // Get recent blockhash
         const { blockhash } = await connection.getLatestBlockhash();
         transaction.recentBlockhash = blockhash;
         transaction.feePayer = buyerPubkey;
 
-        // Serialize transaction (without signatures - buyer and randomness keypair will sign on frontend)
+        // Serialize transaction (without signatures - buyer will sign on frontend)
         const serializedTransaction = transaction.serialize({
             requireAllSignatures: false,
             verifySignatures: false,
         }).toString('base64');
 
-        // Serialize the randomness keypair so frontend can include it as signer
-        const serializedRandomnessKeypair = serializeKeypair(rngKeypair);
-
-        console.log(`\n✅ Transaction built successfully with Switchboard VRF!`);
+        console.log(`\n✅ Transaction built successfully!`);
         console.log(`   Total instructions: ${transaction.instructions.length}`);
+        console.log(`   Box will be created in PENDING state (no randomness yet)`);
 
         return res.json({
             success: true,
             transaction: serializedTransaction,
-            randomnessKeypair: serializedRandomnessKeypair,
-            randomnessAccount: randomnessAccountPubkey.toString(),
             boxId: nextBoxId,
             boxInstancePDA: boxInstancePDA.toString(),
             projectId,
@@ -941,7 +916,7 @@ router.post('/confirm-box-creation', async (req, res) => {
                 project_id: project.id,
                 box_number: boxId,
                 owner_wallet: buyerWallet,
-                box_result: 0, // Pending reveal
+                box_result: 0, // Pending (DB: 0=pending, 1-5=results; On-chain uses 0-4 for tiers)
                 payout_amount: 0,
                 opened_at: null,
                 created_at: new Date().toISOString(),
@@ -988,6 +963,263 @@ router.post('/confirm-box-creation', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to confirm box creation',
+            details: error.message,
+        });
+    }
+});
+
+/**
+ * POST /api/program/build-commit-box-tx
+ * Build transaction for opening a box (committing Switchboard VRF randomness)
+ *
+ * Called when user clicks "Open Box" on a pending box.
+ * This commits randomness and freezes luck at the current time.
+ * User then has 1 hour to call reveal.
+ *
+ * Body:
+ * - projectId: number - Numeric project ID
+ * - boxId: number - Box ID to open
+ * - ownerWallet: string - Box owner's wallet address
+ *
+ * Returns:
+ * - transaction: Serialized transaction for owner to sign
+ * - randomnessKeypair: Serialized keypair that must be included as signer
+ * - randomnessAccount: Public key of the randomness account
+ */
+router.post('/build-commit-box-tx', async (req, res) => {
+    try {
+        const { projectId, boxId, ownerWallet } = req.body;
+
+        // Validate input
+        if (!projectId || boxId === undefined || !ownerWallet) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields: projectId, boxId, ownerWallet'
+            });
+        }
+
+        console.log(`\n📦 Building commit box transaction for box ${boxId} in project ${projectId}...`);
+        console.log(`   Owner: ${ownerWallet}`);
+
+        // Get Anchor program and network config
+        const { program, provider, connection, programId } = await getAnchorProgram();
+        const config = await getNetworkConfig();
+
+        // Fetch box from database
+        const { data: box, error: boxError } = await supabase
+            .from('boxes')
+            .select('*, projects!inner(project_numeric_id, payment_token_mint)')
+            .eq('box_number', boxId)
+            .eq('projects.project_numeric_id', projectId)
+            .single();
+
+        if (boxError || !box) {
+            return res.status(404).json({
+                success: false,
+                error: 'Box not found'
+            });
+        }
+
+        // Verify ownership
+        if (box.owner_wallet !== ownerWallet) {
+            return res.status(403).json({
+                success: false,
+                error: 'Not the owner of this box'
+            });
+        }
+
+        // Check if already committed
+        if (box.randomness_committed) {
+            return res.status(400).json({
+                success: false,
+                error: 'Box already opened (randomness already committed)'
+            });
+        }
+
+        // Check if already revealed (DB: 0=pending, 1-5=results; On-chain: 0-4)
+        if (box.box_result !== 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'Box already revealed'
+            });
+        }
+
+        // Derive PDAs
+        const [platformConfigPDA] = derivePlatformConfigPDA(programId);
+        const [projectConfigPDA] = deriveProjectConfigPDAStandalone(new PublicKey(config.programId), projectId);
+        const [boxInstancePDA] = deriveBoxInstancePDA(programId, projectId, boxId);
+
+        const ownerPubkey = new PublicKey(ownerWallet);
+
+        console.log(`   Platform config PDA: ${platformConfigPDA.toString()}`);
+        console.log(`   Box instance PDA: ${boxInstancePDA.toString()}`);
+        console.log(`   Project config PDA: ${projectConfigPDA.toString()}`);
+
+        // ========================================
+        // SWITCHBOARD VRF: Create randomness account and commit
+        // ========================================
+        console.log(`\n🎰 Setting up Switchboard VRF randomness...`);
+
+        // Create Switchboard randomness account - pass owner as payer
+        const { keypair: rngKeypair, randomness, createInstruction: createRandomnessIx, publicKey: randomnessAccountPubkey } =
+            await createRandomnessAccount(provider, config.network, ownerPubkey);
+
+        console.log(`   Randomness account: ${randomnessAccountPubkey.toString()}`);
+
+        // Create commit instruction
+        const commitIx = await createCommitInstruction(randomness, config.network, ownerPubkey);
+
+        // ========================================
+        // BUILD TRANSACTION
+        // ========================================
+        console.log(`\n📝 Building commit transaction...`);
+
+        const transaction = new Transaction();
+
+        // 1. Create Switchboard randomness account (owner pays)
+        transaction.add(createRandomnessIx);
+        console.log(`   Added: Create randomness account instruction`);
+
+        // 2. Commit to randomness (request VRF)
+        transaction.add(commitIx);
+        console.log(`   Added: Commit to randomness instruction`);
+
+        // 3. Call commit_box on our program
+        const projectIdBN = new BN(projectId);
+        const boxIdBN = new BN(boxId);
+        const commitBoxTx = await program.methods
+            .commitBox(projectIdBN, boxIdBN, randomnessAccountPubkey)
+            .accounts({
+                owner: ownerPubkey,
+                platformConfig: platformConfigPDA,
+                projectConfig: projectConfigPDA,
+                boxInstance: boxInstancePDA,
+            })
+            .transaction();
+
+        transaction.add(...commitBoxTx.instructions);
+        console.log(`   Added: commit_box instruction`);
+
+        // Get recent blockhash
+        const { blockhash } = await connection.getLatestBlockhash();
+        transaction.recentBlockhash = blockhash;
+        transaction.feePayer = ownerPubkey;
+
+        // Serialize transaction
+        const serializedTransaction = transaction.serialize({
+            requireAllSignatures: false,
+            verifySignatures: false,
+        }).toString('base64');
+
+        // Serialize the randomness keypair so frontend can include it as signer
+        const serializedRandomnessKeypair = serializeKeypair(rngKeypair);
+
+        console.log(`\n✅ Commit transaction built successfully!`);
+        console.log(`   Total instructions: ${transaction.instructions.length}`);
+        console.log(`   User has 1 HOUR to reveal after this commits`);
+
+        return res.json({
+            success: true,
+            transaction: serializedTransaction,
+            randomnessKeypair: serializedRandomnessKeypair,
+            randomnessAccount: randomnessAccountPubkey.toString(),
+            boxId,
+            projectId,
+            network: config.network,
+        });
+
+    } catch (error) {
+        console.error('❌ Error building commit box transaction:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Failed to build commit box transaction',
+            details: error.message,
+        });
+    }
+});
+
+/**
+ * POST /api/program/confirm-commit
+ * Record box commit (open) in database after on-chain confirmation
+ *
+ * Body:
+ * - projectId: number - Numeric project ID
+ * - boxId: number - Box ID
+ * - signature: string - Transaction signature
+ * - randomnessAccount: string - Switchboard randomness account address
+ */
+router.post('/confirm-commit', async (req, res) => {
+    try {
+        const { projectId, boxId, signature, randomnessAccount } = req.body;
+
+        if (!projectId || boxId === undefined || !signature || !randomnessAccount) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields: projectId, boxId, signature, randomnessAccount'
+            });
+        }
+
+        console.log(`\n✅ Confirming commit for box ${boxId} in project ${projectId}...`);
+        console.log(`   Transaction: ${signature}`);
+        console.log(`   Randomness account: ${randomnessAccount}`);
+
+        // Fetch box from database
+        const { data: box, error: boxError } = await supabase
+            .from('boxes')
+            .select('id, projects!inner(project_numeric_id)')
+            .eq('box_number', boxId)
+            .eq('projects.project_numeric_id', projectId)
+            .single();
+
+        if (boxError || !box) {
+            return res.status(404).json({
+                success: false,
+                error: 'Box not found'
+            });
+        }
+
+        // Update box with commit info
+        const committedAt = new Date().toISOString();
+        const { error: updateError } = await supabase
+            .from('boxes')
+            .update({
+                randomness_account: randomnessAccount,
+                randomness_committed: true,
+                committed_at: committedAt,
+                commit_tx_signature: signature,
+            })
+            .eq('id', box.id);
+
+        if (updateError) {
+            console.error('Failed to update box commit status:', updateError);
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to record commit in database',
+                details: updateError.message,
+            });
+        }
+
+        console.log(`✅ Box commit recorded in database`);
+        console.log(`   Committed at: ${committedAt}`);
+        console.log(`   User has until: ${new Date(Date.now() + 3600000).toISOString()} to reveal`);
+
+        const config = await getNetworkConfig();
+
+        return res.json({
+            success: true,
+            projectId,
+            boxId,
+            signature,
+            committedAt,
+            expiresAt: new Date(Date.now() + 3600000).toISOString(), // 1 hour from now
+            explorerUrl: `https://explorer.solana.com/tx/${signature}?cluster=${config.network}`,
+        });
+
+    } catch (error) {
+        console.error('❌ Error confirming commit:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Failed to confirm commit',
             details: error.message,
         });
     }
@@ -1134,7 +1366,7 @@ router.post('/build-reveal-box-tx', async (req, res) => {
             });
         }
 
-        // Check if already revealed
+        // Check if already revealed (DB: 0=pending, 1-5=results; On-chain: 0-4)
         if (box.box_result !== 0) {
             return res.status(400).json({
                 success: false,
@@ -1144,11 +1376,44 @@ router.post('/build-reveal-box-tx', async (req, res) => {
         }
 
         // Verify randomness was committed
-        if (!box.randomness_account) {
+        if (!box.randomness_account || !box.randomness_committed) {
             return res.status(400).json({
                 success: false,
-                error: 'Box does not have a randomness account committed. Please create a new box.',
+                error: 'Box has not been opened yet. Click "Open Box" first to commit randomness.',
             });
+        }
+
+        // Check if commit has expired (1 hour limit)
+        if (box.committed_at) {
+            const committedAtTime = new Date(box.committed_at).getTime();
+            const now = Date.now();
+            const oneHourMs = 60 * 60 * 1000; // 1 hour in milliseconds
+
+            if (now - committedAtTime > oneHourMs) {
+                // Mark box as expired/dud in database
+                console.log(`   ⚠️ Box commit has EXPIRED - marking as Dud`);
+
+                await supabase
+                    .from('boxes')
+                    .update({
+                        box_result: 1, // Dud tier (DB: 1=dud; On-chain: 0=dud)
+                        payout_amount: 0,
+                        opened_at: new Date().toISOString(),
+                        luck_value: box.luck_value || 5,
+                    })
+                    .eq('id', box.id);
+
+                return res.status(400).json({
+                    success: false,
+                    error: 'Reveal window expired. Box has become a Dud.',
+                    expired: true,
+                    committedAt: box.committed_at,
+                    expiredAt: new Date(committedAtTime + oneHourMs).toISOString(),
+                });
+            }
+
+            const timeRemaining = oneHourMs - (now - committedAtTime);
+            console.log(`   Time remaining to reveal: ${Math.floor(timeRemaining / 1000)} seconds`);
         }
 
         console.log(`   Randomness account: ${box.randomness_account}`);
@@ -1159,11 +1424,13 @@ router.post('/build-reveal-box-tx', async (req, res) => {
         const randomnessAccountPubkey = new PublicKey(box.randomness_account);
 
         // Derive PDAs
+        const [platformConfigPDA] = derivePlatformConfigPDA(programId);
         const [projectConfigPDA] = deriveProjectConfigPDAStandalone(new PublicKey(config.programId), projectId);
         const [boxInstancePDA] = deriveBoxInstancePDA(programId, projectId, boxId);
         const [vaultAuthorityPDA] = deriveVaultAuthorityPDA(programId, projectId, paymentTokenMintPubkey);
         const vaultTokenAccount = await deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMintPubkey);
 
+        console.log(`   Platform Config PDA: ${platformConfigPDA.toString()}`);
         console.log(`   Project Config PDA: ${projectConfigPDA.toString()}`);
         console.log(`   Box Instance PDA: ${boxInstancePDA.toString()}`);
 
@@ -1178,8 +1445,16 @@ router.post('/build-reveal-box-tx', async (req, res) => {
         let offset = 8;
         const data = boxAccountInfo.data;
 
-        // Skip box_id (8), project_id (8), owner (32), created_at (8)
-        offset += 8 + 8 + 32 + 8;
+        // BoxInstance struct layout (updated with committed_at):
+        // - box_id: u64 (8 bytes)
+        // - project_id: u64 (8 bytes)
+        // - owner: Pubkey (32 bytes)
+        // - created_at: i64 (8 bytes)
+        // - committed_at: i64 (8 bytes) <- NEW FIELD
+        // - luck: u8 (1 byte)
+        // - revealed: bool (1 byte)
+        // Skip to luck field
+        offset += 8 + 8 + 32 + 8 + 8;
 
         // Read luck (1 byte)
         const currentLuck = data[offset];
@@ -1239,6 +1514,7 @@ router.post('/build-reveal-box-tx', async (req, res) => {
             .revealBox(projectIdBN, boxIdBN)
             .accounts({
                 owner: ownerPubkey,
+                platformConfig: platformConfigPDA,
                 projectConfig: projectConfigPDA,
                 boxInstance: boxInstancePDA,
                 vaultTokenAccount: vaultTokenAccount,
@@ -1338,8 +1614,8 @@ router.post('/confirm-reveal', async (req, res) => {
         let offset = 8;
         const data = boxAccountInfo.data;
 
-        // Skip box_id (8), project_id (8), owner (32), created_at (8)
-        offset += 8 + 8 + 32 + 8;
+        // Skip box_id (8), project_id (8), owner (32), created_at (8), committed_at (8)
+        offset += 8 + 8 + 32 + 8 + 8;
 
         // Read luck (1 byte)
         const luck = data[offset];
@@ -1383,10 +1659,12 @@ router.post('/confirm-reveal', async (req, res) => {
         }
 
         // Update box record in database with ON-CHAIN values
+        // NOTE: DB uses 0=pending, 1-5=results; On-chain uses 0-4 for results
+        // We add 1 to on-chain tier to get DB value
         const { error: updateError } = await supabase
             .from('boxes')
             .update({
-                box_result: rewardTier + 1, // 1=dud, 2=rebate, 3=break-even, 4=profit, 5=jackpot
+                box_result: rewardTier + 1, // DB: 1=dud, 2=rebate, 3=break-even, 4=profit, 5=jackpot (on-chain + 1)
                 payout_amount: rewardAmount,
                 opened_at: new Date().toISOString(),
                 // New verification columns
@@ -1497,7 +1775,7 @@ router.post('/build-settle-box-tx', async (req, res) => {
             });
         }
 
-        // Check if revealed (box_result > 0 means revealed)
+        // Check if revealed (DB: 0=pending, 1-5=revealed)
         if (box.box_result === 0) {
             return res.status(400).json({
                 success: false,
@@ -1536,8 +1814,8 @@ router.post('/build-settle-box-tx', async (req, res) => {
         let offset = 8; // Skip discriminator
         const data = boxAccountInfo.data;
 
-        // Skip box_id (8), project_id (8), owner (32), created_at (8), luck (1), revealed (1)
-        offset += 8 + 8 + 32 + 8 + 1 + 1;
+        // Skip box_id (8), project_id (8), owner (32), created_at (8), committed_at (8), luck (1), revealed (1)
+        offset += 8 + 8 + 32 + 8 + 8 + 1 + 1;
 
         // Read settled (1 byte)
         const isSettled = data[offset] === 1;
@@ -1711,7 +1989,7 @@ router.post('/confirm-settle', async (req, res) => {
         }
 
         // Update project stats if jackpot was hit
-        if (box.box_result === 5) { // 5 = Jackpot
+        if (box.box_result === 5) { // DB: 5 = Jackpot (on-chain: 4)
             const { error: statsError } = await supabase
                 .from('projects')
                 .update({

@@ -112,7 +112,7 @@ router.post('/create', async (req, res) => {
                 subdomain: fullSubdomain,
                 description: description || null,
                 box_price: parseInt(box_price),
-                max_boxes: 1000, // Default
+                max_boxes: 99999, // Default - effectively unlimited
                 is_active: true,
                 is_paused: false,
                 vault_wallet: null, // Will be updated after PDA derivation
@@ -379,6 +379,9 @@ router.get('/boxes/by-owner/:walletAddress', async (req, res) => {
                 created_at,
                 project_id,
                 randomness_account,
+                randomness_committed,
+                committed_at,
+                commit_tx_signature,
                 purchase_tx_signature,
                 reveal_tx_signature,
                 settle_tx_signature,

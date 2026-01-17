@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 - **Security middleware** - helmet for security headers, express-rate-limit for rate limiting
+- **Oracle health indicator** - Dashboard shows Switchboard oracle status with auto-refresh
+- **Reveal race condition handling** - Detects when oracle reveals during revealIx call
+- **On-chain result recovery** - Syncs already-revealed boxes from on-chain state
+
 - **CORS wildcard subdomain support** - `*.degenbox.fun` pattern matching for project subdomains
 - **Input validation with Zod** - Schemas for all API endpoints (`backend/lib/validation.js`)
 - **Admin authentication middleware** - Wallet signature verification (`backend/middleware/auth.js`)
@@ -28,6 +32,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Removed
 - Nothing removed in this release
+
+### Known Issues / To Investigate
+- **Box #4 failures** - Anecdotal observation that box number 4 seems to fail more often than others.
+  Need to investigate with a fresh project. Possible causes to explore:
+  - PDA derivation edge case with specific box IDs?
+  - Switchboard randomness account allocation pattern?
+  - Oracle assignment based on some hash of box ID?
+  - Coincidence / confirmation bias?
+
+  Test plan: Create new project, buy 10 boxes, reveal in order, log which fail.
 
 ---
 

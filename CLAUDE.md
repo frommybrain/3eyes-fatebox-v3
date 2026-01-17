@@ -1851,6 +1851,66 @@ cd backend
 node scripts/init-platform-config.js
 ```
 
+### Program Verification (Solscan)
+
+The program is verified on Solscan using `solana-verify`. This proves the on-chain bytecode matches the public source code.
+
+**Requirements:**
+- Docker Desktop installed and running
+- `solana-verify` CLI: `cargo install solana-verify`
+- Public GitHub repository
+- `Cargo.lock` committed to repo
+
+**Verification Process:**
+
+```bash
+# 1. Ensure Cargo.lock compatibility (base64ct must be <= 1.6.0 for Solana Docker image)
+cd backend/program
+cargo update base64ct@1.7.3 --precise 1.6.0  # If needed
+
+# 2. Build verifiable binary locally (takes ~5 min on M1/M2 due to x86 emulation)
+solana-verify build --library-name lootbox_platform
+
+# 3. Deploy the verified binary
+solana program deploy \
+  target/deploy/lootbox_platform.so \
+  --program-id target/deploy/lootbox_platform-keypair.json \
+  --keypair /path/to/deploy-wallet.json \
+  --url devnet
+
+# 4. Verify and upload verification record to on-chain
+solana-verify verify-from-repo \
+  --program-id GTpP39xwT47iTUwbC5HZ7TjCiNon2owkLWg84uUyboat \
+  --library-name lootbox_platform \
+  --mount-path backend/program \
+  --url devnet \
+  --keypair /path/to/deploy-wallet.json \
+  -y \
+  https://github.com/frommybrain/3eyes-fatebox-v3
+```
+
+**Publish IDL (separate from verification):**
+
+```bash
+# IDL allows block explorers to decode transaction data
+cd backend/program
+anchor idl init GTpP39xwT47iTUwbC5HZ7TjCiNon2owkLWg84uUyboat \
+  --filepath target/idl/lootbox_platform.json \
+  --provider.cluster devnet \
+  --provider.wallet /path/to/deploy-wallet.json
+```
+
+**Current Verification Status (Devnet):**
+
+| Item | Status | Details |
+|------|--------|---------|
+| Program Verified | ✅ | Hash: `216bd3e1b6c7efc92879bacaf01adfe389ff584947a10fe208f84917e7e73572` |
+| IDL Published | ✅ | Account: `5Hhwx2Tm6CMSNEHyzo3mMZYNwaYmP7wF7n3Sx3TmyxUv` |
+| Commit | `2a694a6` | Main branch |
+| Verification Tx | `2XHvqCHN61MCPRCRaBDFBat4nko9br5XAnMVBkiGYqeoaFqURqN6RjjsvjNPZq1GtiJpb8KcoMzYiG43PnN4NXzA` |
+
+**For Mainnet:** Repeat the same process with `--url mainnet-beta`. The program ID can stay the same if you use the same keypair (`target/deploy/lootbox_platform-keypair.json`).
+
 ---
 
 ## Open Design Decisions

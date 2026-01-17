@@ -2198,25 +2198,28 @@ router.post('/build-reveal-box-tx', async (req, res) => {
             const revealIx = await createRevealInstruction(randomness, ownerPubkey, config.network);
 
             // Re-check if randomness was revealed during the revealIx call (can take 4-5 seconds)
+            // The oracle might have already revealed while we were getting the instruction
             // This prevents "Transaction already processed" errors from race conditions
+            let skipSwitchboardReveal = false;
             try {
                 const recheckResult = await readRandomnessValue(connection, randomnessAccountPubkey);
                 if (recheckResult.revealSlot > 0) {
-                    console.log(`   ⚠️ Race condition detected! Randomness was revealed during revealIx call`);
-                    console.log(`   Triggering recovery flow instead of returning stale transaction...`);
+                    console.log(`   ⚠️ Race condition: Randomness was revealed during revealIx call`);
+                    console.log(`   Randomness is revealed - checking if BoxInstance is also revealed...`);
 
-                    // Re-read on-chain box state to get the result
+                    // Check if our box is already revealed too
                     const boxAccountInfoRefresh = await connection.getAccountInfo(boxInstancePDA);
                     if (boxAccountInfoRefresh) {
                         const dataRefresh = boxAccountInfoRefresh.data;
-                        let offsetRefresh = 8 + 8 + 8 + 32 + 8 + 8; // Skip to luck
-                        const luckRefresh = dataRefresh[offsetRefresh];
-                        offsetRefresh += 1;
+                        let offsetRefresh = 8 + 8 + 8 + 32 + 8 + 8 + 1; // Skip to revealed field
                         const revealedRefresh = dataRefresh[offsetRefresh] === 1;
-                        offsetRefresh += 1;
 
                         if (revealedRefresh) {
-                            // Parse the result same as the recovery flow above
+                            // Both randomness AND box are revealed - full recovery needed
+                            console.log(`   BoxInstance is also revealed - triggering full recovery...`);
+                            offsetRefresh += 1; // Move past revealed
+
+                            // Parse the result
                             const settledRefresh = dataRefresh[offsetRefresh] === 1;
                             offsetRefresh += 1;
                             const rewardAmountRefresh = dataRefresh.readBigUInt64LE(offsetRefresh);
@@ -2227,6 +2230,9 @@ router.post('/build-reveal-box-tx', async (req, res) => {
                             offsetRefresh += 8;
                             const rewardTierOnChainRefresh = dataRefresh[offsetRefresh];
                             const rewardTierDBRefresh = rewardTierOnChainRefresh + 1;
+
+                            // Get luck from before revealed field
+                            const luckRefresh = dataRefresh[8 + 8 + 8 + 32 + 8 + 8]; // luck offset
 
                             // Update database
                             await supabase
@@ -2254,16 +2260,25 @@ router.post('/build-reveal-box-tx', async (req, res) => {
                                 },
                                 message: 'Race condition detected - result recovered from on-chain.',
                             });
+                        } else {
+                            // Randomness is revealed but box is NOT - skip Switchboard, only run our reveal_box
+                            console.log(`   BoxInstance NOT revealed yet - will only include reveal_box instruction`);
+                            console.log(`   (Skipping Switchboard revealIx to avoid "already processed" error)`);
+                            skipSwitchboardReveal = true;
                         }
                     }
                 }
             } catch (recheckError) {
                 // Still not revealed, continue with normal flow
-                console.log(`   Randomness still not revealed after revealIx call - continuing...`);
+                console.log(`   Randomness still not revealed after revealIx call - continuing with full transaction`);
             }
 
-            transaction.add(revealIx);
-            console.log(`   Added: Switchboard reveal instruction`);
+            if (!skipSwitchboardReveal) {
+                transaction.add(revealIx);
+                console.log(`   Added: Switchboard reveal instruction`);
+            } else {
+                console.log(`   Skipped: Switchboard reveal instruction (already processed by oracle)`);
+            }
         } else {
             console.log(`   Skipping: Switchboard reveal (already revealed)`);
         }

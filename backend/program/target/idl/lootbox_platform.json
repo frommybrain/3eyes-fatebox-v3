@@ -315,17 +315,49 @@
         },
         {
           "name": "buyer_token_account",
+          "docs": [
+            "Buyer's token account - must match project's payment token and be owned by buyer"
+          ],
           "writable": true
         },
         {
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "project_id"
+              },
+              {
+                "kind": "account",
+                "path": "project_config.payment_token_mint",
+                "account": "ProjectConfig"
+              }
+            ]
+          }
+        },
+        {
           "name": "vault_token_account",
+          "docs": [
+            "Vault token account - must match project's payment token and be owned by vault authority"
+          ],
           "writable": true
         },
         {
           "name": "treasury_token_account",
           "docs": [
             "Treasury token account for receiving platform commission",
-            "This is the ATA of the treasury PDA for this project's token"
+            "Must match project's payment token and be owned by treasury PDA"
           ],
           "writable": true
         },
@@ -557,21 +589,21 @@
         {
           "name": "owner_fee_token_account",
           "docs": [
-            "Owner's t3EYES1 token account (pays launch fee)"
+            "Owner's fee token account (pays launch fee) - must be owned by owner and match fee mint"
           ],
           "writable": true
         },
         {
           "name": "platform_fee_token_account",
           "docs": [
-            "Platform fee collection account (receives launch fee)"
+            "Platform fee collection account (receives launch fee) - must match fee mint"
           ],
           "writable": true
         },
         {
           "name": "fee_token_mint",
           "docs": [
-            "t3EYES1 mint (fee token)"
+            "Fee token mint (e.g., $3EYES)"
           ]
         },
         {
@@ -704,7 +736,36 @@
           }
         },
         {
-          "name": "vault_token_account"
+          "name": "vault_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "project_id"
+              },
+              {
+                "kind": "account",
+                "path": "project_config.payment_token_mint",
+                "account": "ProjectConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "docs": [
+            "Vault token account - verified for correct mint and ownership"
+          ]
         },
         {
           "name": "randomness_account"
@@ -816,14 +877,23 @@
           }
         },
         {
-          "name": "payment_token_mint"
+          "name": "payment_token_mint",
+          "docs": [
+            "Payment token mint - must match project's configured token"
+          ]
         },
         {
           "name": "vault_token_account",
+          "docs": [
+            "Vault token account - must match project's payment token and be owned by vault authority"
+          ],
           "writable": true
         },
         {
           "name": "owner_token_account",
+          "docs": [
+            "Owner's token account - must match project's payment token and be owned by signer"
+          ],
           "writable": true
         },
         {
@@ -1235,14 +1305,23 @@
           }
         },
         {
-          "name": "payment_token_mint"
+          "name": "payment_token_mint",
+          "docs": [
+            "Payment token mint - must match project's configured token"
+          ]
         },
         {
           "name": "vault_token_account",
+          "docs": [
+            "Vault token account - must match project's payment token and be owned by vault authority"
+          ],
           "writable": true
         },
         {
           "name": "owner_token_account",
+          "docs": [
+            "Owner's token account - must match project's payment token and be owned by signer"
+          ],
           "writable": true
         },
         {
@@ -1511,6 +1590,36 @@
       "code": 6020,
       "name": "InvalidLuckInterval",
       "msg": "Invalid luck interval (must be >= 0)"
+    },
+    {
+      "code": 6021,
+      "name": "InvalidVaultTokenAccount",
+      "msg": "Invalid vault token account (wrong mint or owner)"
+    },
+    {
+      "code": 6022,
+      "name": "InvalidTreasuryTokenAccount",
+      "msg": "Invalid treasury token account (wrong mint or owner)"
+    },
+    {
+      "code": 6023,
+      "name": "InvalidOwnerTokenAccount",
+      "msg": "Invalid owner token account (wrong mint or owner)"
+    },
+    {
+      "code": 6024,
+      "name": "InvalidBuyerTokenAccount",
+      "msg": "Invalid buyer token account (wrong mint or owner)"
+    },
+    {
+      "code": 6025,
+      "name": "InvalidFeeTokenAccount",
+      "msg": "Invalid fee token account (wrong mint or owner)"
+    },
+    {
+      "code": 6026,
+      "name": "InvalidProbabilitySum",
+      "msg": "Invalid probability configuration (must sum to <= 10000)"
     }
   ],
   "types": [

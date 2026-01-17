@@ -1028,6 +1028,7 @@ router.post('/build-create-box-tx', async (req, res) => {
                 projectConfig: projectConfigPDA,
                 boxInstance: boxInstancePDA,
                 buyerTokenAccount: buyerTokenAccount,
+                vaultAuthority: vaultAuthorityPDA,
                 vaultTokenAccount: vaultTokenAccount,
                 treasuryTokenAccount: treasuryTokenAccount,
                 treasury: treasuryPDA,
@@ -1379,6 +1380,7 @@ router.post('/build-create-boxes-batch-tx', async (req, res) => {
                         projectConfig: projectConfigPDA,
                         boxInstance: boxInstancePDA,
                         buyerTokenAccount: buyerTokenAccount,
+                        vaultAuthority: vaultAuthorityPDA,
                         vaultTokenAccount: vaultTokenAccount,
                         treasuryTokenAccount: treasuryTokenAccount,
                         treasury: treasuryPDA,
@@ -2294,6 +2296,7 @@ router.post('/build-reveal-box-tx', async (req, res) => {
                 platformConfig: platformConfigPDA,
                 projectConfig: projectConfigPDA,
                 boxInstance: boxInstancePDA,
+                vaultAuthority: vaultAuthorityPDA,
                 vaultTokenAccount: vaultTokenAccount,
                 randomnessAccount: randomnessAccountPubkey,
             })

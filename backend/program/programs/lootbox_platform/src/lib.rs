@@ -32,38 +32,41 @@ pub mod lootbox_platform {
         config.luck_time_interval = luck_time_interval; // e.g., 10800 for production (3 hours)
 
         // Payout multipliers (basis points: 10000 = 1.0x)
-        config.payout_dud = 0;           // 0x
-        config.payout_rebate = 8000;     // 0.8x
+        config.payout_dud = 0;           // 0x (only for expired boxes)
+        config.payout_rebate = 5000;     // 0.5x
         config.payout_breakeven = 10000; // 1.0x
-        config.payout_profit = 25000;    // 2.5x
-        config.payout_jackpot = 100000;  // 10x
+        config.payout_profit = 15000;    // 1.5x
+        config.payout_jackpot = 40000;   // 4x
 
-        // Tier 1: Luck 0-5 (new users, worst odds)
-        // Probabilities in basis points (10000 = 100%)
+        // No-Dud Model: Duds only occur for expired boxes (1hr reveal window)
+        // All probabilities in basis points (10000 = 100%)
+        // Jackpot is the remainder (10000 - sum of others)
+
+        // Tier 1: Luck 0-5 (new users) - 74.5% RTP
         config.tier1_max_luck = 5;
-        config.tier1_dud = 5500;         // 55%
-        config.tier1_rebate = 3000;      // 30%
-        config.tier1_breakeven = 1000;   // 10%
-        config.tier1_profit = 450;       // 4.5%
-        // Jackpot = 10000 - 5500 - 3000 - 1000 - 450 = 50 (0.5%)
+        config.tier1_dud = 0;            // 0% (no duds in normal play)
+        config.tier1_rebate = 7200;      // 72%
+        config.tier1_breakeven = 1700;   // 17%
+        config.tier1_profit = 900;       // 9%
+        // Jackpot = 10000 - 0 - 7200 - 1700 - 900 = 200 (2%)
 
-        // Tier 2: Luck 6-13 (medium holders)
+        // Tier 2: Luck 6-13 (medium holders) - 85% RTP
         config.tier2_max_luck = 13;
-        config.tier2_dud = 4500;         // 45%
-        config.tier2_rebate = 3000;      // 30%
-        config.tier2_breakeven = 1500;   // 15%
-        config.tier2_profit = 850;       // 8.5%
-        // Jackpot = 10000 - 4500 - 3000 - 1500 - 850 = 150 (1.5%)
+        config.tier2_dud = 0;            // 0%
+        config.tier2_rebate = 5700;      // 57%
+        config.tier2_breakeven = 2600;   // 26%
+        config.tier2_profit = 1500;      // 15%
+        // Jackpot = 10000 - 0 - 5700 - 2600 - 1500 = 200 (2%)
 
-        // Tier 3: Luck 14-60 (diamond hands, best odds)
-        config.tier3_dud = 3000;         // 30%
-        config.tier3_rebate = 2500;      // 25%
-        config.tier3_breakeven = 2000;   // 20%
+        // Tier 3: Luck 14-60 (diamond hands) - 94% RTP
+        config.tier3_dud = 0;            // 0%
+        config.tier3_rebate = 4400;      // 44%
+        config.tier3_breakeven = 3400;   // 34%
         config.tier3_profit = 2000;      // 20%
-        // Jackpot = 10000 - 3000 - 2500 - 2000 - 2000 = 500 (5%)
+        // Jackpot = 10000 - 0 - 4400 - 3400 - 2000 = 200 (2%)
 
-        // Platform commission (5% default)
-        config.platform_commission_bps = 500;
+        // Platform commission (1% default)
+        config.platform_commission_bps = 100;
         config.treasury_bump = ctx.bumps.treasury;
 
         config.updated_at = clock.unix_timestamp;
@@ -145,6 +148,29 @@ pub mod lootbox_platform {
         if let Some(v) = tier3_rebate { config.tier3_rebate = v; }
         if let Some(v) = tier3_breakeven { config.tier3_breakeven = v; }
         if let Some(v) = tier3_profit { config.tier3_profit = v; }
+
+        // Validate probability sums (jackpot is the remainder, so sum of others must be <= 10000)
+        // This ensures valid probability distributions and prevents admin misconfiguration
+        let tier1_sum = (config.tier1_dud as u32)
+            .saturating_add(config.tier1_rebate as u32)
+            .saturating_add(config.tier1_breakeven as u32)
+            .saturating_add(config.tier1_profit as u32);
+        require!(tier1_sum <= 10000, LootboxError::InvalidProbabilitySum);
+
+        let tier2_sum = (config.tier2_dud as u32)
+            .saturating_add(config.tier2_rebate as u32)
+            .saturating_add(config.tier2_breakeven as u32)
+            .saturating_add(config.tier2_profit as u32);
+        require!(tier2_sum <= 10000, LootboxError::InvalidProbabilitySum);
+
+        let tier3_sum = (config.tier3_dud as u32)
+            .saturating_add(config.tier3_rebate as u32)
+            .saturating_add(config.tier3_breakeven as u32)
+            .saturating_add(config.tier3_profit as u32);
+        require!(tier3_sum <= 10000, LootboxError::InvalidProbabilitySum);
+
+        msg!("Tier probabilities validated: T1={}bp, T2={}bp, T3={}bp (jackpot is remainder)",
+            tier1_sum, tier2_sum, tier3_sum);
 
         // Update pause state
         if let Some(v) = paused {
@@ -964,15 +990,22 @@ pub struct InitializeProject<'info> {
     pub payment_token_mint: Account<'info, Mint>,
 
     // Launch fee token accounts (t3EYES1)
-    /// Owner's t3EYES1 token account (pays launch fee)
-    #[account(mut)]
+    /// Owner's fee token account (pays launch fee) - must be owned by owner and match fee mint
+    #[account(
+        mut,
+        constraint = owner_fee_token_account.mint == fee_token_mint.key() @ LootboxError::InvalidFeeTokenAccount,
+        constraint = owner_fee_token_account.owner == owner.key() @ LootboxError::InvalidFeeTokenAccount
+    )]
     pub owner_fee_token_account: Account<'info, TokenAccount>,
 
-    /// Platform fee collection account (receives launch fee)
-    #[account(mut)]
+    /// Platform fee collection account (receives launch fee) - must match fee mint
+    #[account(
+        mut,
+        constraint = platform_fee_token_account.mint == fee_token_mint.key() @ LootboxError::InvalidFeeTokenAccount
+    )]
     pub platform_fee_token_account: Account<'info, TokenAccount>,
 
-    /// t3EYES1 mint (fee token)
+    /// Fee token mint (e.g., $3EYES)
     pub fee_token_mint: Account<'info, Mint>,
 
     pub system_program: Program<'info, System>,
@@ -1013,15 +1046,36 @@ pub struct CreateBox<'info> {
     )]
     pub box_instance: Account<'info, BoxInstance>,
 
-    #[account(mut)]
+    /// Buyer's token account - must match project's payment token and be owned by buyer
+    #[account(
+        mut,
+        constraint = buyer_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidBuyerTokenAccount,
+        constraint = buyer_token_account.owner == buyer.key() @ LootboxError::InvalidBuyerTokenAccount
+    )]
     pub buyer_token_account: Account<'info, TokenAccount>,
 
-    #[account(mut)]
+    /// CHECK: Vault authority PDA - used to verify vault token account ownership
+    #[account(
+        seeds = [b"vault", project_id.to_le_bytes().as_ref(), project_config.payment_token_mint.as_ref()],
+        bump = project_config.vault_authority_bump
+    )]
+    pub vault_authority: AccountInfo<'info>,
+
+    /// Vault token account - must match project's payment token and be owned by vault authority
+    #[account(
+        mut,
+        constraint = vault_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidVaultTokenAccount,
+        constraint = vault_token_account.owner == vault_authority.key() @ LootboxError::InvalidVaultTokenAccount
+    )]
     pub vault_token_account: Account<'info, TokenAccount>,
 
     /// Treasury token account for receiving platform commission
-    /// This is the ATA of the treasury PDA for this project's token
-    #[account(mut)]
+    /// Must match project's payment token and be owned by treasury PDA
+    #[account(
+        mut,
+        constraint = treasury_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidTreasuryTokenAccount,
+        constraint = treasury_token_account.owner == treasury.key() @ LootboxError::InvalidTreasuryTokenAccount
+    )]
     pub treasury_token_account: Account<'info, TokenAccount>,
 
     /// Treasury PDA (for verification)
@@ -1089,6 +1143,18 @@ pub struct RevealBox<'info> {
     )]
     pub box_instance: Account<'info, BoxInstance>,
 
+    /// CHECK: Vault authority PDA - used to verify vault token account ownership
+    #[account(
+        seeds = [b"vault", project_id.to_le_bytes().as_ref(), project_config.payment_token_mint.as_ref()],
+        bump = project_config.vault_authority_bump
+    )]
+    pub vault_authority: AccountInfo<'info>,
+
+    /// Vault token account - verified for correct mint and ownership
+    #[account(
+        constraint = vault_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidVaultTokenAccount,
+        constraint = vault_token_account.owner == vault_authority.key() @ LootboxError::InvalidVaultTokenAccount
+    )]
     pub vault_token_account: Account<'info, TokenAccount>,
 
     /// CHECK: Switchboard VRF randomness account - verified against box_instance.randomness_account
@@ -1122,12 +1188,26 @@ pub struct SettleBox<'info> {
     )]
     pub vault_authority: AccountInfo<'info>,
 
+    /// Payment token mint - must match project's configured token
+    #[account(
+        constraint = payment_token_mint.key() == project_config.payment_token_mint @ LootboxError::InvalidVaultTokenAccount
+    )]
     pub payment_token_mint: Account<'info, Mint>,
 
-    #[account(mut)]
+    /// Vault token account - must match project's payment token and be owned by vault authority
+    #[account(
+        mut,
+        constraint = vault_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidVaultTokenAccount,
+        constraint = vault_token_account.owner == vault_authority.key() @ LootboxError::InvalidVaultTokenAccount
+    )]
     pub vault_token_account: Account<'info, TokenAccount>,
 
-    #[account(mut)]
+    /// Owner's token account - must match project's payment token and be owned by signer
+    #[account(
+        mut,
+        constraint = owner_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidOwnerTokenAccount,
+        constraint = owner_token_account.owner == owner.key() @ LootboxError::InvalidOwnerTokenAccount
+    )]
     pub owner_token_account: Account<'info, TokenAccount>,
 
     pub token_program: Program<'info, Token>,
@@ -1152,12 +1232,26 @@ pub struct WithdrawEarnings<'info> {
     )]
     pub vault_authority: AccountInfo<'info>,
 
+    /// Payment token mint - must match project's configured token
+    #[account(
+        constraint = payment_token_mint.key() == project_config.payment_token_mint @ LootboxError::InvalidVaultTokenAccount
+    )]
     pub payment_token_mint: Account<'info, Mint>,
 
-    #[account(mut)]
+    /// Vault token account - must match project's payment token and be owned by vault authority
+    #[account(
+        mut,
+        constraint = vault_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidVaultTokenAccount,
+        constraint = vault_token_account.owner == vault_authority.key() @ LootboxError::InvalidVaultTokenAccount
+    )]
     pub vault_token_account: Account<'info, TokenAccount>,
 
-    #[account(mut)]
+    /// Owner's token account - must match project's payment token and be owned by signer
+    #[account(
+        mut,
+        constraint = owner_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidOwnerTokenAccount,
+        constraint = owner_token_account.owner == owner.key() @ LootboxError::InvalidOwnerTokenAccount
+    )]
     pub owner_token_account: Account<'info, TokenAccount>,
 
     pub token_program: Program<'info, Token>,
@@ -1420,4 +1514,22 @@ pub enum LootboxError {
 
     #[msg("Invalid luck interval (must be >= 0)")]
     InvalidLuckInterval,
+
+    #[msg("Invalid vault token account (wrong mint or owner)")]
+    InvalidVaultTokenAccount,
+
+    #[msg("Invalid treasury token account (wrong mint or owner)")]
+    InvalidTreasuryTokenAccount,
+
+    #[msg("Invalid owner token account (wrong mint or owner)")]
+    InvalidOwnerTokenAccount,
+
+    #[msg("Invalid buyer token account (wrong mint or owner)")]
+    InvalidBuyerTokenAccount,
+
+    #[msg("Invalid fee token account (wrong mint or owner)")]
+    InvalidFeeTokenAccount,
+
+    #[msg("Invalid probability configuration (must sum to <= 10000)")]
+    InvalidProbabilitySum,
 }

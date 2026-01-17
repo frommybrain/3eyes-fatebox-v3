@@ -321,17 +321,49 @@ export type LootboxPlatform = {
         },
         {
           "name": "buyerTokenAccount",
+          "docs": [
+            "Buyer's token account - must match project's payment token and be owned by buyer"
+          ],
           "writable": true
         },
         {
+          "name": "vaultAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "projectId"
+              },
+              {
+                "kind": "account",
+                "path": "project_config.payment_token_mint",
+                "account": "projectConfig"
+              }
+            ]
+          }
+        },
+        {
           "name": "vaultTokenAccount",
+          "docs": [
+            "Vault token account - must match project's payment token and be owned by vault authority"
+          ],
           "writable": true
         },
         {
           "name": "treasuryTokenAccount",
           "docs": [
             "Treasury token account for receiving platform commission",
-            "This is the ATA of the treasury PDA for this project's token"
+            "Must match project's payment token and be owned by treasury PDA"
           ],
           "writable": true
         },
@@ -563,21 +595,21 @@ export type LootboxPlatform = {
         {
           "name": "ownerFeeTokenAccount",
           "docs": [
-            "Owner's t3EYES1 token account (pays launch fee)"
+            "Owner's fee token account (pays launch fee) - must be owned by owner and match fee mint"
           ],
           "writable": true
         },
         {
           "name": "platformFeeTokenAccount",
           "docs": [
-            "Platform fee collection account (receives launch fee)"
+            "Platform fee collection account (receives launch fee) - must match fee mint"
           ],
           "writable": true
         },
         {
           "name": "feeTokenMint",
           "docs": [
-            "t3EYES1 mint (fee token)"
+            "Fee token mint (e.g., $3EYES)"
           ]
         },
         {
@@ -710,7 +742,36 @@ export type LootboxPlatform = {
           }
         },
         {
-          "name": "vaultTokenAccount"
+          "name": "vaultAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "projectId"
+              },
+              {
+                "kind": "account",
+                "path": "project_config.payment_token_mint",
+                "account": "projectConfig"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vaultTokenAccount",
+          "docs": [
+            "Vault token account - verified for correct mint and ownership"
+          ]
         },
         {
           "name": "randomnessAccount"
@@ -822,14 +883,23 @@ export type LootboxPlatform = {
           }
         },
         {
-          "name": "paymentTokenMint"
+          "name": "paymentTokenMint",
+          "docs": [
+            "Payment token mint - must match project's configured token"
+          ]
         },
         {
           "name": "vaultTokenAccount",
+          "docs": [
+            "Vault token account - must match project's payment token and be owned by vault authority"
+          ],
           "writable": true
         },
         {
           "name": "ownerTokenAccount",
+          "docs": [
+            "Owner's token account - must match project's payment token and be owned by signer"
+          ],
           "writable": true
         },
         {
@@ -1241,14 +1311,23 @@ export type LootboxPlatform = {
           }
         },
         {
-          "name": "paymentTokenMint"
+          "name": "paymentTokenMint",
+          "docs": [
+            "Payment token mint - must match project's configured token"
+          ]
         },
         {
           "name": "vaultTokenAccount",
+          "docs": [
+            "Vault token account - must match project's payment token and be owned by vault authority"
+          ],
           "writable": true
         },
         {
           "name": "ownerTokenAccount",
+          "docs": [
+            "Owner's token account - must match project's payment token and be owned by signer"
+          ],
           "writable": true
         },
         {
@@ -1517,6 +1596,36 @@ export type LootboxPlatform = {
       "code": 6020,
       "name": "invalidLuckInterval",
       "msg": "Invalid luck interval (must be >= 0)"
+    },
+    {
+      "code": 6021,
+      "name": "invalidVaultTokenAccount",
+      "msg": "Invalid vault token account (wrong mint or owner)"
+    },
+    {
+      "code": 6022,
+      "name": "invalidTreasuryTokenAccount",
+      "msg": "Invalid treasury token account (wrong mint or owner)"
+    },
+    {
+      "code": 6023,
+      "name": "invalidOwnerTokenAccount",
+      "msg": "Invalid owner token account (wrong mint or owner)"
+    },
+    {
+      "code": 6024,
+      "name": "invalidBuyerTokenAccount",
+      "msg": "Invalid buyer token account (wrong mint or owner)"
+    },
+    {
+      "code": 6025,
+      "name": "invalidFeeTokenAccount",
+      "msg": "Invalid fee token account (wrong mint or owner)"
+    },
+    {
+      "code": 6026,
+      "name": "invalidProbabilitySum",
+      "msg": "Invalid probability configuration (must sum to <= 10000)"
     }
   ],
   "types": [

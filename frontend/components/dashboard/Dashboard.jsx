@@ -780,6 +780,32 @@ function BoxCard({ box, project, onRefresh }) {
 
                 throw new Error(buildResult.details || buildResult.error);
             }
+
+            // Check if result was recovered from on-chain (already revealed)
+            if (buildResult.alreadyRevealed && buildResult.reward) {
+                addLog('Result recovered from on-chain!');
+
+                // Update UI with recovered result
+                startBoxTransition(() => {
+                    setOptimisticBox({
+                        box_result: buildResult.reward.tier,
+                        payout_amount: buildResult.reward.payoutAmount,
+                        randomness_committed: false
+                    });
+                });
+                setRevealResult(buildResult.reward);
+
+                const tierName = getTierName(buildResult.reward.tier);
+                const payout = buildResult.reward.payoutAmount
+                    ? (buildResult.reward.payoutAmount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
+                    : '0';
+                endTransaction(true, `Recovered: ${tierName}! Payout: ${payout} ${project.payment_token_symbol}`);
+
+                // Refresh boxes list
+                if (onRefresh) onRefresh();
+                return;
+            }
+
             addLog('Reveal transaction built');
 
             // Step 2: Deserialize transaction

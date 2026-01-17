@@ -2084,11 +2084,74 @@ router.post('/build-reveal-box-tx', async (req, res) => {
 
         // Read revealed (1 byte)
         const isRevealed = data[offset] === 1;
+        offset += 1;
 
         if (isRevealed) {
-            return res.status(400).json({
-                success: false,
-                error: 'Box has already been revealed on-chain',
+            // Box is already revealed on-chain - read the result and sync to database
+            console.log(`   ⚠️ Box already revealed on-chain - recovering result...`);
+
+            // Continue parsing BoxInstance to get result:
+            // settled: bool (1 byte)
+            const isSettled = data[offset] === 1;
+            offset += 1;
+
+            // reward_amount: u64 (8 bytes, little-endian)
+            const rewardAmount = data.readBigUInt64LE(offset);
+            offset += 8;
+
+            // is_jackpot: bool (1 byte)
+            const isJackpot = data[offset] === 1;
+            offset += 1;
+
+            // random_percentage: f64 (8 bytes)
+            const randomPercentage = data.readDoubleLE(offset);
+            offset += 8;
+
+            // reward_tier: u8 (1 byte) - On-chain: 0=Dud, 1=Rebate, 2=Break-even, 3=Profit, 4=Jackpot
+            const rewardTierOnChain = data[offset];
+
+            // Convert on-chain tier (0-4) to DB tier (1-5) - DB uses 1-indexed
+            const rewardTierDB = rewardTierOnChain + 1;
+
+            console.log(`   On-chain result found:`);
+            console.log(`   - Reward tier: ${rewardTierOnChain} (on-chain) / ${rewardTierDB} (DB)`);
+            console.log(`   - Reward amount: ${rewardAmount}`);
+            console.log(`   - Is jackpot: ${isJackpot}`);
+            console.log(`   - Random %: ${(randomPercentage * 100).toFixed(2)}%`);
+            console.log(`   - Settled: ${isSettled}`);
+
+            // Update database with on-chain result
+            const { error: updateError } = await supabase
+                .from('boxes')
+                .update({
+                    box_result: rewardTierDB,
+                    payout_amount: Number(rewardAmount),
+                    luck_value: currentLuck,
+                    opened_at: new Date().toISOString(),
+                })
+                .eq('id', box.id);
+
+            if (updateError) {
+                console.error(`   Failed to sync result to database:`, updateError);
+            } else {
+                console.log(`   ✅ Result synced to database`);
+            }
+
+            // Return the recovered result
+            const tierNames = ['Dud', 'Rebate', 'Break-even', 'Profit', 'Jackpot'];
+            return res.json({
+                success: true,
+                alreadyRevealed: true,
+                recovered: true,
+                reward: {
+                    tier: rewardTierDB,
+                    tierName: tierNames[rewardTierOnChain] || 'Unknown',
+                    payoutAmount: Number(rewardAmount),
+                    isJackpot,
+                    randomPercentage,
+                    luck: currentLuck,
+                },
+                message: 'Box was already revealed on-chain. Result has been recovered.',
             });
         }
 

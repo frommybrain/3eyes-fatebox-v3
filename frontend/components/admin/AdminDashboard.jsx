@@ -4,7 +4,6 @@
 import { useEffect, useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { PublicKey } from '@solana/web3.js';
-import { useRouter } from 'next/navigation';
 import useNetworkStore from '@/store/useNetworkStore';
 import useProjectStore from '@/store/useProjectStore';
 import { supabase } from '@/lib/supabase';
@@ -16,16 +15,16 @@ import {
     DegenLoadingState,
     useToast,
 } from '@/components/ui';
+import LogsViewer from './LogsViewer';
 
 export default function AdminDashboard() {
-    const router = useRouter();
     const { toast } = useToast();
     const { publicKey, connected } = useWallet();
     const { config, configLoading, refreshConfig } = useNetworkStore();
     const { projects, loadAllProjects } = useProjectStore();
 
     const [mounted, setMounted] = useState(false);
-    const [activeTab, setActiveTab] = useState('projects'); // 'projects', 'config', or 'onchain'
+    const [activeTab, setActiveTab] = useState('projects'); // 'projects', 'config', 'onchain', 'treasury', or 'logs'
     const [configForm, setConfigForm] = useState({});
     const [saving, setSaving] = useState(false);
 
@@ -35,33 +34,36 @@ export default function AdminDashboard() {
     const [onChainConfigForm, setOnChainConfigForm] = useState({});
     const [savingOnChain, setSavingOnChain] = useState(false);
 
+    // Treasury state
+    const [treasuryData, setTreasuryData] = useState(null);
+    const [treasuryLoading, setTreasuryLoading] = useState(false);
+    const [withdrawingToken, setWithdrawingToken] = useState(null); // tokenMint being withdrawn
+    const [treasuryLogs, setTreasuryLogs] = useState([]);
+    const [treasuryLogsLoading, setTreasuryLogsLoading] = useState(false);
+
     // Check if user is admin
     const isAdmin = publicKey && config && publicKey.toString() === config.adminWallet.toString();
 
     useEffect(() => {
         setMounted(true);
+    }, []);
 
-        // Redirect if not admin
-        if (mounted && (!connected || !isAdmin)) {
-            router.push('/');
-            return;
-        }
-
-        // Load data
+    // Load data when admin is connected
+    useEffect(() => {
         if (isAdmin) {
             loadAllProjects();
         }
-    }, [connected, isAdmin, mounted, router, loadAllProjects]);
+    }, [isAdmin, loadAllProjects]);
 
     // Separate effect to update form when config changes
     useEffect(() => {
         if (config && isAdmin) {
             setConfigForm({
                 launchFeeAmount: config.launchFeeAmount ? config.launchFeeAmount / 1e9 : 100,
-                withdrawalFeePercentage: config.withdrawalFeePercentage ?? 2.0,
                 threeEyesMint: config.threeEyesMint?.toString() || '',
                 lootboxProgramId: config.lootboxProgramId?.toString() || config.programId?.toString() || '',
-                vaultFundAmount: config.vaultFundAmount ? config.vaultFundAmount / 1e9 : 50000000, // 50M default
+                // Note: vaultFundAmount removed - now calculated dynamically based on box price
+                // Note: withdrawalFeePercentage removed - we use box commission instead (on-chain config)
             });
         }
     }, [config, isAdmin]);
@@ -86,22 +88,25 @@ export default function AdminDashboard() {
                     payoutRebate: cfg.payoutMultipliers.rebate,
                     payoutBreakeven: cfg.payoutMultipliers.breakeven,
                     payoutProfit: cfg.payoutMultipliers.profit,
-                    payoutJackpot: cfg.payoutMultipliers.jackpot,
-                    // Tier probabilities (as percentages)
+                    payoutJackpot: cfg.payoutMultipliers.jackpot ?? 4, // Grok recommends 4x
+                    // Tier probabilities (as percentages) - Grok's no-dud model
+                    // RTP: Tier1=74.5%, Tier2=85%, Tier3=94%
                     tier1MaxLuck: cfg.tiers?.tier1?.maxLuck ?? 5,
-                    tier1Dud: cfg.tiers?.tier1?.dud ?? 55,
-                    tier1Rebate: cfg.tiers?.tier1?.rebate ?? 30,
-                    tier1Breakeven: cfg.tiers?.tier1?.breakeven ?? 10,
-                    tier1Profit: cfg.tiers?.tier1?.profit ?? 4.5,
+                    tier1Dud: cfg.tiers?.tier1?.dud ?? 0,      // No duds
+                    tier1Rebate: cfg.tiers?.tier1?.rebate ?? 72,
+                    tier1Breakeven: cfg.tiers?.tier1?.breakeven ?? 17,
+                    tier1Profit: cfg.tiers?.tier1?.profit ?? 9,
                     tier2MaxLuck: cfg.tiers?.tier2?.maxLuck ?? 13,
-                    tier2Dud: cfg.tiers?.tier2?.dud ?? 45,
-                    tier2Rebate: cfg.tiers?.tier2?.rebate ?? 30,
-                    tier2Breakeven: cfg.tiers?.tier2?.breakeven ?? 15,
-                    tier2Profit: cfg.tiers?.tier2?.profit ?? 8.5,
-                    tier3Dud: cfg.tiers?.tier3?.dud ?? 30,
-                    tier3Rebate: cfg.tiers?.tier3?.rebate ?? 25,
-                    tier3Breakeven: cfg.tiers?.tier3?.breakeven ?? 20,
+                    tier2Dud: cfg.tiers?.tier2?.dud ?? 0,      // No duds
+                    tier2Rebate: cfg.tiers?.tier2?.rebate ?? 57,
+                    tier2Breakeven: cfg.tiers?.tier2?.breakeven ?? 26,
+                    tier2Profit: cfg.tiers?.tier2?.profit ?? 15,
+                    tier3Dud: cfg.tiers?.tier3?.dud ?? 0,      // No duds
+                    tier3Rebate: cfg.tiers?.tier3?.rebate ?? 44,
+                    tier3Breakeven: cfg.tiers?.tier3?.breakeven ?? 34,
                     tier3Profit: cfg.tiers?.tier3?.profit ?? 20,
+                    // Platform commission (as percentage)
+                    platformCommission: cfg.platformCommissionPercent ?? 5,
                 });
             } else {
                 toast.error('Failed to load on-chain config: ' + result.error);
@@ -111,6 +116,86 @@ export default function AdminDashboard() {
             toast.error('Failed to load on-chain config');
         }
         setOnChainConfigLoading(false);
+    };
+
+    // Load treasury data
+    const loadTreasuryData = async () => {
+        setTreasuryLoading(true);
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+
+            // Also load on-chain config if not already loaded (for commission rate)
+            if (!onChainConfig) {
+                loadOnChainConfig();
+            }
+
+            // Load treasury logs in parallel
+            loadTreasuryLogs();
+
+            const response = await fetch(`${backendUrl}/api/admin/treasury-balances`);
+            const result = await response.json();
+
+            if (result.success) {
+                setTreasuryData(result);
+            } else {
+                toast.error('Failed to load treasury data: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Error loading treasury data:', error);
+            toast.error('Failed to load treasury data');
+        }
+        setTreasuryLoading(false);
+    };
+
+    // Load treasury activity logs
+    const loadTreasuryLogs = async () => {
+        setTreasuryLogsLoading(true);
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+            const response = await fetch(`${backendUrl}/api/admin/treasury-logs?limit=20`);
+            const result = await response.json();
+
+            if (result.success) {
+                setTreasuryLogs(result.logs);
+            } else {
+                console.error('Failed to load treasury logs:', result.error);
+            }
+        } catch (error) {
+            console.error('Error loading treasury logs:', error);
+        }
+        setTreasuryLogsLoading(false);
+    };
+
+    // Withdraw token from treasury to admin wallet
+    const handleWithdrawToken = async (tokenMint, symbol) => {
+        if (!confirm(`Withdraw all ${symbol} from treasury to admin wallet?`)) {
+            return;
+        }
+
+        setWithdrawingToken(tokenMint);
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+
+            const response = await fetch(`${backendUrl}/api/admin/withdraw-treasury`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tokenMint }),
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                toast.success(`Withdrawn ${symbol} to admin wallet!`);
+                // Reload treasury data
+                loadTreasuryData();
+            } else {
+                toast.error('Withdrawal failed: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Error withdrawing from treasury:', error);
+            toast.error('Failed to withdraw from treasury');
+        }
+        setWithdrawingToken(null);
     };
 
     // Save on-chain config
@@ -147,6 +232,8 @@ export default function AdminDashboard() {
                 tier3Rebate: onChainConfigForm.tier3Rebate !== tiers.tier3?.rebate ? Math.round(onChainConfigForm.tier3Rebate * 100) : undefined,
                 tier3Breakeven: onChainConfigForm.tier3Breakeven !== tiers.tier3?.breakeven ? Math.round(onChainConfigForm.tier3Breakeven * 100) : undefined,
                 tier3Profit: onChainConfigForm.tier3Profit !== tiers.tier3?.profit ? Math.round(onChainConfigForm.tier3Profit * 100) : undefined,
+                // Platform commission (convert percentage to basis points: 5% = 500)
+                platformCommissionBps: onChainConfigForm.platformCommission !== onChainConfig.platformCommissionPercent ? Math.round(onChainConfigForm.platformCommission * 100) : undefined,
             };
 
             // Remove undefined values
@@ -168,6 +255,26 @@ export default function AdminDashboard() {
 
             if (result.success) {
                 toast.success('On-chain config updated!');
+
+                // Sync luck interval to database if it was changed
+                if (payload.luckTimeInterval !== undefined) {
+                    try {
+                        const { error: dbError } = await supabase
+                            .from('super_admin_config')
+                            .update({ luck_interval_seconds: payload.luckTimeInterval })
+                            .eq('id', 1);
+
+                        if (dbError) {
+                            console.error('Failed to sync luck interval to database:', dbError);
+                        } else {
+                            // Refresh the network config store so other components get the new value
+                            await refreshConfig();
+                        }
+                    } catch (syncError) {
+                        console.error('Error syncing luck interval:', syncError);
+                    }
+                }
+
                 // Reload to get fresh values
                 await loadOnChainConfig();
             } else {
@@ -185,8 +292,8 @@ export default function AdminDashboard() {
         try {
             const updates = {
                 launch_fee_amount: Math.floor(configForm.launchFeeAmount * 1e9),
-                withdrawal_fee_percentage: configForm.withdrawalFeePercentage,
-                vault_fund_amount: Math.floor(configForm.vaultFundAmount * 1e9),
+                // Note: vault_fund_amount removed - now calculated dynamically based on box price
+                // Note: withdrawal_fee_percentage removed - we use box commission instead (on-chain config)
             };
 
             // Only update token addresses if they're provided
@@ -279,8 +386,46 @@ export default function AdminDashboard() {
         );
     }
 
-    if (!connected || !isAdmin) {
-        return null; // Will redirect
+    if (!connected) {
+        return (
+            <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-6">
+                <div className="max-w-7xl mx-auto">
+                    <div className="mb-8">
+                        <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">Admin Dashboard</h1>
+                        <p className="text-degen-text-muted text-lg">Platform management and configuration</p>
+                    </div>
+                    <DegenCard variant="white" padding="lg" className="text-center">
+                        <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-4">
+                            Connect Your Wallet
+                        </h2>
+                        <p className="text-degen-text-muted mb-6">
+                            Please connect your wallet to access the admin dashboard.
+                        </p>
+                    </DegenCard>
+                </div>
+            </div>
+        );
+    }
+
+    if (!isAdmin) {
+        return (
+            <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-6">
+                <div className="max-w-7xl mx-auto">
+                    <div className="mb-8">
+                        <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">Admin Dashboard</h1>
+                        <p className="text-degen-text-muted text-lg">Platform management and configuration</p>
+                    </div>
+                    <DegenCard variant="white" padding="lg" className="text-center">
+                        <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-4">
+                            Access Denied
+                        </h2>
+                        <p className="text-degen-text-muted mb-6">
+                            You do not have admin access to this dashboard.
+                        </p>
+                    </DegenCard>
+                </div>
+            </div>
+        );
     }
 
     return (
@@ -314,7 +459,7 @@ export default function AdminDashboard() {
                         </div>
                         <div>
                             <p className="text-degen-text-muted text-sm uppercase tracking-wider mb-1">RPC URL</p>
-                            <p className="text-degen-black text-sm font-mono">{config.rpcUrl.slice(0, 30)}...</p>
+                            <p className="text-degen-black text-sm font-mono">{config.rpcUrl ? `${config.rpcUrl.slice(0, 30)}...` : 'Not configured'}</p>
                         </div>
                     </div>
                 </DegenCard>
@@ -341,6 +486,21 @@ export default function AdminDashboard() {
                         variant={activeTab === 'onchain' ? 'primary' : 'secondary'}
                     >
                         On-Chain Config
+                    </DegenButton>
+                    <DegenButton
+                        onClick={() => {
+                            setActiveTab('treasury');
+                            if (!treasuryData) loadTreasuryData();
+                        }}
+                        variant={activeTab === 'treasury' ? 'primary' : 'secondary'}
+                    >
+                        Treasury
+                    </DegenButton>
+                    <DegenButton
+                        onClick={() => setActiveTab('logs')}
+                        variant={activeTab === 'logs' ? 'primary' : 'secondary'}
+                    >
+                        Activity Logs
                     </DegenButton>
                 </div>
 
@@ -418,7 +578,7 @@ export default function AdminDashboard() {
                                     className="font-mono text-sm"
                                 />
                                 <p className="text-degen-text-muted text-sm mt-1">
-                                    Platform token used for launch fees and withdrawal fees
+                                    Platform token used for launch fees
                                 </p>
                                 {config.network === 'devnet' && (
                                     <p className="text-degen-warning text-sm mt-1">
@@ -467,49 +627,18 @@ export default function AdminDashboard() {
                         <div className="mb-8 p-6 bg-degen-bg border border-degen-black">
                             <h3 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-4">Project Creation Settings</h3>
 
-                            {/* Vault Fund Amount */}
-                            <div className="mb-6">
-                                <DegenInput
-                                    label="Required Vault Funding (tokens)"
-                                    type="number"
-                                    value={configForm.vaultFundAmount ?? 50000000}
-                                    onChange={(e) => {
-                                        const value = e.target.value === '' ? 50000000 : parseFloat(e.target.value);
-                                        setConfigForm({ ...configForm, vaultFundAmount: isNaN(value) ? 50000000 : value });
-                                    }}
-                                    min="0"
-                                    step="1000000"
-                                />
-                                <p className="text-degen-text-muted text-sm mt-1">
-                                    Amount of tokens project creators must transfer to fund their vault on project creation.
-                                    This ensures there are funds to pay out rewards.
+                            {/* Dynamic Vault Funding Info */}
+                            <div className="p-4 bg-degen-yellow border border-degen-black">
+                                <p className="text-degen-black font-medium mb-2">Dynamic Vault Funding</p>
+                                <p className="text-degen-black text-sm mb-2">
+                                    Vault funding is now calculated dynamically based on the project&apos;s box price.
+                                    This ensures creators only need to fund what&apos;s statistically required.
                                 </p>
-                                <div className="mt-2 flex gap-2">
-                                    <DegenButton
-                                        type="button"
-                                        onClick={() => setConfigForm({ ...configForm, vaultFundAmount: 1000 })}
-                                        variant="warning"
-                                        size="sm"
-                                    >
-                                        Set Dev Mode (1K)
-                                    </DegenButton>
-                                    <DegenButton
-                                        type="button"
-                                        onClick={() => setConfigForm({ ...configForm, vaultFundAmount: 50000000 })}
-                                        variant="success"
-                                        size="sm"
-                                    >
-                                        Set Production (50M)
-                                    </DegenButton>
+                                <div className="text-degen-black text-sm space-y-1">
+                                    <p><strong>Formula:</strong> ~30x box price (minimum)</p>
+                                    <p><strong>Based on:</strong> 99th percentile worst-case variance analysis</p>
+                                    <p><strong>Example:</strong> 1,000 token box price → ~30,000 token vault funding</p>
                                 </div>
-                            </div>
-
-                            {/* Current Vault Fund Setting Display */}
-                            <div className="p-3 bg-degen-white border border-degen-black">
-                                <p className="text-degen-text-muted text-xs uppercase tracking-wider">Current Setting:</p>
-                                <p className="text-degen-black font-medium">
-                                    {(config.vaultFundAmount ? (Number(config.vaultFundAmount) / 1e9).toLocaleString() : '50,000,000')} tokens
-                                </p>
                             </div>
                         </div>
 
@@ -535,22 +664,12 @@ export default function AdminDashboard() {
                                 </p>
                             </div>
 
-                            {/* Withdrawal Fee */}
-                            <div className="mb-6">
-                                <DegenInput
-                                    label="Withdrawal Fee (percentage)"
-                                    type="number"
-                                    value={configForm.withdrawalFeePercentage}
-                                    onChange={(e) => {
-                                        const value = e.target.value === '' ? 0 : parseFloat(e.target.value);
-                                        setConfigForm({ ...configForm, withdrawalFeePercentage: isNaN(value) ? 0 : value });
-                                    }}
-                                    min="0"
-                                    max="100"
-                                    step="0.1"
-                                />
-                                <p className="text-degen-text-muted text-sm mt-1">
-                                    Fee creators pay when withdrawing earnings (in $3EYES)
+                            {/* Box Commission Note */}
+                            <div className="p-4 bg-degen-yellow border border-degen-black">
+                                <p className="text-degen-black font-medium mb-1">Box Commission</p>
+                                <p className="text-degen-black text-sm">
+                                    Platform revenue is collected via box purchase commission (configured in On-Chain Config tab).
+                                    No withdrawal fees are charged to creators.
                                 </p>
                             </div>
                         </div>
@@ -578,10 +697,6 @@ export default function AdminDashboard() {
                                 <div>
                                     <p className="text-degen-text-muted text-xs uppercase tracking-wider">Launch Fee</p>
                                     <p className="text-degen-black font-medium">{config.launchFeeAmount / 1e9} $3EYES</p>
-                                </div>
-                                <div>
-                                    <p className="text-degen-text-muted text-xs uppercase tracking-wider">Withdrawal Fee</p>
-                                    <p className="text-degen-black font-medium">{config.withdrawalFeePercentage}%</p>
                                 </div>
                             </div>
                         </div>
@@ -643,6 +758,31 @@ export default function AdminDashboard() {
                                     </div>
                                 </div>
 
+                                {/* Platform Commission */}
+                                <div className="mb-8 p-6 bg-degen-bg border border-degen-black">
+                                    <h3 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-4">Platform Commission</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <DegenInput
+                                                label="Commission Rate (%)"
+                                                type="number"
+                                                value={onChainConfigForm.platformCommission ?? 5}
+                                                onChange={(e) => setOnChainConfigForm({ ...onChainConfigForm, platformCommission: parseFloat(e.target.value) || 0 })}
+                                                min="0"
+                                                max="50"
+                                                step="0.5"
+                                            />
+                                            <p className="text-degen-text-muted text-xs mt-1">Percentage taken from box purchases (sent to treasury)</p>
+                                        </div>
+                                        <div className="flex items-end">
+                                            <div className="p-3 bg-degen-white border border-degen-black w-full">
+                                                <p className="text-degen-text-muted text-xs uppercase tracking-wider mb-1">Current On-Chain Value</p>
+                                                <p className="text-degen-black font-medium text-lg">{onChainConfig.platformCommissionPercent ?? 5}%</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 {/* Luck Parameters */}
                                 <div className="mb-8 p-6 bg-degen-yellow border border-degen-black">
                                     <h3 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-4">Luck Parameters</h3>
@@ -671,13 +811,13 @@ export default function AdminDashboard() {
                                         </div>
                                         <div>
                                             <DegenInput
-                                                label="Luck Interval (seconds)"
+                                                label="Platform Default Luck Interval (seconds)"
                                                 type="number"
                                                 value={onChainConfigForm.luckTimeInterval ?? 3}
                                                 onChange={(e) => setOnChainConfigForm({ ...onChainConfigForm, luckTimeInterval: parseInt(e.target.value) || 3 })}
                                                 min="1"
                                             />
-                                            <p className="text-degen-text-muted text-xs mt-1">Seconds per +1 luck</p>
+                                            <p className="text-degen-text-muted text-xs mt-1">Seconds per +1 luck (projects can override this)</p>
                                         </div>
                                     </div>
                                     <div className="mt-4 flex gap-2">
@@ -766,6 +906,142 @@ export default function AdminDashboard() {
                                             <span>Jackpot: <strong>{onChainConfig.payoutMultipliers.jackpot}x</strong></span>
                                         </div>
                                     </div>
+                                </div>
+
+                                {/* EV/RTP Calculator */}
+                                <div className="mb-8 p-6 bg-degen-primary border border-degen-black">
+                                    <h3 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-2">Expected Value & RTP Calculator</h3>
+                                    <p className="text-degen-text-muted text-sm mb-4">
+                                        Real-time calculation of Expected Value (EV) and Return To Player (RTP) based on current probability settings.
+                                        <strong> House always wins when RTP &lt; 100%.</strong>
+                                    </p>
+
+                                    {/* Formula explanation */}
+                                    <div className="mb-4 p-3 bg-degen-white border border-degen-black text-sm">
+                                        <p className="text-degen-black font-medium mb-1">Formula:</p>
+                                        <p className="text-degen-text-muted font-mono text-xs">
+                                            EV = (Dud% × {onChainConfigForm.payoutDud || 0}x) + (Rebate% × {onChainConfigForm.payoutRebate || 0.5}x) + (Break-even% × {onChainConfigForm.payoutBreakeven || 1}x) + (Profit% × {onChainConfigForm.payoutProfit || 1.5}x) + (Jackpot% × {onChainConfigForm.payoutJackpot || 3}x)
+                                        </p>
+                                        <p className="text-degen-text-muted mt-1">RTP = EV × 100% | House Edge = 100% - RTP</p>
+                                    </div>
+
+                                    {/* Calculate EVs for each tier */}
+                                    {(() => {
+                                        const payouts = {
+                                            dud: onChainConfigForm.payoutDud || 0,
+                                            rebate: onChainConfigForm.payoutRebate || 0.5,
+                                            breakeven: onChainConfigForm.payoutBreakeven || 1,
+                                            profit: onChainConfigForm.payoutProfit || 1.5,
+                                            jackpot: onChainConfigForm.payoutJackpot || 4, // Grok recommends 4x
+                                        };
+
+                                        const calcEV = (dud, rebate, breakeven, profit) => {
+                                            const jackpot = Math.max(0, 100 - dud - rebate - breakeven - profit);
+                                            return (
+                                                (dud / 100) * payouts.dud +
+                                                (rebate / 100) * payouts.rebate +
+                                                (breakeven / 100) * payouts.breakeven +
+                                                (profit / 100) * payouts.profit +
+                                                (jackpot / 100) * payouts.jackpot
+                                            );
+                                        };
+
+                                        // Grok's no-dud model defaults
+                                        // RTP: Tier1=74.5%, Tier2=85%, Tier3=94%
+                                        const tier1EV = calcEV(
+                                            onChainConfigForm.tier1Dud ?? 0,     // No duds
+                                            onChainConfigForm.tier1Rebate ?? 72,
+                                            onChainConfigForm.tier1Breakeven ?? 17,
+                                            onChainConfigForm.tier1Profit ?? 9
+                                        );
+                                        const tier2EV = calcEV(
+                                            onChainConfigForm.tier2Dud ?? 0,     // No duds
+                                            onChainConfigForm.tier2Rebate ?? 57,
+                                            onChainConfigForm.tier2Breakeven ?? 26,
+                                            onChainConfigForm.tier2Profit ?? 15
+                                        );
+                                        const tier3EV = calcEV(
+                                            onChainConfigForm.tier3Dud ?? 0,     // No duds
+                                            onChainConfigForm.tier3Rebate ?? 44,
+                                            onChainConfigForm.tier3Breakeven ?? 34,
+                                            onChainConfigForm.tier3Profit ?? 20
+                                        );
+
+                                        const getVariant = (rtp) => {
+                                            if (rtp >= 100) return 'error'; // House loses
+                                            if (rtp >= 95) return 'warning'; // Very close
+                                            if (rtp >= 85) return 'success'; // Healthy
+                                            return 'info'; // High house edge
+                                        };
+
+                                        const getAdvice = (rtp, tierName) => {
+                                            if (rtp >= 100) return `${tierName}: LOSING MONEY - reduce payouts or jackpot chance`;
+                                            if (rtp >= 95) return `${tierName}: Very generous - only 5% house edge`;
+                                            if (rtp >= 85) return `${tierName}: Healthy - players feel rewarded, house profits`;
+                                            if (rtp >= 70) return `${tierName}: Moderate - reasonable for lower luck tiers`;
+                                            return `${tierName}: Punishing - may discourage replays`;
+                                        };
+
+                                        return (
+                                            <div className="space-y-4">
+                                                {/* Tier 1 - Low Luck */}
+                                                <div className="p-4 bg-degen-white border border-degen-black">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="text-degen-black font-medium">Tier 1 (Low Luck: 0-{onChainConfigForm.tier1MaxLuck || 5})</span>
+                                                        <div className="flex items-center gap-3">
+                                                            <span className="text-degen-text-muted">EV: <strong>{tier1EV.toFixed(3)}x</strong></span>
+                                                            <DegenBadge variant={getVariant(tier1EV * 100)}>
+                                                                RTP: {(tier1EV * 100).toFixed(1)}%
+                                                            </DegenBadge>
+                                                            <span className="text-degen-text-muted text-sm">House Edge: {(100 - tier1EV * 100).toFixed(1)}%</span>
+                                                        </div>
+                                                    </div>
+                                                    <p className="text-sm text-degen-text-muted">{getAdvice(tier1EV * 100, 'Tier 1')}</p>
+                                                </div>
+
+                                                {/* Tier 2 - Medium Luck */}
+                                                <div className="p-4 bg-degen-white border border-degen-black">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="text-degen-black font-medium">Tier 2 (Medium Luck: {(onChainConfigForm.tier1MaxLuck || 5) + 1}-{onChainConfigForm.tier2MaxLuck || 13})</span>
+                                                        <div className="flex items-center gap-3">
+                                                            <span className="text-degen-text-muted">EV: <strong>{tier2EV.toFixed(3)}x</strong></span>
+                                                            <DegenBadge variant={getVariant(tier2EV * 100)}>
+                                                                RTP: {(tier2EV * 100).toFixed(1)}%
+                                                            </DegenBadge>
+                                                            <span className="text-degen-text-muted text-sm">House Edge: {(100 - tier2EV * 100).toFixed(1)}%</span>
+                                                        </div>
+                                                    </div>
+                                                    <p className="text-sm text-degen-text-muted">{getAdvice(tier2EV * 100, 'Tier 2')}</p>
+                                                </div>
+
+                                                {/* Tier 3 - High Luck */}
+                                                <div className="p-4 bg-degen-white border border-degen-black">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="text-degen-black font-medium">Tier 3 (High Luck: {(onChainConfigForm.tier2MaxLuck || 13) + 1}-{onChainConfigForm.maxLuck || 60})</span>
+                                                        <div className="flex items-center gap-3">
+                                                            <span className="text-degen-text-muted">EV: <strong>{tier3EV.toFixed(3)}x</strong></span>
+                                                            <DegenBadge variant={getVariant(tier3EV * 100)}>
+                                                                RTP: {(tier3EV * 100).toFixed(1)}%
+                                                            </DegenBadge>
+                                                            <span className="text-degen-text-muted text-sm">House Edge: {(100 - tier3EV * 100).toFixed(1)}%</span>
+                                                        </div>
+                                                    </div>
+                                                    <p className="text-sm text-degen-text-muted">{getAdvice(tier3EV * 100, 'Tier 3')}</p>
+                                                </div>
+
+                                                {/* Summary */}
+                                                <div className="p-4 bg-degen-yellow border border-degen-black">
+                                                    <p className="text-degen-black font-medium mb-2">Quick Reference:</p>
+                                                    <ul className="text-sm text-degen-black space-y-1">
+                                                        <li>• <strong>Slots/Pokies:</strong> 85-95% RTP typical</li>
+                                                        <li>• <strong>Roulette:</strong> 94.7% RTP (single zero)</li>
+                                                        <li>• <strong>Recommended:</strong> Tier 1: 70-80% | Tier 2: 80-90% | Tier 3: 90-98%</li>
+                                                        <li>• <strong>Key insight:</strong> High RTP keeps players engaged; house edge compounds over volume</li>
+                                                    </ul>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
 
                                 {/* Tier Probability Thresholds */}
@@ -996,6 +1272,279 @@ export default function AdminDashboard() {
                             </div>
                         )}
                     </DegenCard>
+                )}
+
+                {/* Treasury Tab */}
+                {activeTab === 'treasury' && (
+                    <DegenCard variant="white" padding="lg">
+                        <div className="flex items-center justify-between mb-6">
+                            <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider">Platform Treasury</h2>
+                            <DegenButton
+                                onClick={loadTreasuryData}
+                                variant="secondary"
+                                size="sm"
+                                disabled={treasuryLoading}
+                            >
+                                {treasuryLoading ? 'Loading...' : 'Refresh'}
+                            </DegenButton>
+                        </div>
+
+                        {treasuryLoading && !treasuryData ? (
+                            <DegenLoadingState text="Loading treasury data..." />
+                        ) : treasuryData ? (
+                            <>
+                                {/* Treasury PDA Info */}
+                                <div className="mb-6 p-4 bg-degen-bg border border-degen-black">
+                                    <p className="text-degen-text-muted text-xs uppercase tracking-wider mb-1">Treasury PDA</p>
+                                    <p className="text-degen-black font-mono text-sm break-all">{treasuryData.treasuryPDA}</p>
+                                    <div className="mt-3 flex gap-8">
+                                        <div>
+                                            <p className="text-degen-text-muted text-xs uppercase tracking-wider mb-1">Commission Rate</p>
+                                            <p className="text-degen-black font-medium">{onChainConfig?.platformCommissionPercent ?? 5}% on all box purchases</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-degen-text-muted text-xs uppercase tracking-wider mb-1">Token Types</p>
+                                            <p className="text-degen-black font-medium">{treasuryData.totalTokenTypes || 0}</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Token Balances */}
+                                <div className="mb-6">
+                                    <h3 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-4">Token Balances</h3>
+
+                                    {treasuryData.balances && treasuryData.balances.length > 0 ? (
+                                        <div className="space-y-3">
+                                            {treasuryData.balances.map((token, index) => (
+                                                <div key={index} className="p-4 bg-degen-bg border border-degen-black">
+                                                    <div className="flex items-center justify-between">
+                                                        <div>
+                                                            <p className="text-degen-text-muted text-xs uppercase tracking-wider mb-1">
+                                                                {token.symbol || 'Token'}
+                                                            </p>
+                                                            <p className="text-degen-black text-2xl font-medium">
+                                                                {token.balanceFormatted?.toLocaleString(undefined, { maximumFractionDigits: 2 }) || '0'}
+                                                            </p>
+                                                        </div>
+                                                        <div className="flex items-center gap-4">
+                                                            <div className="text-right">
+                                                                <p className="text-degen-text-muted text-xs uppercase tracking-wider mb-1">Mint</p>
+                                                                <p className="text-degen-black font-mono text-xs">
+                                                                    {token.tokenMint?.slice(0, 8)}...{token.tokenMint?.slice(-8)}
+                                                                </p>
+                                                            </div>
+                                                            {parseFloat(token.balance) > 0 && (
+                                                                <DegenButton
+                                                                    onClick={() => handleWithdrawToken(token.tokenMint, token.symbol)}
+                                                                    variant="primary"
+                                                                    size="sm"
+                                                                    disabled={withdrawingToken === token.tokenMint}
+                                                                >
+                                                                    {withdrawingToken === token.tokenMint ? 'Withdrawing...' : 'Withdraw'}
+                                                                </DegenButton>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    {token.treasuryTokenAccount && (
+                                                        <div className="mt-2 pt-2 border-t border-degen-black">
+                                                            <p className="text-degen-text-muted text-xs">
+                                                                Token Account: <span className="font-mono">{token.treasuryTokenAccount}</span>
+                                                            </p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="p-6 bg-degen-bg border border-degen-black text-center">
+                                            <p className="text-degen-text-muted">No tokens collected yet</p>
+                                            <p className="text-degen-text-muted text-sm mt-1">
+                                                Treasury will accumulate tokens as boxes are purchased
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Recent Activity */}
+                                <div className="mb-6">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h3 className="text-degen-black text-xl font-medium uppercase tracking-wider">Recent Activity</h3>
+                                        <DegenButton
+                                            onClick={loadTreasuryLogs}
+                                            variant="secondary"
+                                            size="sm"
+                                            disabled={treasuryLogsLoading}
+                                        >
+                                            {treasuryLogsLoading ? 'Loading...' : 'Refresh'}
+                                        </DegenButton>
+                                    </div>
+
+                                    {treasuryLogsLoading && treasuryLogs.length === 0 ? (
+                                        <div className="p-4 bg-degen-bg border border-degen-black text-center">
+                                            <p className="text-degen-text-muted">Loading activity...</p>
+                                        </div>
+                                    ) : treasuryLogs.length > 0 ? (
+                                        <div className="space-y-2">
+                                            {treasuryLogs.map((log) => (
+                                                <div key={log.id} className="p-3 bg-degen-bg border border-degen-black">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <DegenBadge variant={
+                                                                log.action_type === 'withdraw' ? 'warning' :
+                                                                log.action_type === 'swap' ? 'info' :
+                                                                log.action_type === 'buyback' ? 'success' :
+                                                                log.action_type === 'dev_transfer' ? 'feature' :
+                                                                'secondary'
+                                                            }>
+                                                                {log.action_type?.toUpperCase()}
+                                                            </DegenBadge>
+                                                            <DegenBadge variant={log.status === 'completed' ? 'success' : 'error'}>
+                                                                {log.status?.toUpperCase()}
+                                                            </DegenBadge>
+                                                        </div>
+                                                        <span className="text-degen-text-muted text-xs">
+                                                            {new Date(log.processed_at).toLocaleString()}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="grid grid-cols-2 gap-4 text-sm">
+                                                        {/* Token info */}
+                                                        <div>
+                                                            <p className="text-degen-text-muted text-xs uppercase">Token</p>
+                                                            <p className="text-degen-black font-mono text-xs">
+                                                                {log.token_mint?.slice(0, 8)}...{log.token_mint?.slice(-8)}
+                                                            </p>
+                                                        </div>
+
+                                                        {/* Amount info based on action type */}
+                                                        {log.action_type === 'withdraw' && log.amount_withdrawn && (
+                                                            <div>
+                                                                <p className="text-degen-text-muted text-xs uppercase">Amount Withdrawn</p>
+                                                                <p className="text-degen-black font-medium">
+                                                                    {(Number(log.amount_withdrawn) / 1e9).toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                        {log.action_type === 'swap' && log.sol_received && (
+                                                            <div>
+                                                                <p className="text-degen-text-muted text-xs uppercase">SOL Received</p>
+                                                                <p className="text-degen-black font-medium">
+                                                                    {(Number(log.sol_received) / 1e9).toFixed(6)} SOL
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                        {log.action_type === 'buyback' && log.three_eyes_bought && (
+                                                            <div>
+                                                                <p className="text-degen-text-muted text-xs uppercase">$3EYES Bought</p>
+                                                                <p className="text-degen-black font-medium">
+                                                                    {(Number(log.three_eyes_bought) / 1e9).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                        {log.action_type === 'dev_transfer' && log.dev_sol_amount && (
+                                                            <div>
+                                                                <p className="text-degen-text-muted text-xs uppercase">Dev SOL</p>
+                                                                <p className="text-degen-black font-medium">
+                                                                    {(Number(log.dev_sol_amount) / 1e9).toFixed(6)} SOL
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Solscan Links */}
+                                                    <div className="mt-2 pt-2 border-t border-degen-black flex gap-3 flex-wrap">
+                                                        {log.explorer_links?.tx_signature && (
+                                                            <a
+                                                                href={log.explorer_links.tx_signature}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="text-degen-blue text-xs hover:underline"
+                                                            >
+                                                                View TX on Solscan
+                                                            </a>
+                                                        )}
+                                                        {log.explorer_links?.swap_to_sol_signature && (
+                                                            <a
+                                                                href={log.explorer_links.swap_to_sol_signature}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="text-degen-blue text-xs hover:underline"
+                                                            >
+                                                                Swap TX
+                                                            </a>
+                                                        )}
+                                                        {log.explorer_links?.buyback_signature && (
+                                                            <a
+                                                                href={log.explorer_links.buyback_signature}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="text-degen-blue text-xs hover:underline"
+                                                            >
+                                                                Buyback TX
+                                                            </a>
+                                                        )}
+                                                        {log.explorer_links?.dev_transfer_signature && (
+                                                            <a
+                                                                href={log.explorer_links.dev_transfer_signature}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="text-degen-blue text-xs hover:underline"
+                                                            >
+                                                                Dev Transfer TX
+                                                            </a>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Error message if failed */}
+                                                    {log.status === 'failed' && log.error_message && (
+                                                        <div className="mt-2 p-2 bg-red-50 border border-red-200 text-red-600 text-xs">
+                                                            {log.error_message}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="p-4 bg-degen-bg border border-degen-black text-center">
+                                            <p className="text-degen-text-muted">No activity recorded yet</p>
+                                            <p className="text-degen-text-muted text-sm mt-1">
+                                                Treasury transactions will appear here
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Info about batch processing */}
+                                <div className="p-4 bg-degen-bg border border-degen-black">
+                                    <h4 className="text-degen-black font-medium uppercase tracking-wider mb-2">Treasury Processing Flow</h4>
+                                    <p className="text-degen-text-muted text-sm mb-2">
+                                        Platform commission is collected in project tokens during box purchases.
+                                    </p>
+                                    <ol className="text-degen-text-muted text-sm list-decimal list-inside space-y-1">
+                                        <li>Click Withdraw to move tokens to admin wallet</li>
+                                        <li>Swap tokens to SOL via Jupiter (jup.ag)</li>
+                                        <li>Send 10% SOL to dev wallet</li>
+                                        <li>Swap 90% SOL to $3EYES via Jupiter</li>
+                                    </ol>
+                                    <p className="text-degen-text-muted text-sm mt-2 italic">
+                                        Run: <code className="bg-degen-white px-1">node scripts/process-treasury-fees.js --help</code> for full automation
+                                    </p>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="text-center py-12">
+                                <p className="text-degen-text-muted">Failed to load treasury data</p>
+                                <DegenButton onClick={loadTreasuryData} variant="primary" className="mt-4">
+                                    Retry
+                                </DegenButton>
+                            </div>
+                        )}
+                    </DegenCard>
+                )}
+
+                {/* Logs Tab */}
+                {activeTab === 'logs' && (
+                    <LogsViewer />
                 )}
             </div>
         </div>

@@ -15,7 +15,6 @@ export default function DegenLoader({ size = 'md', className = '' }) {
                 className={`
                     ${sizeStyles}
                     border-2 border-degen-black
-                    border-t-transparent
                     animate-spin
                 `}
             />

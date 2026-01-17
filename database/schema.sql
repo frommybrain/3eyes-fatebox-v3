@@ -22,10 +22,16 @@ CREATE TABLE IF NOT EXISTS super_admin_config (
     -- Admin wallet
     admin_wallet TEXT NOT NULL,
 
-    -- Fee configuration
+    -- Fee configuration (legacy - kept for reference)
     platform_fee_account TEXT NOT NULL,
     launch_fee_amount BIGINT NOT NULL DEFAULT 1000000000, -- 1 SOL in lamports
-    withdrawal_fee_percentage DECIMAL(5,2) NOT NULL DEFAULT 2.50, -- 2.5%
+    withdrawal_fee_percentage DECIMAL(5,2) NOT NULL DEFAULT 2.50, -- 2.5% (DEPRECATED - not used)
+
+    -- Platform commission configuration (new)
+    platform_commission_bps INTEGER NOT NULL DEFAULT 500,  -- 5% commission on box purchases (basis points)
+    dev_cut_bps INTEGER NOT NULL DEFAULT 1000,             -- 10% of commission to dev wallet (basis points)
+    dev_wallet TEXT,                                        -- Dev wallet for SOL payments (defaults to admin_wallet if null)
+    treasury_pda TEXT,                                      -- Global treasury PDA address
 
     -- Platform settings
     platform_active BOOLEAN DEFAULT true,

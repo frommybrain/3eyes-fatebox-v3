@@ -20,6 +20,33 @@ export function derivePlatformConfigPDA(programId) {
 }
 
 /**
+ * Derive treasury PDA (global treasury for platform commission fees)
+ * @param {PublicKey} programId - Program ID
+ * @returns {[PublicKey, number]} - [PDA address, bump seed]
+ */
+export function deriveTreasuryPDA(programId) {
+    const [pda, bump] = PublicKey.findProgramAddressSync(
+        [Buffer.from('treasury')],
+        programId
+    );
+    return [pda, bump];
+}
+
+/**
+ * Derive treasury token account (ATA for treasury PDA)
+ * @param {PublicKey} treasuryPDA - Treasury PDA
+ * @param {PublicKey} tokenMint - Token mint
+ * @returns {Promise<PublicKey>} - Treasury token account address
+ */
+export async function deriveTreasuryTokenAccount(treasuryPDA, tokenMint) {
+    return await getAssociatedTokenAddress(
+        tokenMint,
+        treasuryPDA,
+        true // allowOwnerOffCurve - PDAs can own token accounts
+    );
+}
+
+/**
  * Derive project config PDA
  * @param {PublicKey} programId - Program ID
  * @param {number} projectId - Numeric project ID
@@ -111,6 +138,8 @@ export async function deriveAllPDAs(programId, projectId, paymentTokenMint) {
     const [projectConfigPDA, projectConfigBump] = deriveProjectConfigPDA(programId, projectId);
     const [vaultAuthorityPDA, vaultAuthorityBump] = deriveVaultAuthorityPDA(programId, projectId, paymentTokenMint);
     const vaultTokenAccount = await deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMint);
+    const [treasuryPDA, treasuryBump] = deriveTreasuryPDA(programId);
+    const treasuryTokenAccount = await deriveTreasuryTokenAccount(treasuryPDA, paymentTokenMint);
 
     return {
         platformConfig: {
@@ -127,6 +156,13 @@ export async function deriveAllPDAs(programId, projectId, paymentTokenMint) {
         },
         vaultTokenAccount: {
             address: vaultTokenAccount,
-        }
+        },
+        treasury: {
+            address: treasuryPDA,
+            bump: treasuryBump,
+        },
+        treasuryTokenAccount: {
+            address: treasuryTokenAccount,
+        },
     };
 }

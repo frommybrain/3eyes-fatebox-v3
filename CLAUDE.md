@@ -1,6 +1,6 @@
 # 3Eyes FateBox v3 - Master Project Specification
 
-**Last Updated:** January 12, 2026 (Updated: Switchboard VRF, DB value mapping)
+**Last Updated:** January 17, 2026 (Updated: Oracle Health Check)
 **Version:** 3.0 (Development)
 **Network:** Devnet (Solana)
 
@@ -18,11 +18,18 @@
 8. [Complete User Flows](#complete-user-flows)
 9. [PDA Architecture](#pda-architecture)
 10. [Game Mechanics](#game-mechanics)
-11. [Current Implementation Status](#current-implementation-status)
-12. [Security Considerations](#security-considerations)
-13. [Environment Configuration](#environment-configuration)
-14. [Deployment Information](#deployment-information)
-15. [Open Design Decisions](#open-design-decisions)
+11. [Configuration Architecture (On-Chain Source of Truth)](#configuration-architecture-on-chain-source-of-truth)
+12. [Enterprise Activity Logging System](#enterprise-activity-logging-system)
+13. [Switchboard VRF Integration](#switchboard-vrf-integration)
+14. [Current Implementation Status](#current-implementation-status)
+15. [Platform Treasury & Commission System](#platform-treasury--commission-system)
+16. [Creator Withdrawals](#creator-withdrawals)
+17. [Security Considerations](#security-considerations)
+18. [Common Debugging Scenarios](#common-debugging-scenarios)
+19. [Environment Configuration](#environment-configuration)
+20. [Deployment Information](#deployment-information)
+21. [Open Design Decisions](#open-design-decisions)
+22. [3EYES Project Updates](#3eyes-project-updates)
 
 ---
 
@@ -44,7 +51,7 @@ Creator pays launch fee (100 $3EYES) → Creates project with custom token
     ↓
 Creator funds vault with tokens → Project goes live
     ↓
-Users buy boxes → Tokens go to vault
+Users buy boxes → Tokens go to vault (5% commission to platform treasury)
     ↓
 Users hold boxes → Luck accumulates (longer hold = better odds)
     ↓
@@ -54,7 +61,9 @@ Users reveal boxes → VRF provides randomness, reward calculated
     ↓
 Users claim rewards → Tokens transferred from vault
     ↓
-Creator withdraws profits → 2% fee in $3EYES (TODO)
+Creator withdraws profits → In project token (no fee - commission already taken)
+    ↓
+Platform processes treasury → 90% $3EYES buyback, 10% dev wallet
 ```
 
 ---
@@ -125,25 +134,33 @@ Creator withdraws profits → 2% fee in $3EYES (TODO)
 GTpP39xwT47iTUwbC5HZ7TjCiNon2owkLWg84uUyboat
 ```
 
+### IDL Location
+```
+backend/program/target/idl/lootbox_platform.json
+```
+
+The Anchor IDL auto-generates TypeScript types and is used by the backend for instruction building.
+
 ### Instructions
 
 | Instruction | Description | Key Accounts |
 |-------------|-------------|--------------|
-| `initialize_platform_config` | One-time setup of global config | admin, platformConfig |
-| `update_platform_config` | Admin updates probabilities/payouts | admin, platformConfig |
+| `initialize_platform_config` | One-time setup of global config | admin, platformConfig, treasury |
+| `update_platform_config` | Admin updates probabilities/payouts/commission | admin, platformConfig |
 | `transfer_platform_admin` | Transfer admin to new wallet | admin, platformConfig |
 | `initialize_project` | Create new lootbox project | owner, projectConfig, vaultAuthority |
-| `create_box` | User purchases a box | buyer, projectConfig, boxInstance, vaultTokenAccount |
+| `create_box` | User purchases a box (with commission) | buyer, projectConfig, boxInstance, vaultTokenAccount, treasuryTokenAccount |
 | `commit_box` | User opens box, commits VRF | owner, platformConfig, boxInstance |
 | `reveal_box` | Reveal with VRF randomness | owner, platformConfig, boxInstance, randomnessAccount |
 | `settle_box` | Transfer reward to user | owner, projectConfig, boxInstance, vaultTokenAccount |
 | `withdraw_earnings` | Creator withdraws from vault | owner, projectConfig, vaultTokenAccount |
-| `update_project` | Pause/resume, change price | owner, projectConfig |
+| `withdraw_treasury` | Admin withdraws from treasury | admin, platformConfig, treasury, treasuryTokenAccount |
+| `update_project` | Pause/resume, change price, update luck interval | owner, projectConfig |
 | `close_project` | Close project, reclaim rent | owner, projectConfig |
 
 ### Account Structures
 
-#### PlatformConfig (98 bytes) - Global Singleton
+#### PlatformConfig (~100 bytes) - Global Singleton
 ```rust
 pub struct PlatformConfig {
     pub admin: Pubkey,              // 32 bytes - Only this wallet can update
@@ -156,38 +173,43 @@ pub struct PlatformConfig {
     pub luck_time_interval: i64,    // 8 bytes (seconds per +1 luck)
 
     // Payout multipliers (basis points: 10000 = 1.0x)
-    pub payout_dud: u32,            // 0 = 0x
-    pub payout_rebate: u32,         // 8000 = 0.8x
+    pub payout_dud: u32,            // 0 = 0x (only for expired boxes)
+    pub payout_rebate: u32,         // 5000 = 0.5x
     pub payout_breakeven: u32,      // 10000 = 1.0x
-    pub payout_profit: u32,         // 25000 = 2.5x
-    pub payout_jackpot: u32,        // 100000 = 10x
+    pub payout_profit: u32,         // 15000 = 1.5x
+    pub payout_jackpot: u32,        // 40000 = 4x
 
     // Tier probabilities (basis points, must sum to 10000)
+    // No-dud model: duds only occur for expired boxes
     pub tier1_max_luck: u8,         // Luck 0-5
-    pub tier1_dud: u16,             // 5500 = 55%
-    pub tier1_rebate: u16,          // 3000 = 30%
-    pub tier1_breakeven: u16,       // 1000 = 10%
-    pub tier1_profit: u16,          // 450 = 4.5%
-    // tier1_jackpot = 10000 - sum = 50 = 0.5%
+    pub tier1_dud: u16,             // 0 = 0% (no duds in normal gameplay)
+    pub tier1_rebate: u16,          // 7200 = 72%
+    pub tier1_breakeven: u16,       // 1700 = 17%
+    pub tier1_profit: u16,          // 900 = 9%
+    // tier1_jackpot = 10000 - sum = 200 = 2%
 
     pub tier2_max_luck: u8,         // Luck 6-13
-    pub tier2_dud: u16,             // 4500 = 45%
-    pub tier2_rebate: u16,          // 3000 = 30%
-    pub tier2_breakeven: u16,       // 1500 = 15%
-    pub tier2_profit: u16,          // 850 = 8.5%
-    // tier2_jackpot = 150 = 1.5%
+    pub tier2_dud: u16,             // 0 = 0%
+    pub tier2_rebate: u16,          // 5700 = 57%
+    pub tier2_breakeven: u16,       // 2600 = 26%
+    pub tier2_profit: u16,          // 1500 = 15%
+    // tier2_jackpot = 200 = 2%
 
-    pub tier3_dud: u16,             // Luck 14-60, 3000 = 30%
-    pub tier3_rebate: u16,          // 2500 = 25%
-    pub tier3_breakeven: u16,       // 2000 = 20%
+    pub tier3_dud: u16,             // Luck 14-60, 0 = 0%
+    pub tier3_rebate: u16,          // 4400 = 44%
+    pub tier3_breakeven: u16,       // 3400 = 34%
     pub tier3_profit: u16,          // 2000 = 20%
-    // tier3_jackpot = 500 = 5%
+    // tier3_jackpot = 200 = 2%
+
+    // Platform commission (NEW)
+    pub platform_commission_bps: u16, // 500 = 5% (configurable, max 50%)
+    pub treasury_bump: u8,          // Bump for treasury PDA
 
     pub updated_at: i64,
 }
 ```
 
-#### ProjectConfig (123 bytes)
+#### ProjectConfig (131 bytes)
 ```rust
 pub struct ProjectConfig {
     pub project_id: u64,
@@ -202,8 +224,11 @@ pub struct ProjectConfig {
     pub active: bool,
     pub launch_fee_paid: bool,
     pub created_at: i64,
+    pub luck_time_interval: i64,      // Per-project luck interval (0 = use platform default)
 }
 ```
+
+**Note:** Projects created before January 16, 2026 have the old 123-byte struct without `luck_time_interval`. These projects will fail to deserialize if you try to update them. New projects created after the program update work correctly.
 
 #### BoxInstance (118 bytes)
 ```rust
@@ -219,7 +244,7 @@ pub struct BoxInstance {
     pub reward_amount: u64,
     pub is_jackpot: bool,
     pub random_percentage: f64,
-    pub reward_tier: u8,            // 0=Dud, 1=Rebate, 2=Break-even, 3=Profit, 4=Jackpot
+    pub reward_tier: u8,            // 0=Dud, 1=Rebate, 2=Break-even, 3=Profit, 4=Jackpot, 5=Refunded
     pub randomness_account: Pubkey, // Switchboard VRF account
     pub randomness_committed: bool,
 }
@@ -248,6 +273,7 @@ pub struct BoxInstance {
 | 6016 | PlatformPaused | All operations paused |
 | 6017 | VaultNotEmpty | Must empty vault to close |
 | 6018 | RevealWindowExpired | 1 hour reveal window passed |
+| 6019 | InvalidCommissionRate | Commission > 50% (5000 bps) |
 
 ---
 
@@ -258,6 +284,31 @@ pub struct BoxInstance {
 - Production: TBD
 
 ### Routes
+
+#### Config (`/api/config`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | Get combined platform config (on-chain + database) |
+
+This is the **primary config endpoint** that the frontend uses. It reads the PlatformConfig PDA from on-chain as the source of truth, then supplements with database values (RPC URL, mints, etc.).
+
+**Response includes:**
+- On-chain values: `baseLuck`, `maxLuck`, `luckIntervalSeconds`, `payoutMultipliers`, `tierProbabilities`, `platformCommissionBps`, `adminWallet`, `paused`
+- Database values: `rpcUrl`, `threeEyesMint`, `platformFeeAccount`, `launchFeeAmount`
+- Metadata: `network`, `programId`, `source` (indicates if from on-chain or database fallback)
+
+#### Oracle Health (`/api/oracle-health`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | Check Switchboard oracle availability |
+
+Checks if Switchboard oracles are reachable by testing DNS resolution for the xip.switchboard-oracles.xyz domain. Used by frontend before committing boxes to warn users if oracles are down.
+
+**Response:**
+- `healthy: boolean` - Whether oracles are reachable
+- `message: string` - Status message or error description
+- `cached: boolean` - Whether result is from 30-second cache
+- `network: string` - Current network (devnet/mainnet)
 
 #### Projects (`/api/projects`)
 | Method | Endpoint | Description |
@@ -294,8 +345,11 @@ pub struct BoxInstance {
 #### Admin (`/api/admin`)
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/update-platform-config` | Update on-chain platform config |
+| POST | `/update-platform-config` | Update on-chain platform config (incl. commission) |
 | GET | `/platform-config` | Read current on-chain config |
+| GET | `/treasury/:tokenMint` | Get treasury balance for specific token |
+| GET | `/treasury-balances` | Get all treasury balances (shows $3EYES first) |
+| POST | `/withdraw-treasury` | Withdraw tokens from treasury to admin wallet |
 
 ### Key Files
 
@@ -306,11 +360,15 @@ pub struct BoxInstance {
 | `routes/projects.js` | Project CRUD operations |
 | `routes/vault.js` | Vault balance queries |
 | `routes/admin.js` | Admin platform config sync |
-| `lib/pdaHelpers.js` | PDA derivation utilities |
+| `lib/pdaHelpers.js` | PDA derivation utilities (incl. treasury) |
 | `lib/anchorClient.js` | Anchor program connection |
-| `lib/getNetworkConfig.js` | Network/RPC configuration |
+| `lib/getNetworkConfig.js` | Network/RPC configuration (reads on-chain config) |
 | `lib/switchboard.js` | Switchboard VRF helpers (create, commit, reveal) |
+| `lib/priceOracle.js` | Jupiter Price API integration for fee calculations |
+| `lib/evCalculator.js` | EV/RTP calculations, dynamic vault funding, reserve calculations |
+| `lib/luckHelpers.js` | Luck interval helpers, presets, time-to-max-luck formatting |
 | `scripts/init-platform-config.js` | Initialize platform config PDA |
+| `scripts/process-treasury-fees.js` | Batch process treasury (swap to SOL, buyback) |
 
 ### Switchboard Library Functions (`lib/switchboard.js`)
 
@@ -330,6 +388,18 @@ pub struct BoxInstance {
 ---
 
 ## Frontend (Next.js/React)
+
+### Style Guide
+
+See **[/frontend/STYLE_GUIDE.md](/frontend/STYLE_GUIDE.md)** for complete UI styling documentation including:
+- Color palette and tokens
+- Typography standards
+- Component variants and sizes
+- Spacing and padding scales
+- Interaction states
+- Layout patterns
+
+All UI development should follow these standards for brand consistency.
 
 ### Pages
 
@@ -351,6 +421,7 @@ pub struct BoxInstance {
 | `CreateProject.jsx` | `components/create/` | Project creation |
 | `AdminDashboard.jsx` | `components/admin/` | Admin panel with config sync |
 | `DegenButton`, etc. | `components/ui/` | Shared UI components |
+| `proxy.js` | root | Multi-tenant subdomain routing |
 
 ### State Management (Zustand)
 
@@ -364,6 +435,36 @@ pub struct BoxInstance {
 
 - `useOptimistic` - Optimistic UI updates for box operations
 - `useTransition` - Non-blocking state updates
+
+### Multi-tenant Subdomain Routing
+
+**File:** `frontend/proxy.js`
+
+The platform uses wildcard DNS subdomain routing to give each project its own subdomain:
+
+```
+catbox.degenbox.fun → /project/catbox
+myproject.degenbox.fun → /project/myproject
+```
+
+**How it works:**
+1. Wildcard DNS (`*.degenbox.fun`) points all subdomains to the same server
+2. `proxy.js` extracts the subdomain from the hostname
+3. Requests are rewritten to `/project/[subdomain]` internally
+4. Reserved subdomains (www, admin, dashboard, api) route to their respective pages
+
+**Reserved Subdomains:**
+- `www`, `app`, `admin`, `dashboard`, `api`, `docs`, `blog`, `help`, `support`, `status`, `staging`, `dev`, `test`
+
+**Local Development:**
+Use `?subdomain=` query param to test subdomain routing locally:
+```
+http://localhost:3000?subdomain=catbox → /project/catbox
+```
+
+**Configuration:**
+- Root domain: `NEXT_PUBLIC_PLATFORM_DOMAIN` (default: `degenbox.fun`)
+- CORS allowed origins set in `proxy.js`
 
 ---
 
@@ -379,12 +480,23 @@ rpc_url: string
 admin_wallet: string (Pubkey)
 lootbox_program_id: string (Pubkey)
 three_eyes_mint: string (Pubkey)
+platform_fee_account: string (Pubkey)
 launch_fee_amount: bigint (lamports)
-withdrawal_fee_percentage: numeric
 luck_interval_seconds: integer
-vault_fund_amount: bigint (lamports)
 is_production: boolean
+platform_commission_bps: integer (default 500 = 5%)
+dev_cut_bps: integer (default 1000 = 10% of commission)
+dev_wallet: string (Pubkey, optional)
+treasury_pda: string (Pubkey)
+-- Note: vault_fund_amount removed (migration 011) - now calculated dynamically based on box price (~30x)
+-- Note: withdrawal_fee_percentage removed (migration 015) - commission is only fee
+-- Note: min_box_price, max_projects_per_wallet removed - no longer used
 ```
+
+**Important:** The frontend `getNetworkConfig.js` only queries these columns:
+- `rpc_url`, `three_eyes_mint`, `platform_fee_account`, `admin_wallet`, `launch_fee_amount`
+
+All other config values come from the on-chain PlatformConfig PDA via the `/api/config` endpoint.
 
 #### `projects`
 ```sql
@@ -456,6 +568,61 @@ subdomain: string (primary key)
 reason: string
 ```
 
+#### `treasury_processing_log`
+```sql
+id: uuid (primary key)
+processed_at: timestamp
+processed_by: text (admin wallet)
+action_type: text  -- 'withdraw', 'swap', 'dev_transfer', 'buyback'
+token_mint: text
+token_amount: bigint
+amount_withdrawn: bigint
+sol_received: bigint
+dev_sol_amount: bigint
+buyback_sol_amount: bigint
+three_eyes_bought: bigint
+tx_signature: text
+swap_to_sol_signature: text
+dev_transfer_signature: text
+buyback_signature: text
+status: text  -- 'completed', 'failed'
+error_message: text
+```
+
+#### `project_counter` (Atomic Counter)
+```sql
+id: integer (always 1)
+counter: bigint (current project numeric ID)
+```
+
+**Purpose:** Provides atomic sequential IDs for project creation. The numeric ID is used in PDA derivation seeds.
+
+**RPC Function:**
+```sql
+CREATE OR REPLACE FUNCTION get_next_project_number()
+RETURNS bigint LANGUAGE plpgsql AS $
+DECLARE next_id bigint;
+BEGIN
+    UPDATE project_counter SET counter = counter + 1 WHERE id = 1
+    RETURNING counter INTO next_id;
+    IF next_id IS NULL THEN
+        INSERT INTO project_counter (id, counter) VALUES (1, 1)
+        ON CONFLICT (id) DO UPDATE SET counter = project_counter.counter + 1
+        RETURNING counter INTO next_id;
+    END IF;
+    RETURN next_id;
+END; $;
+```
+
+**Important:** If project creation fails due to PDA already existing on-chain (from previous testing), increment the counter to skip past used IDs:
+```sql
+UPDATE project_counter SET counter = 10 WHERE id = 1;
+```
+
+### Current Schema Reference
+
+See **[/database/current_schema_130126_1337.sql](/database/current_schema_130126_1337.sql)** for the complete authoritative database schema snapshot.
+
 ### Migrations Applied
 
 1. `001_treasury_to_vault.sql` - Renamed treasury to vault
@@ -463,6 +630,15 @@ reason: string
 3. `003_add_payment_token_fields.sql` - Token metadata
 4. `004_add_numeric_id_sequence.sql` - Auto-increment project IDs
 5. `005_add_box_verification_columns.sql` - TX signatures, luck values
+6. `006_add_switchboard_vrf_columns.sql` - VRF columns for commit/reveal
+7. `006b_add_withdrawal_tracking.sql` - Withdrawal history tracking
+8. `007_add_commit_tracking_columns.sql` - Commit tracking
+9. `010_add_treasury_processing_log.sql` - Treasury activity logging
+10. `011_remove_vault_fund_amount.sql` - Remove vault_fund_amount (now dynamic)
+11. `012_advance_project_sequence.sql` - Advance project counter past old PDAs
+12. `013_add_project_luck_interval.sql` - Per-project luck interval column
+13. `014_activity_logs.sql` - Enterprise activity logging system
+14. `015_remove_withdrawal_fee_percentage.sql` - Remove deprecated withdrawal_fee_percentage column
 
 ---
 
@@ -589,7 +765,7 @@ reason: string
 ### Flow 6: Creator Withdrawal
 
 ```
-1. Creator on /dashboard/manage/[id] clicks "Withdraw"
+1. Creator on /dashboard/manage/[id] clicks "Withdraw Profits"
        ↓
 2. Frontend: Calculate available balance:
    - vault_balance = current tokens in vault
@@ -606,7 +782,7 @@ reason: string
    - Verify project owner
    - Transfer amount from vault to owner (PDA signer)
        ↓
-Note: Withdrawal fee (2% in $3EYES) NOT YET IMPLEMENTED
+6. Payout in project token (no fee - commission already taken on box purchases)
 ```
 
 ### Flow 7: Admin Config Update
@@ -634,6 +810,7 @@ Note: Withdrawal fee (2% in $3EYES) NOT YET IMPLEMENTED
 | PDA | Seeds | Purpose |
 |-----|-------|---------|
 | PlatformConfig | `["platform_config"]` | Global tunable parameters |
+| Treasury | `["treasury"]` | Global treasury for platform commission |
 | ProjectConfig | `["project", u64_le(project_id)]` | Per-project settings |
 | VaultAuthority | `["vault", u64_le(project_id), pubkey(payment_token_mint)]` | PDA that controls vault tokens |
 | BoxInstance | `["box", u64_le(project_id), u64_le(box_id)]` | Individual box state |
@@ -646,6 +823,23 @@ function derivePlatformConfigPDA(programId) {
     return PublicKey.findProgramAddressSync(
         [Buffer.from('platform_config')],
         programId
+    );
+}
+
+// Treasury (Global)
+function deriveTreasuryPDA(programId) {
+    return PublicKey.findProgramAddressSync(
+        [Buffer.from('treasury')],
+        programId
+    );
+}
+
+// Treasury Token Account (ATA for treasury PDA)
+async function deriveTreasuryTokenAccount(treasuryPDA, tokenMint) {
+    return await getAssociatedTokenAddress(
+        tokenMint,
+        treasuryPDA,
+        true  // allowOwnerOffCurve - PDAs can own token accounts
     );
 }
 
@@ -702,40 +896,319 @@ current_luck = min(base_luck + bonus_luck, max_luck)
 **Config Values:**
 - `base_luck`: 5
 - `max_luck`: 60
-- `luck_time_interval`: 3 seconds (devnet) or 10800 seconds (mainnet)
+- `luck_time_interval`: Per-project (0 = use platform default)
 
-### Reward Tiers
+### Per-Project Luck Interval
 
-| Tier | Payout | Tier 1 (Luck 0-5) | Tier 2 (Luck 6-13) | Tier 3 (Luck 14-60) |
-|------|--------|-------------------|---------------------|---------------------|
-| Dud | 0x | 55% | 45% | 30% |
-| Rebate | 0.8x | 30% | 30% | 25% |
-| Break-even | 1.0x | 10% | 15% | 20% |
-| Profit | 2.5x | 4.5% | 8.5% | 20% |
-| Jackpot | 10x | 0.5% | 1.5% | 5% |
+Project creators can set their own luck accumulation interval instead of using the platform default. This allows creators to customize the player experience.
 
-### Expected Value Calculation
+**How it works:**
+- `luck_time_interval = 0` → Uses platform default (from `PlatformConfig.luck_time_interval`)
+- `luck_time_interval > 0` → Uses project's custom interval
 
-For Tier 3 (best odds):
-```
-EV = (0.30 × 0) + (0.25 × 0.8) + (0.20 × 1.0) + (0.20 × 2.5) + (0.05 × 10)
-EV = 0 + 0.2 + 0.2 + 0.5 + 0.5
-EV = 1.4x (40% expected profit for users)
+**On-chain logic (in `commit_box`):**
+```rust
+let effective_interval = if project_config.luck_time_interval > 0 {
+    project_config.luck_time_interval
+} else {
+    platform_config.luck_time_interval
+};
 ```
 
-### Locked Balance Calculation (Off-Chain)
+**UI Features:**
+- **Create Project:** Set custom luck interval during creation with presets
+- **Manage Project:** Update luck interval after launch (affects all future box openings)
+- **Platform Default Display:** Shows actual platform default value (e.g., "Platform Default (3 hours)")
 
-To prevent creators from withdrawing funds needed for potential payouts:
+**Database:**
+- `projects.luck_interval_seconds` - NULL/0 = use platform default, >0 = custom interval
+- Migration: `database/migrations/013_add_project_luck_interval.sql`
+
+---
+
+## Configuration Architecture (On-Chain Source of Truth)
+
+As of January 17, 2026, the platform uses **on-chain configuration as the source of truth**. This ensures that critical game parameters (luck settings, payout multipliers, commission rates) are verifiable on-chain.
+
+### Config Flow
+
+```
+Frontend (getNetworkConfig.js)
+    ↓
+Backend GET /api/config (server.js)
+    ↓
+Reads PlatformConfig PDA from Solana
+    ↓
+Supplements with Supabase (RPC URL, mints)
+    ↓
+Returns combined config to frontend
+    ↓
+Frontend stores in useNetworkStore
+```
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `backend/server.js` | `/api/config` endpoint - reads on-chain PlatformConfig |
+| `backend/lib/getNetworkConfig.js` | Backend helper to read on-chain config |
+| `frontend/lib/getNetworkConfig.js` | Frontend - fetches from `/api/config`, falls back to Supabase |
+| `frontend/store/useNetworkStore.js` | Zustand store for config state |
+
+### What Comes From Where
+
+| Source | Fields |
+|--------|--------|
+| **On-Chain** (PlatformConfig PDA) | `baseLuck`, `maxLuck`, `luckIntervalSeconds`, `payoutMultipliers`, `tierProbabilities`, `platformCommissionBps`, `adminWallet`, `paused` |
+| **Database** (super_admin_config) | `rpcUrl`, `threeEyesMint`, `platformFeeAccount`, `launchFeeAmount` |
+| **Derived** | `network`, `programId`, `isProduction`, `source` |
+
+### Fallback Behavior
+
+1. Frontend calls `GET /api/config`
+2. Backend reads on-chain → returns `source: 'on-chain'`
+3. If on-chain fails → Backend returns `source: 'database-fallback'` with Supabase values
+4. If backend unreachable → Frontend queries Supabase directly
+
+### Admin Config Updates
+
+When admin updates config via AdminDashboard:
+1. **Database fields** (RPC URL, mints) → Direct Supabase update
+2. **On-chain fields** (luck, payouts, commission) → Builds `update_platform_config` transaction
+3. Backend signs with deploy wallet → Submits to Solana
+4. Frontend clears cache → Fetches fresh config
+
+---
+
+## Enterprise Activity Logging System
+
+The platform includes a comprehensive, enterprise-grade activity logging system for monitoring, debugging, and analytics.
+
+### Log Tables
+
+**`activity_logs`** - Core logging table for all platform events:
+- Event classification (type, category, severity)
+- Actor information (wallet, type: user/creator/admin/system)
+- Target/subject (project_id, box_id)
+- Transaction details (signature, status)
+- Financial data (amounts in lamports/tokens)
+- Contextual metadata (JSON)
+- Error information (code, message)
+- Request context (IP, user agent)
+
+**`log_aggregates`** - Pre-computed aggregates for dashboard performance:
+- Hourly/daily/weekly buckets
+- Counts by severity and category
+- Financial totals
+
+**`system_health_logs`** - System-level metrics:
+- RPC latency, DB connections, API errors
+- Service health monitoring
+
+### Event Categories
+
+| Category | Event Types |
+|----------|-------------|
+| project | created, updated, activated, deactivated, luck_updated |
+| box | purchased, opened, settled, expired |
+| treasury | deposited, withdrawn, fee_collected |
+| withdrawal | requested, approved, completed, failed |
+| admin | config_updated, project_verified, user_banned, emergency_action |
+| error | transaction_failed, rpc_error, database_error, validation_error |
+| system | startup, shutdown, health_check, maintenance |
+
+### Withdrawal Logging
+
+Project creator withdrawals are logged to `activity_logs` with:
+- `event_type`: `withdrawal_completed`
+- `actor_type`: `creator`
+- `actor_wallet`: Creator's wallet
+- `project_id`: Project numeric ID
+- `tx_signature`: Solana transaction signature
+- `amount_tokens`: Withdrawal amount
+- `token_mint`: Project payment token
+- Metadata: `withdrawalType`, `vaultBalanceBefore`, `vaultBalanceAfter`, `reservedForBoxes`, `unopenedBoxes`
+
+### Key Files
+
+| File | Description |
+|------|-------------|
+| `backend/lib/logger.js` | ActivityLogger service with batching and retry |
+| `backend/routes/logs.js` | API endpoints for log queries |
+| `frontend/components/admin/LogsViewer.jsx` | Real-time log viewer component |
+| `database/migrations/014_activity_logs.sql` | Database schema |
+
+### Features
+
+- **Real-time Updates**: Supabase Realtime subscription for live log streaming
+- **Filtering**: By category, severity, project, wallet, date range, text search
+- **Pagination**: 50 logs per page with total count
+- **Statistics**: 24-hour summaries, error counts, top projects
+- **Log Batching**: Buffers logs and flushes every 5 seconds or 10 logs
+- **Retry Logic**: Failed writes queued for retry (max 3 attempts)
+- **RLS Security**: Only super admins can view logs
+
+### Usage
 
 ```javascript
-// Statistical approach (1.4x expected value)
-const pendingBoxes = await getPendingBoxCount(projectId);
-const boxPrice = project.box_price;
-const lockedBalance = pendingBoxes * boxPrice * 1.4;
-const available = vaultBalance - lockedBalance;
+import logger from '../lib/logger.js';
+
+// Log project creation
+await logger.logProjectCreated({
+    creatorWallet: '...',
+    projectId: 123,
+    subdomain: 'my-project',
+    txSignature: '...',
+});
+
+// Log project withdrawal (in vault.js confirm-withdraw)
+await logger.logProjectWithdrawal({
+    creatorWallet: project.owner_wallet,
+    projectId: project.project_numeric_id,
+    projectSubdomain: project.subdomain,
+    txSignature: signature,
+    amount: withdrawalAmount,
+    tokenMint: project.payment_token_mint,
+    withdrawalType: 'partial',  // or 'full'
+    vaultBalanceBefore: '...',
+    vaultBalanceAfter: '...',
+    reservedForBoxes: '...',
+    unopenedBoxes: 0,
+});
+
+// Log errors (immediate flush)
+await logger.logTransactionError({
+    wallet: '...',
+    errorCode: 'TX_FAILED',
+    errorMessage: error.message,
+});
 ```
 
-**Note:** This is calculated off-chain only. The on-chain program trusts the backend to enforce this.
+Migration: `database/migrations/014_activity_logs.sql`
+
+**Important Notes:**
+1. Changes take effect immediately for all future box openings
+2. Existing unopened boxes will use the new interval when opened (luck calculated at commit time)
+3. Only projects created after Jan 16, 2026 support this feature (struct size change)
+
+### Reward Tiers (No-Dud Model)
+
+The platform uses a **no-dud model** for normal gameplay, providing a better player experience where the worst outcome is getting half back (0.5x rebate). Duds (0x) only occur for **expired boxes** (not revealed within the 1-hour oracle window).
+
+#### Payout Multipliers
+
+| Outcome | Multiplier | On-Chain Tier | DB Value | Notes |
+|---------|------------|---------------|----------|-------|
+| Dud | 0x | 0 | 1 | Only for expired boxes (user inaction penalty) |
+| Rebate | 0.5x | 1 | 2 | Worst outcome in normal gameplay |
+| Break-even | 1.0x | 2 | 3 | Get your money back |
+| Profit | 1.5x | 3 | 4 | 50% profit |
+| Jackpot | 4x | 4 | 5 | Big win |
+
+**Note:** DB values are on-chain tier + 1 (0 is reserved for "pending/unrevealed" in DB)
+
+#### Tier Probability Distributions
+
+| Outcome | Tier 1 (Luck 0-5) | Tier 2 (Luck 6-13) | Tier 3 (Luck 14-60) |
+|---------|-------------------|---------------------|---------------------|
+| Dud | 0% | 0% | 0% |
+| Rebate | 72% | 57% | 44% |
+| Break-even | 17% | 26% | 34% |
+| Profit | 9% | 15% | 20% |
+| Jackpot | 2% | 2% | 2% |
+| **RTP** | **74.5%** | **85%** | **94%** |
+| **House Edge** | **25.5%** | **15%** | **6%** |
+
+**Key design decisions:**
+- **Fixed 2% jackpot** across all tiers - luck affects other outcomes, not jackpot chance
+- **No duds in normal gameplay** - worst case is 0.5x rebate (get half back)
+- **Duds only for expired boxes** - penalty for not revealing within 1-hour oracle window
+- **4x jackpot multiplier** - exciting but variance-controlled (0.08x EV contribution)
+
+### Expected Value (EV) & RTP Calculations
+
+**Formula:**
+```
+EV = (Dud% × 0) + (Rebate% × 0.5) + (Break-even% × 1) + (Profit% × 1.5) + (Jackpot% × 4)
+RTP = EV × 100%
+House Edge = 100% - RTP
+```
+
+**Tier 1 (Low Luck):**
+```
+EV = (0 × 0) + (0.72 × 0.5) + (0.17 × 1) + (0.09 × 1.5) + (0.02 × 4)
+EV = 0 + 0.36 + 0.17 + 0.135 + 0.08 = 0.745 (74.5% RTP)
+```
+
+**Tier 2 (Medium Luck):**
+```
+EV = (0 × 0) + (0.57 × 0.5) + (0.26 × 1) + (0.15 × 1.5) + (0.02 × 4)
+EV = 0 + 0.285 + 0.26 + 0.225 + 0.08 = 0.85 (85% RTP)
+```
+
+**Tier 3 (High Luck):**
+```
+EV = (0 × 0) + (0.44 × 0.5) + (0.34 × 1) + (0.20 × 1.5) + (0.02 × 4)
+EV = 0 + 0.22 + 0.34 + 0.30 + 0.08 = 0.94 (94% RTP)
+```
+
+**Industry Benchmarks:**
+- Slot machines: 85-95% RTP
+- Roulette (single zero): 94.7% RTP
+- Our Tier 3: 94% RTP (competitive with casino games)
+
+### Dynamic Vault Funding
+
+Vault funding is now calculated **dynamically based on box price** rather than a fixed amount. This ensures creators only fund what's statistically required.
+
+**Formula:**
+```
+minimum_vault_funding = box_price × 30 (minimum)
+```
+
+**Calculation basis:**
+- Uses 99th percentile worst-case variance analysis
+- Accounts for jackpot clustering risk in first ~100 boxes
+- 20% safety margin built in
+
+**Example:**
+- Box price: 1,000 tokens → Vault funding: ~30,000 tokens
+- Box price: 10,000 tokens → Vault funding: ~300,000 tokens
+
+**Implementation:** `backend/lib/evCalculator.js`
+
+### Reserve Calculation for Withdrawals
+
+When creators withdraw, the system reserves funds for unopened boxes using EV-based calculations:
+
+```javascript
+// Uses worst-case (99th percentile) reserve based on tier 3 probabilities
+const reservedForUnopened = calculateUnopenedBoxReserve(
+    boxPrice,
+    unopenedBoxCount,
+    tier3Probabilities,  // Use max luck tier (worst case for house)
+    payoutMultipliers
+);
+```
+
+**Implementation:** `backend/routes/vault.js` and `backend/lib/evCalculator.js`
+
+### Expired Box Handling
+
+Boxes that are committed (user clicked "Open Box") but not revealed within the **1-hour oracle window** become **true duds (0x payout)**:
+
+```javascript
+// In build-reveal-box-tx endpoint
+if (now - committedAtTime > oneHourMs) {
+    // Mark box as expired/dud
+    await supabase.from('boxes').update({
+        box_result: 1,      // Dud tier (DB: 1=dud)
+        payout_amount: 0,   // 0x payout
+    }).eq('id', box.id);
+}
+```
+
+This is the **only scenario where duds occur** - it's a penalty for user inaction, not random bad luck.
 
 ### Reveal Window
 
@@ -772,7 +1245,50 @@ The VRF uses a two-phase commit-reveal pattern to ensure fairness:
 2. **Reveal Phase** (User reveals box):
    - Call `randomness.revealIx()` to get oracle's signed randomness
    - Call our `reveal_box` instruction to read randomness and calculate reward
-   - Randomness is read from account offset 152-184 (32 bytes)
+   - Uses official SDK parsing (see below)
+
+### SDK vs Manual Parsing (IMPORTANT)
+
+**Current Implementation:** Uses official Switchboard SDK for parsing randomness.
+
+**Rust (on-chain):**
+```rust
+use switchboard_on_demand::accounts::RandomnessAccountData;
+
+// Parse randomness account using official SDK
+let randomness_data = RandomnessAccountData::parse(
+    ctx.accounts.randomness_account.data.borrow()
+).map_err(|_| LootboxError::RandomnessNotReady)?;
+
+// Get the revealed random value (32 bytes)
+let clock = Clock::get()?;
+let revealed_random_value: [u8; 32] = randomness_data
+    .get_value(&clock)
+    .map_err(|_| LootboxError::RandomnessNotReady)?;
+
+// Use 8 bytes (u64) for better entropy distribution
+let random_u64 = u64::from_le_bytes([
+    revealed_random_value[0], revealed_random_value[1],
+    revealed_random_value[2], revealed_random_value[3],
+    revealed_random_value[4], revealed_random_value[5],
+    revealed_random_value[6], revealed_random_value[7],
+]);
+
+let random_percentage = (random_u64 as f64) / (u64::MAX as f64);
+```
+
+**Why SDK over Manual Parsing:**
+- Byte offsets can change between Switchboard versions
+- SDK handles validation automatically
+- `get_value()` checks reveal timing with clock
+- More robust against future Switchboard updates
+
+**Legacy Manual Parsing (deprecated):**
+```rust
+// DO NOT USE - byte offsets may change!
+// let reveal_slot = u64::from_le_bytes(data[144..152]);
+// let random_bytes = &data[152..184];
+```
 
 ### Key Implementation Details
 
@@ -800,9 +1316,44 @@ const revealIx = await randomness.revealIx(payer);
 
 2. **Devnet Reliability** - Devnet oracles can be unreliable (503 errors, timeouts). The backend includes retry logic with exponential backoff.
 
-3. **Randomness Account Reading** - The randomness value is at offset 152-184 in the account data. Check `reveal_slot` at offset 144-152 is non-zero before reading.
+3. **Use SDK for Parsing** - Always use `RandomnessAccountData::parse()` and `get_value()` instead of manual byte offsets.
 
 4. **Retry Logic** - The reveal instruction has built-in retry logic (3 attempts, exponential backoff) for transient oracle failures.
+
+5. **Cargo.toml Dependency:**
+```toml
+switchboard-on-demand = "0.11"
+```
+
+### Oracle Health Check
+
+**Endpoint:** `GET /api/oracle-health`
+
+Tests oracle availability by performing DNS resolution for the Switchboard xip service.
+
+```javascript
+// Response
+{
+  healthy: true,
+  message: "Oracle service is available",
+  cached: false,
+  network: "devnet"
+}
+```
+
+**Pre-commit Warning:** Frontend checks oracle health before users commit (open) boxes. If unhealthy, users are warned to avoid starting the 1-hour timer.
+
+#### Error Codes for Frontend
+
+When reveal fails, backend returns structured errors:
+
+| Error Code | Description | Retryable | Retry After |
+|------------|-------------|-----------|-------------|
+| `ORACLE_UNAVAILABLE` | Switchboard DNS/network failure | Yes | 60s |
+| `ORACLE_TIMEOUT` | Oracle took too long to respond | Yes | 30s |
+| `INSUFFICIENT_FUNDS` | Wallet can't pay transaction fee | No | N/A |
+| `REVEAL_EXPIRED` | Past 1-hour reveal window | No | N/A |
+| `REVEAL_ERROR` | Generic error | Maybe | N/A |
 
 ---
 
@@ -814,24 +1365,249 @@ const revealIx = await randomness.revealIx(payer);
 |---------|--------|-------|
 | Platform Config PDA | Complete | Global tunable parameters |
 | Project Creation | Complete | Launch fee collection works |
-| Box Purchase | Complete | VRF commit on open |
-| Box Reveal | Complete | VRF randomness working |
+| Box Purchase | Complete | VRF commit on open, commission collected |
+| Box Reveal | Complete | VRF randomness via SDK parsing |
 | Reward Claim | Complete | Vault payout via PDA |
 | Project Pause/Resume | Complete | Active flag toggleable |
-| Admin Dashboard | Complete | Config sync to on-chain |
+| Admin Dashboard | Complete | Config sync, Treasury tab |
 | Luck System | Complete | Time-based accumulation |
+| Per-Project Luck Interval | Complete | Creators can set custom luck intervals |
 | Tier Probabilities | Complete | 3 configurable tiers |
+| Platform Treasury | Complete | 5% commission on purchases |
+| Configurable Commission | Complete | Admin can set 0-50% |
+| Treasury Admin UI | Complete | View balances, $3EYES first |
+| Treasury Withdrawal | Complete | Admin can withdraw to wallet |
+| Treasury Processing Script | Complete | Withdraw, swap, buyback with logging |
+| Treasury Activity Logging | Complete | Database logging with Solscan links |
+| Enterprise Activity Logging | Complete | Full platform logging with real-time UI |
+| Project Withdrawal Logging | Complete | Creator withdrawals logged to activity_logs |
+| On-Chain Config Source of Truth | Complete | Backend reads PlatformConfig PDA |
+| Switchboard SDK | Complete | Migrated from manual parsing |
+| Multi-tenant Subdomain Routing | Complete | proxy.js with wildcard DNS |
+| Oracle Health Check | Complete | Pre-commit warning, `/api/oracle-health` endpoint |
 
 ### Incomplete / TODO
 
 | Feature | Priority | Notes |
 |---------|----------|-------|
-| Withdrawal Fee | High | 2% in $3EYES not implemented |
-| Rate Limiting | High | No express-rate-limit yet |
-| RLS Policies | High | Need owner_wallet checks |
-| Subdomain Routing | Medium | Currently using path routing |
+| Withdraw All & Close | High | Close project mode not implemented |
+| **Mainnet Testing** | **High** | Treasury script untested on mainnet (Jupiter swaps) |
+| Rate Limiting | Medium | No express-rate-limit yet |
+| RLS Policies | Medium | Need owner_wallet checks |
 | Backend Wallet Auth | Medium | No signed message verification |
 | Program Security Metadata | Low | For mainnet launch |
+
+### Mainnet Readiness Gaps
+
+| Gap | Description | Risk |
+|-----|-------------|------|
+| Jupiter Swaps | Treasury script uses Jupiter API - only works on mainnet | Script will fail swap/buyback on devnet |
+| $3EYES Token | Need real $3EYES mint address for buyback | Must configure before mainnet |
+| Dev Wallet | `--dev-wallet` flag required for SOL distribution | 10% dev cut needs destination |
+| Oracle Reliability | Mainnet Switchboard oracles more reliable but need testing | VRF timing may differ |
+| RPC Limits | Production RPC needed for mainnet traffic | Rate limits could cause issues |
+
+---
+
+## Platform Treasury & Commission System
+
+### Overview
+
+The platform collects a configurable commission (default 5%) on every box purchase. This commission is collected in the project's payment token and stored in the global treasury PDA.
+
+### Commission Flow
+
+```
+User buys box for 100 tokens
+    ↓
+On-chain: calculate commission (5% = 5 tokens)
+    ↓
+95 tokens → Project Vault (for payouts)
+5 tokens → Treasury Token Account (platform revenue)
+    ↓
+Admin batches treasury processing:
+    - Withdraw tokens from treasury
+    - Swap all tokens to SOL via Jupiter
+    - 90% of SOL → Buy $3EYES → Treasury wallet
+    - 10% of SOL → Dev wallet
+```
+
+### On-Chain Implementation
+
+**In `create_box` instruction:**
+```rust
+// Calculate commission
+let commission = (box_price * platform_config.platform_commission_bps as u64) / 10000;
+let net_amount = box_price - commission;
+
+// Transfer net amount to vault
+transfer(ctx.accounts.buyer_to_vault_context(), net_amount)?;
+
+// Transfer commission to treasury
+if commission > 0 {
+    transfer(ctx.accounts.buyer_to_treasury_context(), commission)?;
+}
+```
+
+### Treasury PDA Structure
+
+| Component | Description |
+|-----------|-------------|
+| Treasury PDA | `seeds = ["treasury"]` - Global treasury account |
+| Treasury Token Accounts | ATAs owned by treasury PDA for each token type |
+
+### Admin Dashboard (Treasury Tab)
+
+The admin dashboard includes a Treasury tab showing:
+- Treasury PDA address
+- Current commission rate (configurable)
+- Token balances ($3EYES always shown first, even if 0)
+- Token account addresses
+
+### Batch Processing Script
+
+**File:** `backend/scripts/process-treasury-fees.js`
+
+```bash
+# Show all available flags
+node scripts/process-treasury-fees.js --help
+
+# Dry run (simulation, no transactions)
+node scripts/process-treasury-fees.js --dry-run
+
+# Withdraw only (skip Jupiter swaps - useful for devnet testing)
+node scripts/process-treasury-fees.js --withdraw-only
+
+# Test with partial balance (e.g., 20% of treasury)
+node scripts/process-treasury-fees.js --withdraw-only --test-multiplier 0.2
+
+# Process specific token only
+node scripts/process-treasury-fees.js --token <mint_address>
+
+# Set minimum SOL threshold (default: 0.001 SOL)
+node scripts/process-treasury-fees.js --min-sol 0.01
+
+# Full mainnet processing with dev wallet
+node scripts/process-treasury-fees.js --dev-wallet <pubkey>
+```
+
+**Script Flow:**
+1. Query all unique payment tokens from projects
+2. Check treasury balance for each token
+3. Get Jupiter quote for SOL value
+4. Skip if below minimum threshold
+5. **Withdraw:** Transfer tokens from treasury PDA to admin wallet
+6. **Swap:** Swap tokens to SOL via Jupiter API (mainnet only)
+7. **Split:** 90% for $3EYES buyback, 10% to dev wallet (if specified)
+8. **Log:** Each step logged to `treasury_processing_log` table
+
+**Database Logging:**
+All treasury operations are logged to the `treasury_processing_log` table with:
+- `action_type`: 'withdraw', 'swap', 'dev_transfer', 'buyback' (REQUIRED)
+- `processed_by`: Admin wallet that triggered the operation (REQUIRED)
+- Transaction signatures for Solscan links
+- Amounts and status
+- Error messages for failed operations
+
+**Important:** The `processed_by` and `action_type` fields are NOT NULL. All inserts must include these fields.
+
+**Testing Status:**
+- Devnet: Withdrawal tested successfully with `--withdraw-only --test-multiplier 0.2`
+- Mainnet: **NOT TESTED** - Jupiter swaps require real liquidity
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/admin/treasury-balances` | GET | All treasury balances |
+| `/api/admin/treasury/:tokenMint` | GET | Specific token balance |
+| `/api/admin/withdraw-treasury` | POST | Withdraw to admin wallet |
+| `/api/admin/treasury-logs` | GET | Treasury activity logs with Solscan links |
+
+### Configuration
+
+Commission rate is stored on-chain in `PlatformConfig.platform_commission_bps`:
+- Units: Basis points (100 = 1%)
+- Default: 500 (5%)
+- Maximum: 5000 (50%)
+- Configurable via Admin Dashboard → On-Chain Config
+
+### Important Notes
+
+1. **Commission is per-token** - Each project's payment token accumulates separately
+2. **Treasury is global** - One treasury PDA, multiple token accounts
+3. **$3EYES shown first** - Even with 0 balance, for visibility
+4. **SOL threshold** - Batch script skips tokens worth less than threshold
+5. **Buyback destination** - $3EYES purchased goes to treasury wallet (not burned)
+
+---
+
+## Creator Withdrawals
+
+### Overview
+
+Creators can withdraw profits from their project vault in the project's payment token. **No withdrawal fee is charged** because the platform already collects a 5% commission on every box purchase (double-charging would be unfair).
+
+### Withdrawal Modes
+
+1. **Withdraw Profits** - Take only profits above initial funding amount
+   - Keeps vault funded for ongoing payouts
+   - Project stays active
+   - Available = vault_balance - locked_balance - initial_funding
+
+2. **Withdraw All & Close** - Withdraw everything and close the project
+   - Calculate reserve needed for unclaimed boxes (pending reveals)
+   - Creator receives: vault_balance - reserve_for_pending
+   - Project becomes inactive
+   - Any remaining funds after all boxes settle can be claimed
+
+### Locked Balance Calculation
+
+To prevent creators from withdrawing funds needed for potential payouts, reserves are calculated using EV-based worst-case analysis:
+
+```javascript
+// Uses EV calculator for worst-case (99th percentile) reserve
+import { calculateUnopenedBoxReserve, DEFAULT_TIER_PROBABILITIES, DEFAULT_PAYOUT_MULTIPLIERS } from '../lib/evCalculator.js';
+
+const reservedForUnopened = calculateUnopenedBoxReserve(
+    boxPrice,
+    unopenedBoxes,
+    DEFAULT_TIER_PROBABILITIES.tier3,  // Use max luck tier (worst case)
+    DEFAULT_PAYOUT_MULTIPLIERS
+);
+const available = vaultBalance - reservedForUnopened - unclaimedRewards;
+```
+
+This calculation accounts for:
+- **Tier 3 RTP (94%)** - worst case for house
+- **Jackpot clustering risk** - 99th percentile for multiple jackpots in small samples
+- **20% safety margin** - additional buffer for variance
+
+### Why No Withdrawal Fee?
+
+The platform revenue model is based on commission, not withdrawal fees:
+
+| Revenue Source | Rate | Collection Point |
+|----------------|------|------------------|
+| Box Purchase Commission | 5% | Per box purchase |
+| Launch Fee | 100 $3EYES | Project creation |
+
+Charging both commission AND withdrawal fee would double-charge creators, which is unfair and could discourage project creation.
+
+### Payout Currency
+
+Creators receive payouts in their **project's payment token only**:
+- Example: CATS project → Creator withdraws in CATS
+- No SOL conversion option (would create unnecessary sell pressure on project token)
+
+### Implementation Status
+
+| Feature | Status |
+|---------|--------|
+| Withdraw Profits | Complete |
+| Withdraw All & Close | Needs implementation |
+| Locked Balance Calc | Off-chain only |
+| No Withdrawal Fee | Complete (by design)
 
 ---
 
@@ -854,7 +1630,115 @@ const revealIx = await randomness.revealIx(payer);
 | RLS too permissive | Any user can UPDATE | Add owner_wallet checks |
 | No backend wallet auth | Claim any owner_wallet | Require signed messages |
 | No rate limiting | API spam | Add express-rate-limit |
-| Missing withdrawal fee | Platform revenue loss | Implement fee transfer |
+
+---
+
+## Common Debugging Scenarios
+
+### Config Loading Failures
+**Error:** `Cannot read properties of undefined (reading 'slice')` or `Cannot read properties of null`
+**Cause:** Frontend component accessing config before it's loaded, or config field is null
+**Fix:** Add null checks with optional chaining:
+```javascript
+// Bad
+config.rpcUrl.slice(0, 30)
+config.adminWallet.toString()
+
+// Good
+config?.rpcUrl?.slice(0, 30) || 'Not configured'
+config?.adminWallet && publicKey.toString() === config.adminWallet.toString()
+```
+
+### Supabase 400 Bad Request
+**Error:** `400 Bad Request` on Supabase queries
+**Cause:** Query references columns that don't exist in the database
+**Fix:** Check `super_admin_config` table schema. Common removed columns:
+- `vault_fund_amount` (removed in migration 011)
+- `withdrawal_fee_percentage` (removed in migration 015)
+- `min_box_price`, `max_projects_per_wallet` (no longer used)
+
+### BN.js vs BigInt Mismatch
+**Error:** `src.toArrayLike is not a function`
+**Cause:** Anchor expects BN.js, JavaScript gives native BigInt
+**Fix:**
+```javascript
+const BN = require('bn.js');
+const amountBN = new BN(amount.toString());
+```
+
+### ATA Not Created
+**Error:** `AccountNotInitialized` or withdrawal fails silently
+**Cause:** Admin/user wallet doesn't have an Associated Token Account for the token
+**Fix:** Add `createAssociatedTokenAccountInstruction` before transfer:
+```javascript
+const { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } = require('@solana/spl-token');
+const ata = await getAssociatedTokenAddress(mint, owner, true); // true for PDAs
+// Check if exists, create if not
+```
+
+### PDA Already Exists (Project Creation Fails)
+**Error:** Transaction fails with no clear message, or "Unexpected error" from wallet
+**Cause:** Project numeric ID maps to a PDA that already exists on-chain from previous testing
+**Fix:** Increment the project counter in Supabase:
+```sql
+UPDATE project_counter SET counter = 10 WHERE id = 1;
+```
+**Debug:** Check if PDA exists:
+```bash
+solana account <PDA_ADDRESS> --url devnet
+```
+
+### VRF InvalidSecpSignature (0x1780)
+**Error:** Reveal transaction fails with error 0x1780
+**Cause:** Using Crossbar for VRF, which routes to different oracles
+**Fix:** Never use Crossbar for VRF. Use direct oracle connection.
+
+### Switchboard VRF DNS Resolution Failures (Devnet)
+**Error:** `getaddrinfo ENOTFOUND 92.222.100.185.xip.switchboard-oracles.xyz`
+**Cause:** Switchboard devnet oracles use `xip.io` style DNS (maps hostnames to IPs via DNS wildcards). The xip DNS service can be unreliable.
+**Symptoms:**
+- Box commits succeed (randomness account created)
+- Reveals fail with DNS resolution errors
+- Affects all devnet VRF operations
+
+**Platform Handling (as of Jan 17, 2026):**
+
+1. **Pre-commit health check** - Before opening a box, frontend calls `GET /api/oracle-health` to check if oracles are reachable. If unhealthy, user is warned and prevented from committing.
+
+2. **Error classification** - Backend classifies reveal errors with specific error codes:
+   - `ORACLE_UNAVAILABLE` - DNS/network failure (retryable)
+   - `ORACLE_TIMEOUT` - 503/timeout (retryable)
+   - `INSUFFICIENT_FUNDS` - User needs more SOL (retryable)
+   - `REVEAL_EXPIRED` - 1-hour window passed (not retryable)
+
+3. **Time remaining display** - When reveal fails, the error includes how much time remains in the 1-hour window, so users know they can retry.
+
+4. **Retry within window** - Users CAN retry reveals as many times as needed within the 1-hour window. Only the commit is on-chain; reveals can be reattempted.
+
+**Key Implementation Files:**
+- `backend/lib/switchboard.js` - `checkOracleHealth()` function
+- `backend/server.js` - `GET /api/oracle-health` endpoint
+- `backend/routes/program.js` - Error classification in `build-reveal-box-tx`
+- `frontend/components/dashboard/Dashboard.jsx` - Health check before commit, error display
+
+**Workarounds (manual):**
+1. Wait for xip service to recover (usually resolves within hours)
+2. Add manual entry to `/etc/hosts`: `92.222.100.185 92.222.100.185.xip.switchboard-oracles.xyz`
+3. Report to Switchboard Discord
+
+**Note:** This is a Switchboard infrastructure issue, not a code bug. Mainnet oracles are generally more reliable.
+
+### Transaction Simulation Fails
+**Debug:** Check simulation logs for the actual error:
+```javascript
+const simulation = await connection.simulateTransaction(transaction);
+console.log(simulation.value.logs);
+```
+
+### Solana Timestamps
+**Issue:** Dates display incorrectly
+**Cause:** Solana uses Unix seconds, JavaScript uses milliseconds
+**Fix:** `new Date(solanaTimestamp * 1000)`
 
 ---
 
@@ -868,6 +1752,10 @@ NODE_ENV=development
 SUPABASE_URL=https://xxx.supabase.co
 SUPABASE_ANON_KEY=your_anon_key
 DEPLOY_WALLET_JSON=[array of 64 bytes]  # Platform admin wallet keypair
+DEPLOY_WALLET_PUBKEY=your_pubkey        # For reference
+RPC_URL=https://devnet.helius-rpc.com/?api-key=xxx
+SOLANA_NETWORK=devnet
+JUPITER_API_KEY=your_jupiter_api_key    # Required for price oracle & swaps
 ```
 
 ### Frontend (.env.local)
@@ -882,6 +1770,55 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
 
 ## Deployment Information
 
+### Backend Hosting (Render.com)
+
+The backend is deployed to Render.com. Required environment variables:
+
+```bash
+# Server
+PORT=3333
+NODE_ENV=production
+
+# Supabase
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+
+# Solana
+SOLANA_NETWORK=devnet
+RPC_URL=https://your-rpc-url
+DEPLOY_WALLET_JSON=[keypair,bytes]
+DEPLOY_WALLET_PUBKEY=YourPubkey
+
+# External APIs
+JUPITER_API_KEY=your_key
+
+# Security (IMPORTANT for production)
+ALLOWED_ORIGINS=https://degenbox.fun,https://www.degenbox.fun
+PLATFORM_DOMAIN=degenbox.fun
+API_BASE_URL=https://api.degenbox.fun
+```
+
+### Security Features (January 2026)
+
+The backend includes these security measures:
+
+| Feature | Implementation |
+|---------|----------------|
+| Security Headers | `helmet` middleware |
+| Rate Limiting | `express-rate-limit` (100 req/15min general, 20/hr admin, 30/min transactions) |
+| CORS | Wildcard subdomain support for `*.degenbox.fun` |
+| Input Validation | Zod schemas for all endpoints |
+| Error Sanitization | Production hides sensitive error details |
+| Request IDs | Every request gets tracking ID |
+
+**Key Files:**
+- `backend/server.js` - Security middleware configuration
+- `backend/middleware/auth.js` - Admin authentication middleware
+- `backend/lib/validation.js` - Zod validation schemas
+- `backend/lib/utils.js` - Utility functions
+- `backend/lib/devLogger.js` - Development-only logging
+
 ### Current Devnet Deployment
 
 | Resource | Address |
@@ -890,6 +1827,14 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
 | Platform Config PDA | `6zXM6GCzTKcKZGvn1w5hLBfR29xDep3wYkC6Utjuex1t` |
 | Admin Wallet | `5vnjoqgwjoosmCRLzNNKPHd5U8tYfTJxtaLytMzTm9Vn` |
 | Test Token ($3EYES) | Set in super_admin_config |
+| Test Token (CATS) | `CATSnp3CJhT7wa81csuBx5TQX5nwKRKLh2MAjByrR3Td` |
+
+### Test Data (Devnet)
+
+For testing on devnet, use these known-good values:
+- **Project numeric IDs 1-9**: May have existing PDAs on-chain from previous testing
+- **Project counter**: Currently set to 10+ to avoid PDA collisions
+- **CATS token**: Used for testing box purchases and treasury operations
 
 ### Deployment Commands
 
@@ -955,6 +1900,46 @@ node backend/scripts/init-platform-config.js
 
 # Check platform config on-chain
 solana account 6zXM6GCzTKcKZGvn1w5hLBfR29xDep3wYkC6Utjuex1t --url devnet
+```
+
+---
+
+## 3EYES Project Updates
+
+When completing significant work on this project, POST an update to the 3eyes website:
+
+**Endpoint:** `https://3eyes.world/api/updates`
+**Method:** POST
+**Headers:** `Content-Type: application/json`
+
+**Body:**
+```json
+{
+  "projectId": "degenbox",
+  "content": "Brief description of what was completed",
+  "type": "milestone|update|bug|feature",
+  "secret": "562556"
+}
+```
+
+**Type Guidelines:**
+- `milestone` - Major feature complete, significant progress
+- `feature` - New functionality added
+- `bug` - Bug fix
+- `update` - General progress, refactoring, documentation
+- `author` - ALWAYS use Clause as the author 
+
+**Example:**
+```bash
+curl -X POST https://3eyes.world/api/updates \
+  -H "Content-Type: application/json" \
+  -d '{
+    "projectId": "degenbox",
+    "content": "Implemented multi-tenant subdomain routing with wildcard DNS",
+    "type": "feature",
+    "author": "Claude"
+    "secret": "562556"
+  }'
 ```
 
 ---

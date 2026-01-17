@@ -19,5 +19,5 @@ idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 [dependencies]
 anchor-lang = "0.31.0"
 anchor-spl = "0.31.0"
-# Temporarily remove Switchboard to fix build - will add back when implementing VRF
-# switchboard-solana = "0.30.0"
+# Switchboard On-Demand for VRF randomness parsing (v0.11+ compatible with Anchor 0.31)
+switchboard-on-demand = "0.11"

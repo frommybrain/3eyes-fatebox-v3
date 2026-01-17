@@ -1,19 +1,19 @@
 // lib/getNetworkConfig.js
 // Network-agnostic configuration loader
-// Reads from Supabase super_admin_config table
-// This allows switching from devnet → mainnet without code changes
+// Fetches from backend API which reads on-chain config as source of truth
+// Falls back to Supabase database for network settings
 
 import { supabase } from './supabase';
 import { PublicKey } from '@solana/web3.js';
 
-// Cache configuration to avoid repeated database queries
+// Cache configuration to avoid repeated API calls
 let configCache = null;
 let cacheTimestamp = null;
 const CACHE_TTL = 60000; // 1 minute cache
 
 /**
- * Get current network configuration from database
- * This is the SINGLE SOURCE OF TRUTH for all network-specific values
+ * Get current network configuration
+ * Fetches from backend API which reads on-chain config as source of truth
  *
  * @returns {Promise<NetworkConfig>}
  */
@@ -24,23 +24,21 @@ export async function getNetworkConfig(forceRefresh = false) {
     }
 
     try {
-        const { data, error } = await supabase
-            .from('super_admin_config')
-            .select('*')
-            .single();
+        // Fetch from backend API (which reads on-chain + database)
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+        const response = await fetch(`${backendUrl}/api/config`);
 
-        if (error) {
-            throw new Error(`Failed to fetch network config: ${error.message}`);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch config from backend: ${response.statusText}`);
         }
 
-        if (!data) {
-            throw new Error('No network configuration found in database');
+        const result = await response.json();
+
+        if (!result.success || !result.config) {
+            throw new Error(result.error || 'Invalid config response from backend');
         }
 
-        // Validate required fields
-        if (!data.network || !data.rpc_url || !data.lootbox_program_id) {
-            throw new Error('Invalid network configuration: missing required fields');
-        }
+        const data = result.config;
 
         // Helper function to safely create PublicKey
         const safePublicKey = (value, fieldName) => {
@@ -49,45 +47,69 @@ export async function getNetworkConfig(forceRefresh = false) {
                 return new PublicKey(value);
             } catch (error) {
                 console.warn(`Invalid PublicKey for ${fieldName}: ${value}. Using placeholder.`);
-                // Return a placeholder PublicKey (System Program ID)
                 return new PublicKey('11111111111111111111111111111111');
             }
         };
 
         // Parse and construct config object
         const config = {
-            // Network
+            // Network info
             network: data.network,
-            rpcUrl: data.rpc_url,
-            isProduction: data.is_production,
-            mainnetEnabled: data.mainnet_enabled,
+            isProduction: data.network === 'mainnet' || data.network === 'mainnet-beta',
 
-            // Program & Tokens - with validation
-            programId: safePublicKey(data.lootbox_program_id, 'lootbox_program_id'),
-            lootboxProgramId: safePublicKey(data.lootbox_program_id, 'lootbox_program_id'), // Alias for compatibility
-            threeEyesMint: safePublicKey(data.three_eyes_mint, 'three_eyes_mint'),
-            platformFeeAccount: safePublicKey(data.platform_fee_account, 'platform_fee_account'),
+            // Program ID
+            programId: safePublicKey(data.programId, 'programId'),
+            lootboxProgramId: safePublicKey(data.programId, 'programId'), // Alias for compatibility
 
-            // Fees (raw values)
-            launchFeeAmount: data.launch_fee_amount, // bigint
-            withdrawalFeePercentage: parseFloat(data.withdrawal_fee_percentage),
+            // Platform status
+            paused: data.paused,
+            maintenanceMode: data.maintenanceMode,
 
-            // Platform settings
-            minBoxPrice: data.min_box_price,
-            maxProjectsPerWallet: data.max_projects_per_wallet,
+            // Luck settings (from on-chain)
+            baseLuck: data.baseLuck,
+            maxLuck: data.maxLuck,
+            luckIntervalSeconds: data.luckIntervalSeconds,
 
-            // Game settings
-            luckIntervalSeconds: data.luck_interval_seconds ?? 3, // Default 3 seconds for dev
+            // Payout multipliers (from on-chain)
+            payoutMultipliers: data.payoutMultipliers,
 
-            // Project creation settings
-            vaultFundAmount: data.vault_fund_amount, // Required vault funding for project creation
+            // Tier probabilities (from on-chain)
+            tierProbabilities: data.tierProbabilities,
 
-            // Admin
-            adminWallet: safePublicKey(data.admin_wallet, 'admin_wallet'),
+            // Platform commission (from on-chain)
+            platformCommissionBps: data.platformCommissionBps,
+            platformCommissionPercent: data.platformCommissionPercent,
 
-            // Raw data (for debugging)
-            _raw: data,
+            // Admin wallet (from on-chain or database via backend)
+            adminWallet: safePublicKey(data.adminWallet, 'adminWallet'),
+
+            // Metadata
+            source: data.source, // 'on-chain' or 'database-fallback'
+
+            // For components that still need these (will fetch from database as fallback)
+            _needsDatabaseFallback: true,
         };
+
+        // Fetch additional fields from database (RPC URL, mints, etc. not in on-chain config)
+        try {
+            const { data: dbData } = await supabase
+                .from('super_admin_config')
+                .select('rpc_url, three_eyes_mint, platform_fee_account, admin_wallet, launch_fee_amount')
+                .single();
+
+            if (dbData) {
+                config.rpcUrl = dbData.rpc_url;
+                config.threeEyesMint = safePublicKey(dbData.three_eyes_mint, 'three_eyes_mint');
+                config.platformFeeAccount = safePublicKey(dbData.platform_fee_account, 'platform_fee_account');
+                // Only use database adminWallet if not already set from API
+                if (!config.adminWallet) {
+                    config.adminWallet = safePublicKey(dbData.admin_wallet, 'admin_wallet');
+                }
+                config.launchFeeAmount = dbData.launch_fee_amount;
+            }
+        } catch (dbError) {
+            console.warn('Could not fetch additional config from database:', dbError.message);
+        }
 
         // Update cache
         configCache = config;
@@ -104,8 +126,59 @@ export async function getNetworkConfig(forceRefresh = false) {
             return configCache;
         }
 
-        throw error;
+        // Last resort: try to fetch directly from database
+        console.warn('Falling back to direct database fetch...');
+        return fetchConfigFromDatabase();
     }
+}
+
+/**
+ * Fallback function to fetch config directly from database
+ * Used when backend API is unavailable
+ */
+async function fetchConfigFromDatabase() {
+    const { data, error } = await supabase
+        .from('super_admin_config')
+        .select('*')
+        .single();
+
+    if (error) {
+        throw new Error(`Failed to fetch network config: ${error.message}`);
+    }
+
+    if (!data) {
+        throw new Error('No network configuration found in database');
+    }
+
+    const safePublicKey = (value) => {
+        if (!value) return null;
+        try {
+            return new PublicKey(value);
+        } catch {
+            return new PublicKey('11111111111111111111111111111111');
+        }
+    };
+
+    const config = {
+        network: data.network,
+        rpcUrl: data.rpc_url,
+        isProduction: data.network === 'mainnet' || data.network === 'mainnet-beta',
+        programId: safePublicKey(data.lootbox_program_id, 'lootbox_program_id'),
+        lootboxProgramId: safePublicKey(data.lootbox_program_id, 'lootbox_program_id'),
+        threeEyesMint: safePublicKey(data.three_eyes_mint, 'three_eyes_mint'),
+        platformFeeAccount: safePublicKey(data.platform_fee_account, 'platform_fee_account'),
+        launchFeeAmount: data.launch_fee_amount,
+        luckIntervalSeconds: data.luck_interval_seconds ?? 3,
+        adminWallet: safePublicKey(data.admin_wallet, 'admin_wallet'),
+        platformCommissionBps: data.platform_commission_bps ?? 500,
+        platformCommissionPercent: (data.platform_commission_bps ?? 500) / 100,
+        source: 'database-fallback',
+    };
+
+    configCache = config;
+    cacheTimestamp = Date.now();
+
+    return config;
 }
 
 /**
@@ -164,6 +237,28 @@ export function generateSubdomain(requestedSubdomain, network) {
         return `devnet-${requestedSubdomain}`;
     }
     return requestedSubdomain;
+}
+
+/**
+ * Get the full URL for a project page
+ * Uses NEXT_PUBLIC_PLATFORM_URL if set, otherwise detects localhost vs production
+ * @param {string} subdomain - Project subdomain (e.g., 'devnet-myproject')
+ * @returns {string} - Full project URL
+ */
+export function getProjectUrl(subdomain) {
+    // Check for explicit platform URL in env
+    const platformUrl = process.env.NEXT_PUBLIC_PLATFORM_URL;
+    if (platformUrl) {
+        return `${platformUrl}/project/${subdomain}`;
+    }
+
+    // Detect localhost in browser
+    if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+        return `http://localhost:3000/project/${subdomain}`;
+    }
+
+    // Production default
+    return `https://${subdomain}.degenbox.fun`;
 }
 
 /**

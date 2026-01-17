@@ -4,12 +4,19 @@
 import express from 'express';
 import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 import { createClient } from '@supabase/supabase-js';
-import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction, TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import BN from 'bn.js';
-import { getNetworkConfig } from '../lib/getNetworkConfig.js';
+import { getNetworkConfig, getPlatformConfig } from '../lib/getNetworkConfig.js';
 import { getAnchorProgram } from '../lib/anchorClient.js';
-import { calculateWithdrawalFee, getTokenPriceUSD, testJupiterConnection, KNOWN_TOKENS } from '../lib/priceOracle.js';
-import { deriveVaultAuthorityPDA } from '../lib/pdaHelpers.js';
+import { testJupiterConnection, KNOWN_TOKENS } from '../lib/priceOracle.js';
+import { deriveVaultAuthorityPDA, derivePlatformConfigPDA } from '../lib/pdaHelpers.js';
+import {
+    calculateUnopenedBoxReserve,
+    calculateExpectedReserve,
+    DEFAULT_TIER_PROBABILITIES,
+    DEFAULT_PAYOUT_MULTIPLIERS,
+} from '../lib/evCalculator.js';
+import logger from '../lib/logger.js';
 
 const router = express.Router();
 
@@ -293,16 +300,16 @@ router.get('/balance/:projectId', async (req, res) => {
 // ============================================
 
 /**
- * Statistical expected payout multiplier at max luck (60)
- * Based on probability distribution:
- * - 30% Dud (0x) = 0
- * - 25% Rebate (0.8x) = 0.2
- * - 20% Break-even (1x) = 0.2
- * - 20% Profit (2.5x) = 0.5
- * - 5% Jackpot (10x) = 0.5
- * Total = 1.4x expected per box at max luck
+ * Reserve calculation uses EV-based calculation from evCalculator.js
+ * Based on probability analysis from Claude, ChatGPT, and Grok (Jan 2026)
+ *
+ * Default model (Grok's no-dud approach):
+ * - Tier 3 (max luck): 94% RTP, 6% house edge
+ * - 2% jackpot at 4x multiplier
+ * - Reserve = RTP × box_price × unopened_count (straight expected value)
+ *
+ * See: backend/lib/evCalculator.js for full calculation
  */
-const EXPECTED_PAYOUT_MULTIPLIER = 1.4;
 
 /**
  * GET /api/vault/withdrawal-info/:projectId
@@ -402,12 +409,29 @@ router.get('/withdrawal-info/:projectId', async (req, res) => {
             }
         }
 
-        // Calculate reserved amount for unopened boxes
-        // Reserve = unopened_boxes * box_price * expected_payout_multiplier
+        // Calculate reserved amount for unopened boxes using EV calculator
+        // Reserve = RTP × box_price × count (Tier 3 RTP varies based on on-chain config)
         const boxPrice = BigInt(project.box_price || 0);
-        const reservedForUnopened = BigInt(Math.ceil(
-            Number(boxPrice) * unopenedBoxes * EXPECTED_PAYOUT_MULTIPLIER
-        ));
+
+        // Fetch platform config (on-chain as source of truth, database as fallback)
+        const platformConfig = await getPlatformConfig();
+
+        // Use on-chain values for tier probabilities and payout multipliers
+        const tier3Probs = platformConfig.tierProbabilities?.tier3 || DEFAULT_TIER_PROBABILITIES.tier3;
+        const payoutMultipliers = platformConfig.payoutMultipliers || DEFAULT_PAYOUT_MULTIPLIERS;
+
+        const reservedForUnopened = calculateUnopenedBoxReserve(
+            boxPrice,
+            unopenedBoxes,
+            tier3Probs,
+            payoutMultipliers
+        );
+
+        // Calculate the reserve multiplier used (for display purposes)
+        // This is the expected RTP for Tier 3 based on current on-chain settings
+        const reserveMultiplier = unopenedBoxes > 0
+            ? calculateExpectedReserve(tier3Probs, payoutMultipliers)
+            : 0;
 
         // Total reserved = reserved for unopened + actual unclaimed rewards
         const totalReserved = reservedForUnopened + unclaimedRewards;
@@ -435,56 +459,8 @@ router.get('/withdrawal-info/:projectId', async (req, res) => {
         // Can close project? Only if no unopened and no unclaimed boxes
         const canCloseProject = unopenedBoxes === 0 && unclaimedBoxes === 0;
 
-        // Get creator's platform token balance (fee is paid from their wallet, not the vault)
-        let creatorPlatformTokenBalance = BigInt(0);
-        const platformTokenMint = config.threeEyesMint?.toString();
-
-        if (platformTokenMint && ownerWallet) {
-            try {
-                const ownerPubkey = new PublicKey(ownerWallet);
-                const platformMintPubkey = new PublicKey(platformTokenMint);
-                const creatorPlatformATA = await getAssociatedTokenAddress(
-                    platformMintPubkey,
-                    ownerPubkey
-                );
-                const accountInfo = await connection.getAccountInfo(creatorPlatformATA);
-                if (accountInfo) {
-                    const amountBN = new BN(accountInfo.data.slice(64, 72), 'le');
-                    creatorPlatformTokenBalance = BigInt(amountBN.toString());
-                }
-            } catch (e) {
-                console.log('   Creator platform token account not found or empty');
-            }
-        }
-
-        // Get fee estimate for a sample withdrawal (use maxWithdrawable)
-        let feeEstimate = null;
-        if (maxWithdrawable > BigInt(0) && platformTokenMint) {
-            const feeResult = await calculateWithdrawalFee(
-                maxWithdrawable,
-                config.withdrawalFeePercentage || 2.5,
-                project.payment_token_mint,
-                platformTokenMint,
-                project.payment_token_decimals || 9,
-                9 // Platform token decimals
-            );
-
-            if (feeResult.success) {
-                feeEstimate = {
-                    feePercentage: config.withdrawalFeePercentage || 2.5,
-                    feeInProjectToken: feeResult.feeInProjectToken.toString(),
-                    feeInPlatformToken: feeResult.feeInPlatformToken.toString(),
-                    exchangeRate: feeResult.exchangeRate,
-                    projectTokenPriceUSD: feeResult.projectTokenPriceUSD,
-                    platformTokenPriceUSD: feeResult.platformTokenPriceUSD,
-                    isMockPrice: feeResult.isMockPrice || false,
-                };
-            } else {
-                feeEstimate = {
-                    error: feeResult.error,
-                };
-            }
-        }
+        // Note: No platform fee for project vault withdrawals
+        // Platform only takes commission on box purchases (on-chain)
 
         // Format values for response
         const decimals = project.payment_token_decimals || 9;
@@ -493,18 +469,11 @@ router.get('/withdrawal-info/:projectId', async (req, res) => {
             formatted: (Number(amount) / Math.pow(10, decimals)).toFixed(decimals),
         });
 
-        // Format platform token balance (9 decimals)
-        const formatPlatformAmount = (amount) => ({
-            raw: amount.toString(),
-            formatted: (Number(amount) / Math.pow(10, 9)).toFixed(9),
-        });
-
         console.log(`✅ Withdrawal info calculated:`);
         console.log(`   Vault balance: ${vaultBalance}`);
         console.log(`   Unopened boxes: ${unopenedBoxes}`);
         console.log(`   Reserved: ${totalReserved}`);
         console.log(`   Max withdrawable: ${maxWithdrawable}`);
-        console.log(`   Creator platform token balance: ${creatorPlatformTokenBalance}`);
 
         return res.json({
             success: true,
@@ -528,7 +497,7 @@ router.get('/withdrawal-info/:projectId', async (req, res) => {
                 forUnopenedBoxes: formatAmount(reservedForUnopened),
                 forUnclaimedRewards: formatAmount(unclaimedRewards),
                 total: formatAmount(totalReserved),
-                multiplierUsed: EXPECTED_PAYOUT_MULTIPLIER,
+                multiplierUsed: reserveMultiplier.toFixed(4),
             },
             withdrawable: {
                 maxAmount: formatAmount(maxWithdrawable),
@@ -537,14 +506,7 @@ router.get('/withdrawal-info/:projectId', async (req, res) => {
                 isInLoss: profit < BigInt(0),
                 lossAmount: profit < BigInt(0) ? formatAmount(-profit) : null,
             },
-            // Creator's platform token balance (for paying withdrawal fee)
-            creatorFeeWallet: {
-                balance: formatPlatformAmount(creatorPlatformTokenBalance),
-                tokenSymbol: 't3EYES2', // Platform token symbol
-                tokenMint: platformTokenMint,
-            },
             canCloseProject,
-            feeEstimate,
             network: config.network,
         });
 
@@ -553,102 +515,6 @@ router.get('/withdrawal-info/:projectId', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to calculate withdrawal info',
-            details: error.message,
-        });
-    }
-});
-
-/**
- * POST /api/vault/calculate-fee
- * Calculate exact fee for a specific withdrawal amount
- */
-router.post('/calculate-fee', async (req, res) => {
-    try {
-        const { projectId, withdrawalAmount } = req.body;
-
-        if (!projectId || !withdrawalAmount) {
-            return res.status(400).json({
-                success: false,
-                error: 'Missing required fields: projectId, withdrawalAmount',
-            });
-        }
-
-        console.log(`\n💵 Calculating fee for withdrawal of ${withdrawalAmount}...`);
-
-        // Fetch project
-        const { data: project, error: projectError } = await supabase
-            .from('projects')
-            .select('*')
-            .eq('project_numeric_id', parseInt(projectId))
-            .single();
-
-        if (projectError || !project) {
-            return res.status(404).json({
-                success: false,
-                error: 'Project not found',
-            });
-        }
-
-        // Get network config
-        const config = await getNetworkConfig();
-        const platformTokenMint = config.threeEyesMint?.toString();
-
-        if (!platformTokenMint) {
-            return res.status(500).json({
-                success: false,
-                error: 'Platform token not configured',
-            });
-        }
-
-        // Calculate fee
-        const feeResult = await calculateWithdrawalFee(
-            BigInt(withdrawalAmount),
-            config.withdrawalFeePercentage || 2.5,
-            project.payment_token_mint,
-            platformTokenMint,
-            project.payment_token_decimals || 9,
-            9 // Platform token decimals
-        );
-
-        if (!feeResult.success) {
-            return res.status(400).json({
-                success: false,
-                error: feeResult.error,
-            });
-        }
-
-        const decimals = project.payment_token_decimals || 9;
-
-        return res.json({
-            success: true,
-            withdrawalAmount: {
-                raw: withdrawalAmount,
-                formatted: (Number(withdrawalAmount) / Math.pow(10, decimals)).toFixed(decimals),
-            },
-            fee: {
-                percentage: config.withdrawalFeePercentage || 2.5,
-                inProjectToken: {
-                    raw: feeResult.feeInProjectToken.toString(),
-                    formatted: (Number(feeResult.feeInProjectToken) / Math.pow(10, decimals)).toFixed(decimals),
-                },
-                inPlatformToken: {
-                    raw: feeResult.feeInPlatformToken.toString(),
-                    formatted: (Number(feeResult.feeInPlatformToken) / Math.pow(10, 9)).toFixed(9),
-                    symbol: 't3EYES2', // Platform token symbol
-                },
-            },
-            exchangeRate: feeResult.exchangeRate,
-            prices: {
-                projectTokenUSD: feeResult.projectTokenPriceUSD,
-                platformTokenUSD: feeResult.platformTokenPriceUSD,
-            },
-        });
-
-    } catch (error) {
-        console.error('❌ Error calculating fee:', error);
-        return res.status(500).json({
-            success: false,
-            error: 'Failed to calculate fee',
             details: error.message,
         });
     }
@@ -709,8 +575,9 @@ router.post('/build-withdraw-tx', async (req, res) => {
 
         // Validate withdrawal amount against limits
         // (Re-calculate to ensure no race conditions)
+        const apiBaseUrl = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 3333}`;
         const withdrawalInfoResponse = await fetch(
-            `http://localhost:${process.env.PORT || 3333}/api/vault/withdrawal-info/${projectId}?ownerWallet=${ownerWallet}`
+            `${apiBaseUrl}/api/vault/withdrawal-info/${projectId}?ownerWallet=${encodeURIComponent(ownerWallet)}`
         );
         const withdrawalInfo = await withdrawalInfoResponse.json();
 
@@ -740,29 +607,12 @@ router.post('/build-withdraw-tx', async (req, res) => {
             console.log(`   Reserved funds: ${withdrawalInfo.reserved.total.formatted} ${project.payment_token_symbol}`);
         }
 
-        // Calculate fee
-        const platformTokenMintStr = config.threeEyesMint?.toString();
-        const feeResult = await calculateWithdrawalFee(
-            requestedAmount,
-            config.withdrawalFeePercentage || 2.5,
-            project.payment_token_mint,
-            platformTokenMintStr,
-            project.payment_token_decimals || 9,
-            9
-        );
-
-        if (!feeResult.success) {
-            return res.status(400).json({
-                success: false,
-                error: `Fee calculation failed: ${feeResult.error}`,
-            });
-        }
+        // Note: No platform fee for project vault withdrawals
+        // Platform only takes commission on box purchases (on-chain)
 
         // Build transaction
         const ownerPubkey = new PublicKey(ownerWallet);
         const paymentTokenMint = new PublicKey(project.payment_token_mint);
-        const platformTokenMint = config.threeEyesMint;
-        const platformFeeAccount = config.platformFeeAccount;
 
         // Derive PDAs
         const [vaultAuthority] = deriveVaultAuthorityPDA(
@@ -773,14 +623,9 @@ router.post('/build-withdraw-tx', async (req, res) => {
 
         const vaultTokenAccount = new PublicKey(project.vault_token_account);
 
-        // Owner's token accounts
+        // Owner's token account
         const ownerTokenAccount = await getAssociatedTokenAddress(
             paymentTokenMint,
-            ownerPubkey
-        );
-
-        const ownerPlatformTokenAccount = await getAssociatedTokenAddress(
-            platformTokenMint,
             ownerPubkey
         );
 
@@ -820,60 +665,6 @@ router.post('/build-withdraw-tx', async (req, res) => {
 
         transaction.add(withdrawIx);
 
-        // Add fee transfer instruction (from creator's wallet to platform fee account)
-        // The fee is paid in platform tokens ($3EYES) from the creator's wallet
-        if (feeResult.feeInPlatformToken > BigInt(0)) {
-            // Get platform fee token account (where fees go)
-            const platformFeeTokenAccount = await getAssociatedTokenAddress(
-                platformTokenMint,
-                platformFeeAccount
-            );
-
-            // Check if platform fee account exists, create if not
-            const platformFeeAccountInfo = await connection.getAccountInfo(platformFeeTokenAccount);
-            if (!platformFeeAccountInfo) {
-                transaction.add(
-                    createAssociatedTokenAccountInstruction(
-                        ownerPubkey, // payer
-                        platformFeeTokenAccount,
-                        platformFeeAccount, // owner of the ATA
-                        platformTokenMint
-                    )
-                );
-            }
-
-            // Check if creator has the platform token ATA
-            const ownerPlatformAccountInfo = await connection.getAccountInfo(ownerPlatformTokenAccount);
-            if (!ownerPlatformAccountInfo) {
-                return res.status(400).json({
-                    success: false,
-                    error: `You don't have a ${project.payment_token_symbol} token account. Please acquire some platform tokens first.`,
-                });
-            }
-
-            // Verify creator has enough platform tokens for the fee
-            const creatorPlatformBalance = new BN(ownerPlatformAccountInfo.data.slice(64, 72), 'le');
-            if (BigInt(creatorPlatformBalance.toString()) < feeResult.feeInPlatformToken) {
-                return res.status(400).json({
-                    success: false,
-                    error: `Insufficient platform token balance for fee. Need ${(Number(feeResult.feeInPlatformToken) / 1e9).toFixed(6)} but have ${(Number(creatorPlatformBalance.toString()) / 1e9).toFixed(6)}`,
-                    required: feeResult.feeInPlatformToken.toString(),
-                    available: creatorPlatformBalance.toString(),
-                });
-            }
-
-            // Add fee transfer instruction
-            const feeTransferIx = createTransferInstruction(
-                ownerPlatformTokenAccount, // from: creator's platform token account
-                platformFeeTokenAccount,   // to: platform fee account
-                ownerPubkey,               // owner/signer
-                BigInt(feeResult.feeInPlatformToken.toString())
-            );
-            transaction.add(feeTransferIx);
-
-            console.log(`   Added fee transfer: ${feeResult.feeInPlatformToken} platform tokens`);
-        }
-
         // Get recent blockhash
         const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
         transaction.recentBlockhash = blockhash;
@@ -886,7 +677,7 @@ router.post('/build-withdraw-tx', async (req, res) => {
             verifySignatures: false,
         }).toString('base64');
 
-        console.log(`✅ Withdrawal transaction built`);
+        console.log(`✅ Withdrawal transaction built (no platform fee)`);
 
         return res.json({
             success: true,
@@ -895,13 +686,6 @@ router.post('/build-withdraw-tx', async (req, res) => {
                 amount: amount,
                 amountFormatted: (Number(amount) / Math.pow(10, project.payment_token_decimals || 9)).toFixed(project.payment_token_decimals || 9),
                 type: withdrawalType,
-            },
-            fee: {
-                percentage: config.withdrawalFeePercentage || 2.5,
-                amountInPlatformToken: feeResult.feeInPlatformToken.toString(),
-                amountFormatted: (Number(feeResult.feeInPlatformToken) / Math.pow(10, 9)).toFixed(9),
-                platformTokenSymbol: 't3EYES2',
-                exchangeRate: feeResult.exchangeRate,
             },
             accounts: {
                 vaultAuthority: vaultAuthority.toString(),
@@ -998,11 +782,14 @@ router.post('/confirm-withdraw', async (req, res) => {
             .eq('project_id', project.id)
             .eq('box_result', 0);
 
-        // Calculate reserved amount
+        // Calculate reserved amount using proper EV calculation
         const boxPrice = BigInt(project.box_price || 0);
-        const reservedForBoxes = BigInt(Math.ceil(
-            Number(boxPrice) * (unopenedCount || 0) * EXPECTED_PAYOUT_MULTIPLIER
-        ));
+        const reservedForBoxes = calculateUnopenedBoxReserve(
+            boxPrice,
+            unopenedCount || 0,
+            DEFAULT_TIER_PROBABILITIES.tier3,
+            DEFAULT_PAYOUT_MULTIPLIERS
+        );
 
         // Insert withdrawal history
         const { error: historyError } = await supabase
@@ -1052,6 +839,21 @@ router.post('/confirm-withdraw', async (req, res) => {
         if (updateError) {
             console.error('Error updating project:', updateError);
         }
+
+        // Log to activity_logs for admin visibility
+        await logger.logProjectWithdrawal({
+            creatorWallet: project.owner_wallet,
+            projectId: project.project_numeric_id,
+            projectSubdomain: project.subdomain,
+            txSignature: signature,
+            amount: withdrawalAmount,
+            tokenMint: project.payment_token_mint,
+            withdrawalType: withdrawalType || 'partial',
+            vaultBalanceBefore: vaultBalanceBefore.toString(),
+            vaultBalanceAfter: vaultBalanceAfter.toString(),
+            reservedForBoxes: reservedForBoxes.toString(),
+            unopenedBoxes: unopenedCount || 0,
+        });
 
         console.log(`✅ Withdrawal confirmed and recorded`);
 

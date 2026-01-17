@@ -220,7 +220,8 @@ router.post('/create', async (req, res) => {
 
             try {
                 // Call the program initialization endpoint internally
-                const initResponse = await fetch(`http://localhost:${process.env.PORT || 3333}/api/program/initialize-project`, {
+                const apiBaseUrl = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 3333}`;
+                const initResponse = await fetch(`${apiBaseUrl}/api/program/initialize-project`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

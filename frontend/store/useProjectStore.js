@@ -187,6 +187,32 @@ const useProjectStore = create((set, get) => ({
     },
 
     /**
+     * Refresh current project silently (no loading state)
+     * Use this after actions like box purchase to avoid UI flicker
+     * @param {string} subdomain
+     */
+    refreshCurrentProject: async (subdomain) => {
+        try {
+            const { data, error } = await supabase
+                .from('projects')
+                .select('*')
+                .eq('subdomain', subdomain)
+                .single();
+
+            if (error) {
+                console.error('Failed to refresh project:', error);
+                return;
+            }
+
+            // Silently update without touching loading state
+            set({ currentProject: data });
+            return data;
+        } catch (error) {
+            console.error('Failed to refresh project:', error);
+        }
+    },
+
+    /**
      * Clear current project
      */
     clearCurrentProject: () => {

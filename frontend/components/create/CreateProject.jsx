@@ -17,6 +17,7 @@ import {
     DegenLoadingState,
     useToast,
 } from '@/components/ui';
+import { formatTimeToMaxLuck, formatDuration, LUCK_INTERVAL_PRESETS } from '@/lib/luckHelpers';
 
 export default function CreateProject() {
     const router = useRouter();
@@ -38,20 +39,38 @@ export default function CreateProject() {
         paymentTokenDecimals: 9,
         boxPrice: '',
         logoUrl: '',
+        luckIntervalSeconds: 0, // 0 = use platform default
     });
 
     const [errors, setErrors] = useState({});
     const [subdomainChecking, setSubdomainChecking] = useState(false);
     const [subdomainAvailable, setSubdomainAvailable] = useState(null);
 
+    // On-chain config for luck calculation (baseLuck, maxLuck)
+    const [onChainConfig, setOnChainConfig] = useState(null);
+
     useEffect(() => {
         setMounted(true);
+    }, []);
 
-        // Redirect if not connected
-        if (mounted && !connected) {
-            router.push('/');
+    // Fetch on-chain platform config for baseLuck/maxLuck
+    useEffect(() => {
+        async function fetchOnChainConfig() {
+            try {
+                const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+                const response = await fetch(`${backendUrl}/api/admin/platform-config`);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success && data.platformConfig) {
+                        setOnChainConfig(data.platformConfig);
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching on-chain config:', error);
+            }
         }
-    }, [connected, mounted, router]);
+        fetchOnChainConfig();
+    }, []);
 
     // Auto-generate subdomain from name
     const handleNameChange = (e) => {
@@ -128,6 +147,7 @@ export default function CreateProject() {
                     payment_token_symbol: formData.paymentTokenSymbol,
                     payment_token_decimals: formData.paymentTokenDecimals,
                     network: config.network,
+                    luck_interval_seconds: formData.luckIntervalSeconds || null,
                 })
                 .select()
                 .single();
@@ -150,6 +170,7 @@ export default function CreateProject() {
                     boxPrice: Math.floor(parseFloat(formData.boxPrice) * Math.pow(10, formData.paymentTokenDecimals)),
                     paymentTokenMint: formData.paymentTokenMint,
                     ownerWallet: publicKey.toString(),
+                    luckIntervalSeconds: formData.luckIntervalSeconds || 0,
                 }),
             });
 
@@ -168,12 +189,29 @@ export default function CreateProject() {
             const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
             transaction.recentBlockhash = blockhash;
             transaction.lastValidBlockHeight = lastValidBlockHeight;
+            transaction.feePayer = publicKey;
+
+            // Step 3.5: Simulate transaction to get detailed error before sending
+            console.log('Simulating transaction...');
+            try {
+                const simulation = await connection.simulateTransaction(transaction);
+                console.log('Simulation result:', simulation);
+                if (simulation.value.err) {
+                    console.error('Simulation failed:', simulation.value.err);
+                    console.error('Logs:', simulation.value.logs);
+                    throw new Error(`Transaction simulation failed: ${JSON.stringify(simulation.value.err)}\nLogs: ${simulation.value.logs?.join('\n')}`);
+                }
+                console.log('Simulation successful, proceeding to sign...');
+            } catch (simError) {
+                console.error('Simulation error:', simError);
+                throw simError;
+            }
 
             console.log('Sending transaction for signing...');
 
             // Step 4: Sign and send transaction
             const signature = await sendTransaction(transaction, connection, {
-                skipPreflight: false,
+                skipPreflight: true, // We already simulated
                 preflightCommitment: 'confirmed',
             });
 
@@ -197,6 +235,7 @@ export default function CreateProject() {
                     signature,
                     pdas: buildResult.pdas,
                     vaultFunding: buildResult.vaultFunding,
+                    launchFee: buildResult.launchFee,
                 }),
             });
 
@@ -211,7 +250,7 @@ export default function CreateProject() {
                 title: 'Project Created',
                 duration: 6000,
             });
-            router.push('/dashboard');
+            router.push('/dashboard?tab=projects');
 
         } catch (error) {
             console.error('Error creating project:', error);
@@ -253,12 +292,32 @@ export default function CreateProject() {
     }
 
     if (!connected) {
-        return null; // Will redirect
+        return (
+            <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-6">
+                <div className="max-w-3xl mx-auto">
+                    <div className="mb-8">
+                        <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">Create New Project</h1>
+                        <p className="text-degen-text-muted text-lg">Launch your own lootbox project</p>
+                    </div>
+                    <DegenCard variant="white" padding="lg" className="text-center">
+                        <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-4">
+                            Connect Your Wallet
+                        </h2>
+                        <p className="text-degen-text-muted mb-6">
+                            Please connect your wallet to create a new project.
+                        </p>
+                    </DegenCard>
+                </div>
+            </div>
+        );
     }
 
     const isDevnet = config?.network === 'devnet';
     const launchFee = config?.launchFeeAmount ? config.launchFeeAmount / 1e9 : 100;
-    const vaultFundAmount = config?.vaultFundAmount ? Number(config.vaultFundAmount) / 1e9 : 50000000;
+
+    // Dynamic vault funding: ~30x box price (calculated by backend based on EV analysis)
+    const boxPriceNum = parseFloat(formData.boxPrice) || 0;
+    const estimatedVaultFunding = Math.ceil(boxPriceNum * 30);
 
     return (
         <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-6">
@@ -298,7 +357,7 @@ export default function CreateProject() {
                                 label="Project Name *"
                                 value={formData.name}
                                 onChange={handleNameChange}
-                                placeholder="Lucky Cat Boxes"
+                                placeholder="Cats"
                                 error={errors.name}
                             />
                         </div>
@@ -318,7 +377,7 @@ export default function CreateProject() {
                                             setSubdomainAvailable(null);
                                         }}
                                         onBlur={checkSubdomain}
-                                        placeholder="luckycat"
+                                        placeholder="cats"
                                         className="w-full px-3 py-2 bg-degen-white text-degen-black placeholder:text-degen-text-muted border border-degen-black outline-none transition-colors duration-100 focus:bg-degen-container"
                                     />
                                     {subdomainChecking && (
@@ -347,7 +406,7 @@ export default function CreateProject() {
                                 label="Description"
                                 value={formData.description}
                                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                                placeholder="Try your luck with adorable cat-themed lootboxes!"
+                                placeholder="Not run out of your 9 lives yet? Try your luck with cats lootboxes"
                                 rows={3}
                             />
                         </div>
@@ -397,6 +456,80 @@ export default function CreateProject() {
                             />
                         </div>
 
+                        {/* Luck Settings */}
+                        <div className="mb-6">
+                            <label className="block text-degen-black font-medium text-sm uppercase tracking-wider mb-2">
+                                Luck Accumulation Speed
+                            </label>
+                            <p className="text-degen-text-muted text-sm mb-3">
+                                How fast should luck accumulate? This determines how long users need to hold boxes to reach maximum luck.
+                            </p>
+
+                            {/* Platform Default Info */}
+                            <div className="bg-blue-50 border border-blue-200 p-3 mb-3">
+                                <p className="text-blue-800 text-sm">
+                                    <strong>Platform Default:</strong> {config?.luckIntervalSeconds ? formatDuration(config.luckIntervalSeconds) : '...'} per +1 luck
+                                    {config?.luckIntervalSeconds && (
+                                        <span className="text-blue-600"> ({formatTimeToMaxLuck(config.luckIntervalSeconds, onChainConfig?.baseLuck, onChainConfig?.maxLuck)} to max luck)</span>
+                                    )}
+                                </p>
+                            </div>
+
+                            {/* Custom Interval Input */}
+                            <DegenInput
+                                type="number"
+                                value={formData.luckIntervalSeconds || ''}
+                                onChange={(e) => setFormData({
+                                    ...formData,
+                                    luckIntervalSeconds: parseInt(e.target.value) || 0
+                                })}
+                                placeholder="Leave empty to use platform default"
+                                min="0"
+                                hint="Seconds per +1 luck"
+                            />
+
+                            {/* Quick Presets */}
+                            <div className="flex flex-wrap gap-2 mt-3">
+                                {/* Platform Default button */}
+                                <button
+                                    type="button"
+                                    onClick={() => setFormData({ ...formData, luckIntervalSeconds: 0 })}
+                                    className={`px-3 py-1 text-xs border transition-colors ${
+                                        formData.luckIntervalSeconds === 0
+                                            ? 'bg-degen-black text-degen-white border-degen-black'
+                                            : 'bg-degen-white text-degen-black border-degen-text-light hover:border-degen-black'
+                                    }`}
+                                >
+                                    Platform Default ({config?.luckIntervalSeconds ? formatDuration(config.luckIntervalSeconds) : '...'})
+                                </button>
+                                {/* Other presets */}
+                                {LUCK_INTERVAL_PRESETS.slice(0, 5).map((preset) => (
+                                    <button
+                                        key={preset.value}
+                                        type="button"
+                                        onClick={() => setFormData({ ...formData, luckIntervalSeconds: preset.value })}
+                                        className={`px-3 py-1 text-xs border transition-colors ${
+                                            formData.luckIntervalSeconds === preset.value
+                                                ? 'bg-degen-black text-degen-white border-degen-black'
+                                                : 'bg-degen-white text-degen-black border-degen-text-light hover:border-degen-black'
+                                        }`}
+                                    >
+                                        {preset.label}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* Time to Max Luck Projection */}
+                            <div className="mt-4 p-3 bg-degen-container border border-degen-text-light">
+                                <div className="flex justify-between items-center">
+                                    <span className="text-degen-text-muted text-sm">Time to max luck ({onChainConfig?.maxLuck ?? 60}):</span>
+                                    <span className="text-degen-black font-medium">
+                                        {formatTimeToMaxLuck(formData.luckIntervalSeconds || config?.luckIntervalSeconds || 10800, onChainConfig?.baseLuck, onChainConfig?.maxLuck)}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
                         {/* Continue Button */}
                         <DegenButton
                             onClick={() => {
@@ -427,6 +560,10 @@ export default function CreateProject() {
                             )}
                             <ReviewItem label="Payment Token" value={formData.paymentTokenSymbol || 'TOKEN'} />
                             <ReviewItem label="Box Price" value={`${formData.boxPrice} ${formData.paymentTokenSymbol || 'TOKEN'}`} />
+                            <ReviewItem
+                                label="Time to Max Luck"
+                                value={`${formatTimeToMaxLuck(formData.luckIntervalSeconds || config?.luckIntervalSeconds || 10800, onChainConfig?.baseLuck, onChainConfig?.maxLuck)}${formData.luckIntervalSeconds === 0 ? ' (platform default)' : ''}`}
+                            />
                         </div>
 
                         {/* Launch Fee & Vault Funding Notice */}
@@ -440,10 +577,13 @@ export default function CreateProject() {
                                 </div>
                                 <div className="flex justify-between items-center">
                                     <span className="text-degen-black">Vault Funding ({formData.paymentTokenSymbol || 'tokens'})</span>
-                                    <span className="text-degen-black font-medium">{vaultFundAmount.toLocaleString()} {formData.paymentTokenSymbol || 'tokens'}</span>
+                                    <span className="text-degen-black font-medium">~{estimatedVaultFunding.toLocaleString()} {formData.paymentTokenSymbol || 'tokens'}</span>
                                 </div>
                             </div>
 
+                            <p className="text-degen-black/70 text-sm mb-2">
+                                Vault funding is calculated dynamically (~30x box price) based on statistical payout requirements.
+                            </p>
                             <p className="text-degen-black/70 text-sm">
                                 {isDevnet
                                     ? "This is DEVNET - no real tokens required for testing!"

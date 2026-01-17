@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Mint, Transfer};
+use switchboard_on_demand::accounts::RandomnessAccountData;
 
 // Program ID from keypair: GTpP39xwT47iTUwbC5HZ7TjCiNon2owkLWg84uUyboat
 declare_id!("GTpP39xwT47iTUwbC5HZ7TjCiNon2owkLWg84uUyboat");
@@ -61,6 +62,10 @@ pub mod lootbox_platform {
         config.tier3_profit = 2000;      // 20%
         // Jackpot = 10000 - 3000 - 2500 - 2000 - 2000 = 500 (5%)
 
+        // Platform commission (5% default)
+        config.platform_commission_bps = 500;
+        config.treasury_bump = ctx.bumps.treasury;
+
         config.updated_at = clock.unix_timestamp;
 
         msg!("Platform config initialized!");
@@ -103,6 +108,8 @@ pub mod lootbox_platform {
         tier3_profit: Option<u16>,
         // Emergency pause
         paused: Option<bool>,
+        // Platform commission (basis points, 500 = 5%)
+        platform_commission_bps: Option<u16>,
     ) -> Result<()> {
         let config = &mut ctx.accounts.platform_config;
         let clock = Clock::get()?;
@@ -149,6 +156,14 @@ pub mod lootbox_platform {
             }
         }
 
+        // Update platform commission
+        if let Some(v) = platform_commission_bps {
+            // Sanity check: max 50% commission (5000 bps)
+            require!(v <= 5000, LootboxError::InvalidCommissionRate);
+            config.platform_commission_bps = v;
+            msg!("Platform commission updated to {} bps ({}%)", v, v as f64 / 100.0);
+        }
+
         config.updated_at = clock.unix_timestamp;
 
         msg!("Platform config updated at {}", clock.unix_timestamp);
@@ -176,6 +191,7 @@ pub mod lootbox_platform {
         project_id: u64,
         box_price: u64,
         launch_fee_amount: u64,
+        luck_time_interval: i64,  // Per-project luck interval (0 = use platform default)
     ) -> Result<()> {
         // Check platform is not paused
         require!(!ctx.accounts.platform_config.paused, LootboxError::PlatformPaused);
@@ -184,6 +200,7 @@ pub mod lootbox_platform {
         let clock = Clock::get()?;
 
         require!(box_price > 0, LootboxError::InvalidBoxPrice);
+        require!(luck_time_interval >= 0, LootboxError::InvalidLuckInterval);
 
         // Transfer launch fee from owner to platform fee account
         let cpi_accounts = Transfer {
@@ -210,6 +227,7 @@ pub mod lootbox_platform {
         project_config.active = true;
         project_config.launch_fee_paid = true;
         project_config.created_at = clock.unix_timestamp;
+        project_config.luck_time_interval = luck_time_interval;
 
         msg!("Project initialized!");
         msg!("Project ID: {}", project_id);
@@ -217,6 +235,7 @@ pub mod lootbox_platform {
         msg!("Payment token: {}", ctx.accounts.payment_token_mint.key());
         msg!("Box price: {}", box_price);
         msg!("Vault authority: {}", ctx.accounts.vault_authority.key());
+        msg!("Luck time interval: {}", luck_time_interval);
 
         Ok(())
     }
@@ -244,15 +263,39 @@ pub mod lootbox_platform {
             .checked_add(1)
             .ok_or(LootboxError::ArithmeticOverflow)?;
 
-        // Transfer payment from buyer to vault
+        // Calculate commission split
+        let box_price = project_config.box_price;
+        let commission_bps = platform_config.platform_commission_bps as u64;
+        let commission_amount = box_price
+            .checked_mul(commission_bps)
+            .ok_or(LootboxError::ArithmeticOverflow)?
+            .checked_div(10000)
+            .ok_or(LootboxError::ArithmeticOverflow)?;
+        let creator_amount = box_price
+            .checked_sub(commission_amount)
+            .ok_or(LootboxError::ArithmeticOverflow)?;
+
+        // Transfer creator's portion to vault
         let cpi_accounts = Transfer {
             from: ctx.accounts.buyer_token_account.to_account_info(),
             to: ctx.accounts.vault_token_account.to_account_info(),
             authority: ctx.accounts.buyer.to_account_info(),
         };
         let cpi_program = ctx.accounts.token_program.to_account_info();
-        let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
-        token::transfer(cpi_ctx, project_config.box_price)?;
+        let cpi_ctx = CpiContext::new(cpi_program.clone(), cpi_accounts);
+        token::transfer(cpi_ctx, creator_amount)?;
+
+        // Transfer commission to treasury (if commission > 0)
+        if commission_amount > 0 {
+            let cpi_accounts_treasury = Transfer {
+                from: ctx.accounts.buyer_token_account.to_account_info(),
+                to: ctx.accounts.treasury_token_account.to_account_info(),
+                authority: ctx.accounts.buyer.to_account_info(),
+            };
+            let cpi_ctx_treasury = CpiContext::new(cpi_program, cpi_accounts_treasury);
+            token::transfer(cpi_ctx_treasury, commission_amount)?;
+            msg!("Platform commission: {} tokens to treasury", commission_amount);
+        }
 
         // Initialize box instance (no randomness yet - committed when user opens box)
         box_instance.box_id = box_id;
@@ -300,6 +343,7 @@ pub mod lootbox_platform {
 
         let box_instance = &mut ctx.accounts.box_instance;
         let platform_config = &ctx.accounts.platform_config;
+        let project_config = &ctx.accounts.project_config;
         let clock = Clock::get()?;
 
         // Verify ownership
@@ -319,11 +363,21 @@ pub mod lootbox_platform {
 
         // Calculate and freeze luck at commit time using config values
         let hold_time = clock.unix_timestamp - box_instance.created_at;
-        let bonus_luck = if platform_config.luck_time_interval > 0 {
-            (hold_time / platform_config.luck_time_interval) as u8
+
+        // Use project's interval if set (> 0), otherwise fall back to platform default
+        let effective_interval = if project_config.luck_time_interval > 0 {
+            project_config.luck_time_interval
+        } else {
+            platform_config.luck_time_interval
+        };
+
+        let bonus_luck_raw = if effective_interval > 0 {
+            hold_time / effective_interval
         } else {
             0
         };
+        // Clamp to u8 max before casting to prevent overflow (e.g., 265 as u8 = 9)
+        let bonus_luck = std::cmp::min(bonus_luck_raw, 255) as u8;
         let current_luck = std::cmp::min(
             platform_config.base_luck.saturating_add(bonus_luck),
             platform_config.max_luck
@@ -339,6 +393,7 @@ pub mod lootbox_platform {
         msg!("Box ID: {}", box_id);
         msg!("Owner: {}", ctx.accounts.owner.key());
         msg!("Hold time: {} seconds", hold_time);
+        msg!("Luck interval: {} (project: {}, platform: {})", effective_interval, project_config.luck_time_interval, platform_config.luck_time_interval);
         msg!("Luck frozen at: {}/{}", current_luck, platform_config.max_luck);
         msg!("Randomness account: {}", randomness_account);
         msg!("Committed at: {}", clock.unix_timestamp);
@@ -403,61 +458,38 @@ pub mod lootbox_platform {
         // Use the luck that was frozen at commit time (no recalculation)
         let current_luck = box_instance.luck;
 
-        // Read randomness from Switchboard VRF account
-        let randomness_data = ctx.accounts.randomness_account.try_borrow_data()?;
+        // Parse randomness using official Switchboard SDK
+        // This abstracts away byte offsets and handles future format changes
+        let randomness_data = RandomnessAccountData::parse(
+            ctx.accounts.randomness_account.try_borrow_data()?
+        ).map_err(|_| LootboxError::RandomnessNotReady)?;
 
-        // Log the account data length for debugging
-        msg!("Switchboard account data length: {}", randomness_data.len());
+        // Get the revealed random value (32 bytes) using SDK method
+        // This validates that randomness has been revealed and returns the value
+        // Pass the current slot as u64 for the SDK to validate reveal timing
+        let revealed_random_value: [u8; 32] = randomness_data
+            .get_value(clock.slot)
+            .map_err(|_| LootboxError::RandomnessNotReady)?;
 
-        // Ensure we have enough data
-        // Switchboard RandomnessAccountData structure:
-        // - 0-8: discriminator (8 bytes)
-        // - 8-40: authority (32 bytes)
-        // - 40-72: queue (32 bytes)
-        // - 72-104: oracle (32 bytes)
-        // - 104-112: seed_slot (8 bytes)
-        // - 112-144: seed_slothash (32 bytes)
-        // - 144-152: reveal_slot (8 bytes)
-        // - 152-184: randomness_value (32 bytes) <- THIS IS THE ACTUAL RANDOMNESS
-        require!(
-            randomness_data.len() >= 184,
-            LootboxError::RandomnessNotReady
-        );
+        msg!("Switchboard SDK parsed randomness successfully");
+        msg!("Randomness bytes (first 8): [{}, {}, {}, {}, {}, {}, {}, {}]",
+            revealed_random_value[0], revealed_random_value[1],
+            revealed_random_value[2], revealed_random_value[3],
+            revealed_random_value[4], revealed_random_value[5],
+            revealed_random_value[6], revealed_random_value[7]);
 
-        // Check that randomness has been revealed (reveal_slot should be non-zero)
-        let reveal_slot = u64::from_le_bytes([
-            randomness_data[144],
-            randomness_data[145],
-            randomness_data[146],
-            randomness_data[147],
-            randomness_data[148],
-            randomness_data[149],
-            randomness_data[150],
-            randomness_data[151],
+        // Use 8 bytes (u64) for better entropy distribution (vs 4 bytes u32 before)
+        let random_u64 = u64::from_le_bytes([
+            revealed_random_value[0], revealed_random_value[1],
+            revealed_random_value[2], revealed_random_value[3],
+            revealed_random_value[4], revealed_random_value[5],
+            revealed_random_value[6], revealed_random_value[7],
         ]);
 
-        require!(
-            reveal_slot > 0,
-            LootboxError::RandomnessNotReady
-        );
+        // Convert to percentage (0.0 to 0.9999) using full u64 range
+        let random_percentage = (random_u64 as f64) / (u64::MAX as f64);
 
-        // Read the revealed randomness value at offset 152
-        let random_u32 = u32::from_le_bytes([
-            randomness_data[152],
-            randomness_data[153],
-            randomness_data[154],
-            randomness_data[155],
-        ]);
-
-        msg!("Switchboard randomness revealed at slot {}", reveal_slot);
-        msg!("Randomness bytes: [{}, {}, {}, {}] -> u32: {}",
-            randomness_data[152], randomness_data[153],
-            randomness_data[154], randomness_data[155], random_u32);
-
-        // Convert to percentage (0.0 to 0.9999)
-        let random_percentage = (random_u32 as f64) / (u32::MAX as f64);
-
-        msg!("Switchboard randomness: u32={}, percentage={:.4}", random_u32, random_percentage);
+        msg!("Switchboard randomness: u64={}, percentage={:.4}", random_u64, random_percentage);
 
         // Calculate reward based on luck and randomness using config values
         let (reward_amount, is_jackpot, reward_tier) = calculate_reward_from_config(
@@ -623,6 +655,7 @@ pub mod lootbox_platform {
         _project_id: u64,
         new_box_price: Option<u64>,
         new_active: Option<bool>,
+        new_luck_time_interval: Option<i64>,
     ) -> Result<()> {
         let project_config = &mut ctx.accounts.project_config;
 
@@ -643,6 +676,13 @@ pub mod lootbox_platform {
         if let Some(active) = new_active {
             project_config.active = active;
             msg!("Project active status: {}", active);
+        }
+
+        // Update luck time interval if provided
+        if let Some(interval) = new_luck_time_interval {
+            require!(interval >= 0, LootboxError::InvalidLuckInterval);
+            project_config.luck_time_interval = interval;
+            msg!("Luck time interval updated to: {}", interval);
         }
 
         Ok(())
@@ -671,6 +711,90 @@ pub mod lootbox_platform {
         msg!("Project ID: {}", project_config.project_id);
 
         // Account will be closed by Anchor due to close = owner constraint
+        Ok(())
+    }
+
+    /// Withdraw accumulated fees from treasury (admin only)
+    /// Used by admin to collect platform commission for batch processing (swap to SOL, buyback, etc.)
+    pub fn withdraw_treasury(
+        ctx: Context<WithdrawTreasury>,
+        amount: u64,
+    ) -> Result<()> {
+        let platform_config = &ctx.accounts.platform_config;
+
+        // Verify treasury has enough balance
+        let treasury_balance = ctx.accounts.treasury_token_account.amount;
+        require!(
+            amount <= treasury_balance,
+            LootboxError::InsufficientVaultBalance
+        );
+
+        msg!("Treasury balance: {}", treasury_balance);
+        msg!("Withdrawal amount: {}", amount);
+
+        // Transfer from treasury to admin using PDA signer
+        let seeds = &[
+            b"treasury".as_ref(),
+            &[platform_config.treasury_bump],
+        ];
+        let signer = &[&seeds[..]];
+
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.treasury_token_account.to_account_info(),
+            to: ctx.accounts.admin_token_account.to_account_info(),
+            authority: ctx.accounts.treasury.to_account_info(),
+        };
+        let cpi_program = ctx.accounts.token_program.to_account_info();
+        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+        token::transfer(cpi_ctx, amount)?;
+
+        msg!("Treasury withdrawal complete!");
+        msg!("Amount: {}", amount);
+        msg!("Admin: {}", ctx.accounts.admin.key());
+        msg!("Token mint: {}", ctx.accounts.token_mint.key());
+
+        Ok(())
+    }
+
+    /// Close platform config (admin only) - used for migrations/reinitialization
+    /// WARNING: This will delete all platform config data. Use with caution.
+    pub fn close_platform_config(
+        ctx: Context<ClosePlatformConfig>,
+    ) -> Result<()> {
+        msg!("Closing platform config...");
+
+        // Manually read admin from account data (skip 8-byte discriminator)
+        let data = ctx.accounts.platform_config.data.borrow();
+        if data.len() < 40 {
+            return Err(LootboxError::InvalidRandomnessAccount.into());
+        }
+
+        let stored_admin = Pubkey::try_from(&data[8..40])
+            .map_err(|_| LootboxError::InvalidRandomnessAccount)?;
+
+        msg!("Stored admin: {}", stored_admin);
+        msg!("Caller admin: {}", ctx.accounts.admin.key());
+
+        // Verify caller is the admin
+        require!(
+            stored_admin == ctx.accounts.admin.key(),
+            LootboxError::NotPlatformAdmin
+        );
+
+        // Drop the borrow before we transfer lamports
+        drop(data);
+
+        // Transfer all lamports to admin (effectively closing the account)
+        let platform_config_info = ctx.accounts.platform_config.to_account_info();
+        let admin_info = ctx.accounts.admin.to_account_info();
+
+        let lamports = platform_config_info.lamports();
+        **platform_config_info.try_borrow_mut_lamports()? = 0;
+        **admin_info.try_borrow_mut_lamports()? = admin_info.lamports().checked_add(lamports).unwrap();
+
+        msg!("Rent returned: {} lamports", lamports);
+        msg!("Platform config closed!");
+
         Ok(())
     }
 }
@@ -771,6 +895,14 @@ pub struct InitializePlatformConfig<'info> {
         bump
     )]
     pub platform_config: Account<'info, PlatformConfig>,
+
+    /// Global treasury PDA - holds platform commission fees from all projects
+    /// CHECK: This is a PDA used as authority for treasury token accounts
+    #[account(
+        seeds = [b"treasury"],
+        bump
+    )]
+    pub treasury: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
 }
@@ -886,6 +1018,19 @@ pub struct CreateBox<'info> {
 
     #[account(mut)]
     pub vault_token_account: Account<'info, TokenAccount>,
+
+    /// Treasury token account for receiving platform commission
+    /// This is the ATA of the treasury PDA for this project's token
+    #[account(mut)]
+    pub treasury_token_account: Account<'info, TokenAccount>,
+
+    /// Treasury PDA (for verification)
+    /// CHECK: Verified by seeds
+    #[account(
+        seeds = [b"treasury"],
+        bump = platform_config.treasury_bump
+    )]
+    pub treasury: UncheckedAccount<'info>,
 
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
@@ -1054,6 +1199,61 @@ pub struct CloseProject<'info> {
     pub vault_token_account: Account<'info, TokenAccount>,
 }
 
+#[derive(Accounts)]
+pub struct WithdrawTreasury<'info> {
+    pub admin: Signer<'info>,
+
+    #[account(
+        seeds = [b"platform_config"],
+        bump,
+        constraint = platform_config.admin == admin.key() @ LootboxError::NotPlatformAdmin
+    )]
+    pub platform_config: Account<'info, PlatformConfig>,
+
+    /// Treasury PDA that holds accumulated fees
+    /// CHECK: Verified by seeds - this is the authority for treasury token accounts
+    #[account(
+        seeds = [b"treasury"],
+        bump = platform_config.treasury_bump
+    )]
+    pub treasury: UncheckedAccount<'info>,
+
+    /// The token mint being withdrawn
+    pub token_mint: Account<'info, Mint>,
+
+    /// Treasury's token account for this mint (source)
+    #[account(
+        mut,
+        constraint = treasury_token_account.owner == treasury.key() @ LootboxError::InvalidRandomnessAccount,
+        constraint = treasury_token_account.mint == token_mint.key() @ LootboxError::InvalidRandomnessAccount
+    )]
+    pub treasury_token_account: Account<'info, TokenAccount>,
+
+    /// Admin's token account (destination)
+    #[account(
+        mut,
+        constraint = admin_token_account.mint == token_mint.key() @ LootboxError::InvalidRandomnessAccount
+    )]
+    pub admin_token_account: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct ClosePlatformConfig<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+
+    /// CHECK: We manually verify the admin and close the account.
+    /// Using UncheckedAccount to handle migration from old struct format.
+    #[account(
+        mut,
+        seeds = [b"platform_config"],
+        bump
+    )]
+    pub platform_config: UncheckedAccount<'info>,
+}
+
 // ============================================================================
 // State Accounts
 // ============================================================================
@@ -1096,12 +1296,16 @@ pub struct PlatformConfig {
     pub tier3_breakeven: u16,       // 2 bytes
     pub tier3_profit: u16,          // 2 bytes
 
+    // Platform commission (NEW)
+    pub platform_commission_bps: u16, // 2 bytes - Commission on box purchases (500 = 5%)
+    pub treasury_bump: u8,          // 1 byte - Bump for treasury PDA
+
     pub updated_at: i64,            // 8 bytes
 }
 
 impl PlatformConfig {
-    // 32 + 1 + 1 + 1 + 1 + 8 + 4 + 4 + 4 + 4 + 4 + 1 + 2 + 2 + 2 + 2 + 1 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 8 = 98 bytes
-    pub const LEN: usize = 32 + 1 + 1 + 1 + 1 + 8 + 4 + 4 + 4 + 4 + 4 + 1 + 2 + 2 + 2 + 2 + 1 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 8;
+    // Original: 98 bytes + 2 (commission_bps) + 1 (treasury_bump) = 101 bytes
+    pub const LEN: usize = 32 + 1 + 1 + 1 + 1 + 8 + 4 + 4 + 4 + 4 + 4 + 1 + 2 + 2 + 2 + 2 + 1 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 1 + 8;
 }
 
 #[account]
@@ -1118,11 +1322,12 @@ pub struct ProjectConfig {
     pub active: bool,                 // 1 byte
     pub launch_fee_paid: bool,        // 1 byte
     pub created_at: i64,              // 8 bytes
+    pub luck_time_interval: i64,      // 8 bytes - Per-project luck interval (0 = use platform default)
 }
 
 impl ProjectConfig {
-    // 8 + 32 + 32 + 8 + 1 + 8 + 8 + 8 + 8 + 1 + 1 + 8 = 123 bytes
-    pub const LEN: usize = 8 + 32 + 32 + 8 + 1 + 8 + 8 + 8 + 8 + 1 + 1 + 8;
+    // 8 + 32 + 32 + 8 + 1 + 8 + 8 + 8 + 8 + 1 + 1 + 8 + 8 = 131 bytes
+    pub const LEN: usize = 8 + 32 + 32 + 8 + 1 + 8 + 8 + 8 + 8 + 1 + 1 + 8 + 8;
 }
 
 #[account]
@@ -1209,4 +1414,10 @@ pub enum LootboxError {
 
     #[msg("Reveal window expired")]
     RevealWindowExpired,
+
+    #[msg("Invalid commission rate (max 50%)")]
+    InvalidCommissionRate,
+
+    #[msg("Invalid luck interval (must be >= 0)")]
+    InvalidLuckInterval,
 }

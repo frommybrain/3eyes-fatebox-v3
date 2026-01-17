@@ -14,6 +14,62 @@ export type LootboxPlatform = {
   },
   "instructions": [
     {
+      "name": "closePlatformConfig",
+      "docs": [
+        "Close platform config (admin only) - used for migrations/reinitialization",
+        "WARNING: This will delete all platform config data. Use with caution."
+      ],
+      "discriminator": [
+        142,
+        2,
+        40,
+        195,
+        82,
+        25,
+        32,
+        52
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "platformConfig",
+          "docs": [
+            "Using UncheckedAccount to handle migration from old struct format."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "closeProject",
       "docs": [
         "Close a project and reclaim rent (only if no pending boxes)"
@@ -272,6 +328,37 @@ export type LootboxPlatform = {
           "writable": true
         },
         {
+          "name": "treasuryTokenAccount",
+          "docs": [
+            "Treasury token account for receiving platform commission",
+            "This is the ATA of the treasury PDA for this project's token"
+          ],
+          "writable": true
+        },
+        {
+          "name": "treasury",
+          "docs": [
+            "Treasury PDA (for verification)"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  101,
+                  97,
+                  115,
+                  117,
+                  114,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "tokenProgram",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
@@ -332,6 +419,29 @@ export type LootboxPlatform = {
                   102,
                   105,
                   103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury",
+          "docs": [
+            "Global treasury PDA - holds platform commission fees from all projects"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  101,
+                  97,
+                  115,
+                  117,
+                  114,
+                  121
                 ]
               }
             ]
@@ -495,6 +605,10 @@ export type LootboxPlatform = {
         {
           "name": "launchFeeAmount",
           "type": "u64"
+        },
+        {
+          "name": "luckTimeInterval",
+          "type": "i64"
         }
       ]
     },
@@ -978,6 +1092,12 @@ export type LootboxPlatform = {
           "type": {
             "option": "bool"
           }
+        },
+        {
+          "name": "platformCommissionBps",
+          "type": {
+            "option": "u16"
+          }
         }
       ]
     },
@@ -1041,6 +1161,12 @@ export type LootboxPlatform = {
           "name": "newActive",
           "type": {
             "option": "bool"
+          }
+        },
+        {
+          "name": "newLuckTimeInterval",
+          "type": {
+            "option": "i64"
           }
         }
       ]
@@ -1135,6 +1261,109 @@ export type LootboxPlatform = {
           "name": "projectId",
           "type": "u64"
         },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdrawTreasury",
+      "docs": [
+        "Withdraw accumulated fees from treasury (admin only)",
+        "Used by admin to collect platform commission for batch processing (swap to SOL, buyback, etc.)"
+      ],
+      "discriminator": [
+        40,
+        63,
+        122,
+        158,
+        144,
+        216,
+        83,
+        96
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "platformConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury",
+          "docs": [
+            "Treasury PDA that holds accumulated fees"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  101,
+                  97,
+                  115,
+                  117,
+                  114,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "tokenMint",
+          "docs": [
+            "The token mint being withdrawn"
+          ]
+        },
+        {
+          "name": "treasuryTokenAccount",
+          "docs": [
+            "Treasury's token account for this mint (source)"
+          ],
+          "writable": true
+        },
+        {
+          "name": "adminTokenAccount",
+          "docs": [
+            "Admin's token account (destination)"
+          ],
+          "writable": true
+        },
+        {
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
         {
           "name": "amount",
           "type": "u64"
@@ -1278,6 +1507,16 @@ export type LootboxPlatform = {
       "code": 6018,
       "name": "revealWindowExpired",
       "msg": "Reveal window expired"
+    },
+    {
+      "code": 6019,
+      "name": "invalidCommissionRate",
+      "msg": "Invalid commission rate (max 50%)"
+    },
+    {
+      "code": 6020,
+      "name": "invalidLuckInterval",
+      "msg": "Invalid luck interval (must be >= 0)"
     }
   ],
   "types": [
@@ -1451,6 +1690,14 @@ export type LootboxPlatform = {
             "type": "u16"
           },
           {
+            "name": "platformCommissionBps",
+            "type": "u16"
+          },
+          {
+            "name": "treasuryBump",
+            "type": "u8"
+          },
+          {
             "name": "updatedAt",
             "type": "i64"
           }
@@ -1508,6 +1755,10 @@ export type LootboxPlatform = {
           },
           {
             "name": "createdAt",
+            "type": "i64"
+          },
+          {
+            "name": "luckTimeInterval",
             "type": "i64"
           }
         ]

@@ -250,7 +250,7 @@ export async function loadRandomness(provider, randomnessAccountPubkey, network 
  *
  * @param {Connection} connection - Solana connection
  * @param {PublicKey} randomnessAccountPubkey - Randomness account
- * @returns {Promise<Object>} { randomBytes, randomU32, randomPercentage, revealSlot }
+ * @returns {Promise<Object>} { randomBytes, randomU64, randomPercentage, revealSlot }
  */
 export async function readRandomnessValue(connection, randomnessAccountPubkey) {
     console.log(`[Switchboard] Reading randomness value from: ${randomnessAccountPubkey.toString()}`);
@@ -276,20 +276,22 @@ export async function readRandomnessValue(connection, randomnessAccountPubkey) {
     // Extract randomness value at offset 152-184 (32 bytes)
     const randomBytes = accountInfo.data.slice(152, 184);
 
-    // Convert first 4 bytes to u32 for percentage calculation (matches on-chain logic)
-    const randomU32 = Buffer.from(randomBytes.slice(0, 4)).readUInt32LE(0);
+    // Convert first 8 bytes to u64 for percentage calculation (matches on-chain SDK approach)
+    // Using BigInt for full u64 precision
+    const randomU64 = randomBytes.readBigUInt64LE(0);
 
-    // Convert to percentage (0.0 to 1.0)
-    const randomPercentage = randomU32 / 0xFFFFFFFF;
+    // Convert to percentage (0.0 to 1.0) using BigInt division
+    // Note: On-chain uses f64, we approximate here for logging
+    const randomPercentage = Number(randomU64) / Number(0xFFFFFFFFFFFFFFFFn);
 
     console.log(`   Reveal slot: ${revealSlot}`);
     console.log(`   Random bytes (first 8): ${randomBytes.slice(0, 8).toString('hex')}`);
-    console.log(`   Random u32: ${randomU32}`);
+    console.log(`   Random u64: ${randomU64}`);
     console.log(`   Random percentage: ${(randomPercentage * 100).toFixed(4)}%`);
 
     return {
         randomBytes,
-        randomU32,
+        randomU64,
         randomPercentage,
         revealSlot: Number(revealSlot),
     };
@@ -308,8 +310,8 @@ export async function readRandomnessValue(connection, randomnessAccountPubkey) {
 export async function waitForRandomness(
     connection,
     randomnessAccountPubkey,
-    maxWaitMs = 30000,
-    pollIntervalMs = 2000
+    maxWaitMs = 15000,
+    pollIntervalMs = 1500
 ) {
     console.log(`[Switchboard] Waiting for randomness to be revealed (max ${maxWaitMs / 1000}s)...`);
 
@@ -353,4 +355,104 @@ export function serializeKeypair(keypair) {
 export function deserializeKeypair(base64SecretKey) {
     const secretKey = Buffer.from(base64SecretKey, 'base64');
     return Keypair.fromSecretKey(secretKey);
+}
+
+// Cache for oracle health status
+let oracleHealthCache = {
+    status: 'unknown',
+    lastCheck: 0,
+    message: null,
+};
+const HEALTH_CACHE_TTL = 30000; // 30 seconds
+
+/**
+ * Check if Switchboard oracles are healthy/reachable
+ * Uses a simple DNS check for the xip.switchboard-oracles.xyz domain
+ *
+ * @param {string} network - 'devnet' or 'mainnet'
+ * @returns {Promise<{healthy: boolean, message: string, cachedAt: number}>}
+ */
+export async function checkOracleHealth(network = 'devnet') {
+    const now = Date.now();
+
+    // Return cached result if fresh
+    if (now - oracleHealthCache.lastCheck < HEALTH_CACHE_TTL) {
+        return {
+            healthy: oracleHealthCache.status === 'healthy',
+            message: oracleHealthCache.message,
+            cachedAt: oracleHealthCache.lastCheck,
+            cached: true,
+        };
+    }
+
+    console.log(`[Switchboard] Checking oracle health for ${network}...`);
+
+    try {
+        // Try to resolve a known oracle hostname pattern
+        // The xip.switchboard-oracles.xyz DNS is what fails during outages
+        const dns = await import('dns');
+        const { promisify } = await import('util');
+        const lookup = promisify(dns.lookup);
+
+        // Test DNS resolution for the xip domain pattern
+        // Using a common IP pattern seen in devnet oracles
+        const testHostname = '1.1.1.1.xip.switchboard-oracles.xyz';
+
+        await lookup(testHostname);
+
+        oracleHealthCache = {
+            status: 'healthy',
+            lastCheck: now,
+            message: 'Oracle service is available',
+        };
+
+        console.log(`[Switchboard] Oracle health check: HEALTHY`);
+
+        return {
+            healthy: true,
+            message: 'Oracle service is available',
+            cachedAt: now,
+            cached: false,
+        };
+
+    } catch (error) {
+        const isXipDnsFailure = error.code === 'ENOTFOUND' &&
+            error.hostname?.includes('xip.switchboard-oracles');
+
+        let message;
+        if (isXipDnsFailure) {
+            message = 'Switchboard oracle DNS service (xip) is currently unavailable. This is a temporary infrastructure issue.';
+        } else if (error.code === 'ENOTFOUND') {
+            message = 'Oracle DNS resolution failed. Network connectivity issue.';
+        } else {
+            message = `Oracle health check failed: ${error.message}`;
+        }
+
+        oracleHealthCache = {
+            status: 'unhealthy',
+            lastCheck: now,
+            message,
+        };
+
+        console.log(`[Switchboard] Oracle health check: UNHEALTHY - ${message}`);
+
+        return {
+            healthy: false,
+            message,
+            cachedAt: now,
+            cached: false,
+            errorCode: error.code,
+        };
+    }
+}
+
+/**
+ * Clear oracle health cache (useful after a successful operation)
+ */
+export function clearOracleHealthCache() {
+    oracleHealthCache = {
+        status: 'unknown',
+        lastCheck: 0,
+        message: null,
+    };
 }

@@ -1,18 +1,25 @@
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import Header from "@/components/ui/header";
 import WalletProvider from "@/components/wallet/WalletProvider";
 import NetworkInitializer from "@/components/providers/NetworkInitializer";
-import { DegenToastProvider } from "@/components/ui";
+import { DegenToastProvider, TransactionProvider } from "@/components/ui";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const threeEyesFont = localFont({
+  src: [
+    {
+      path: "../public/fonts/3EYESSansMonoV2-Regular.woff2",
+      weight: "400",
+      style: "normal",
+    },
+    {
+      path: "../public/fonts/3EYESSansMonoV2-Regular.woff",
+      weight: "400",
+      style: "normal",
+    },
+  ],
+  variable: "--font-3eyes",
+  display: "swap",
 });
 
 export const metadata = {
@@ -24,13 +31,15 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${threeEyesFont.variable} font-sans antialiased`}
       >
         <NetworkInitializer>
           <WalletProvider>
             <DegenToastProvider>
-              <Header />
-              {children}
+              <TransactionProvider>
+                <Header />
+                {children}
+              </TransactionProvider>
             </DegenToastProvider>
           </WalletProvider>
         </NetworkInitializer>

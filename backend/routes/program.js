@@ -15,7 +15,9 @@ import {
     deriveProjectConfigPDA as deriveProjectConfigPDAStandalone,
     deriveBoxInstancePDA,
     deriveVaultAuthorityPDA,
-    deriveVaultTokenAccount
+    deriveVaultTokenAccount,
+    deriveTreasuryPDA,
+    deriveTreasuryTokenAccount
 } from '../lib/pdaHelpers.js';
 import { getNetworkConfig } from '../lib/getNetworkConfig.js';
 import { createClient } from '@supabase/supabase-js';
@@ -28,6 +30,12 @@ import {
     getSwitchboardConstants,
     getSwitchboardProgram
 } from '../lib/switchboard.js';
+import {
+    calculateMinimumVaultFunding,
+    DEFAULT_TIER_PROBABILITIES,
+    DEFAULT_PAYOUT_MULTIPLIERS,
+} from '../lib/evCalculator.js';
+import logger, { EventTypes, Severity, ActorTypes } from '../lib/logger.js';
 
 const router = express.Router();
 
@@ -49,7 +57,7 @@ const supabase = createClient(
  */
 router.post('/build-initialize-project-tx', async (req, res) => {
     try {
-        const { projectId, boxPrice, paymentTokenMint, ownerWallet } = req.body;
+        const { projectId, boxPrice, paymentTokenMint, ownerWallet, luckIntervalSeconds } = req.body;
 
         // Validate input
         if (!projectId || !boxPrice || !paymentTokenMint || !ownerWallet) {
@@ -59,10 +67,14 @@ router.post('/build-initialize-project-tx', async (req, res) => {
             });
         }
 
+        // Default luck interval to 0 (use platform default) if not provided
+        const luckInterval = luckIntervalSeconds ?? 0;
+
         console.log(`\n🔨 Building initialize project transaction for project ${projectId}...`);
         console.log(`   Box price: ${boxPrice}`);
         console.log(`   Payment token: ${paymentTokenMint}`);
         console.log(`   Owner: ${ownerWallet}`);
+        console.log(`   Luck interval: ${luckInterval} (0 = platform default)`);
 
         // Get Anchor program and network config
         const { program, provider, connection, programId } = await getAnchorProgram();
@@ -81,26 +93,80 @@ router.post('/build-initialize-project-tx', async (req, res) => {
 
         console.log(`\n💰 Launch fee: ${adminConfig.launch_fee_amount / 1e9} ${adminConfig.three_eyes_mint.substring(0, 8)}...`);
 
-        // Get vault fund amount from config
-        const vaultFundAmount = BigInt(adminConfig.vault_fund_amount || '50000000000000000'); // Default 50M with 9 decimals
-        console.log(`💰 Vault fund amount: ${Number(vaultFundAmount) / 1e9} tokens`);
+        // Calculate dynamic vault fund amount based on box price
+        // Uses worst-case (99th percentile) reserve calculation for ~100 boxes at max luck
+        // Minimum is 30x box price (based on Grok's variance analysis)
+        const boxPriceBigInt = BigInt(boxPrice);
+        const vaultFundAmount = calculateMinimumVaultFunding(
+            boxPriceBigInt,
+            DEFAULT_TIER_PROBABILITIES.tier3,
+            DEFAULT_PAYOUT_MULTIPLIERS
+        );
+        console.log(`💰 Dynamic vault fund amount: ${Number(vaultFundAmount) / 1e9} tokens (based on ${Number(boxPriceBigInt) / 1e9} box price)`);
 
         // Convert inputs to proper types
         const paymentTokenMintPubkey = new PublicKey(paymentTokenMint);
         const ownerPubkey = new PublicKey(ownerWallet);
         const feeTokenMintPubkey = new PublicKey(adminConfig.three_eyes_mint);
-        const platformFeeAccountPubkey = new PublicKey(adminConfig.platform_fee_account);
 
-        // Derive PDAs using standalone helpers
-        const pdas = await deriveAllPDAs(programId, parseInt(projectId), paymentTokenMintPubkey);
-        const projectConfigPDA = pdas.projectConfig.address;
+        // Find an available project ID (auto-advance if PDA already exists on-chain)
+        let currentProjectId = parseInt(projectId);
+        let pdas;
+        let projectConfigPDA;
+        let projectConfigInfo;
+        const maxAttempts = 20; // Safety limit to prevent infinite loops
+
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            pdas = await deriveAllPDAs(programId, currentProjectId, paymentTokenMintPubkey);
+            projectConfigPDA = pdas.projectConfig.address;
+            projectConfigInfo = await connection.getAccountInfo(projectConfigPDA);
+
+            if (!projectConfigInfo) {
+                // Found an available ID
+                if (currentProjectId !== parseInt(projectId)) {
+                    console.log(`⚠️  Project ID ${projectId} already exists on-chain, using ${currentProjectId} instead`);
+
+                    // Update the database counter to stay in sync
+                    // This advances the counter so future projects get IDs after this one
+                    await supabase.rpc('setval_project_counter', { new_val: currentProjectId });
+
+                    // Update the project record with the new ID
+                    const { error: updateIdError } = await supabase
+                        .from('projects')
+                        .update({ project_numeric_id: currentProjectId })
+                        .eq('project_numeric_id', parseInt(projectId));
+
+                    if (updateIdError) {
+                        console.error('Failed to update project numeric ID:', updateIdError);
+                        // Continue anyway - the on-chain ID is what matters
+                    }
+                }
+                break;
+            }
+
+            console.log(`🔍 Project ID ${currentProjectId} already exists on-chain, trying ${currentProjectId + 1}...`);
+            currentProjectId++;
+        }
+
+        // If we exhausted all attempts, fail
+        if (projectConfigInfo) {
+            console.error(`❌ Could not find available project ID after ${maxAttempts} attempts`);
+            return res.status(409).json({
+                success: false,
+                error: 'No available project IDs',
+                details: `Tried project IDs ${projectId} through ${currentProjectId - 1}, all already exist on-chain. Please contact an administrator.`,
+            });
+        }
+
         const vaultAuthorityPDA = pdas.vaultAuthority.address;
         const vaultAuthorityBump = pdas.vaultAuthority.bump;
+        const treasuryPDA = pdas.treasury.address;
 
-        console.log(`\n📍 Derived PDAs:`);
+        console.log(`\n📍 Derived PDAs (Project ID: ${currentProjectId}):`);
         console.log(`   Project Config: ${projectConfigPDA.toString()}`);
         console.log(`   Vault Authority: ${vaultAuthorityPDA.toString()}`);
         console.log(`   Vault Authority Bump: ${vaultAuthorityBump}`);
+        console.log(`   Treasury PDA: ${treasuryPDA.toString()}`);
 
         const vaultTokenAccount = pdas.vaultTokenAccount.address;
 
@@ -112,14 +178,16 @@ router.post('/build-initialize-project-tx', async (req, res) => {
             ownerPubkey
         );
 
-        const platformFeeTokenAccount = await getAssociatedTokenAddress(
+        // Launch fee goes to treasury PDA's token account (not admin wallet)
+        const treasuryFeeTokenAccount = await getAssociatedTokenAddress(
             feeTokenMintPubkey,
-            platformFeeAccountPubkey
+            treasuryPDA,
+            true // allowOwnerOffCurve - PDAs can own token accounts
         );
 
         console.log(`\n💳 Fee token accounts:`);
         console.log(`   Owner fee account: ${ownerFeeTokenAccount.toString()}`);
-        console.log(`   Platform fee account: ${platformFeeTokenAccount.toString()}`);
+        console.log(`   Treasury fee account: ${treasuryFeeTokenAccount.toString()}`);
 
         // Get owner's payment token account (for vault funding)
         const ownerPaymentTokenAccount = await getAssociatedTokenAddress(
@@ -137,9 +205,17 @@ router.post('/build-initialize-project-tx', async (req, res) => {
             console.log(`   ⚠️  Vault token account doesn't exist - will create it`);
         }
 
+        // Check if treasury fee token account already exists (for launch fee)
+        const treasuryFeeAccountInfo = await connection.getAccountInfo(treasuryFeeTokenAccount);
+        const treasuryFeeNeedsCreation = !treasuryFeeAccountInfo;
+
+        if (treasuryFeeNeedsCreation) {
+            console.log(`   ⚠️  Treasury fee token account doesn't exist - will create it`);
+        }
+
         // Convert box price and launch fee to BN
         const boxPriceBN = new BN(boxPrice);
-        const projectIdBN = new BN(projectId);
+        const projectIdBN = new BN(currentProjectId); // Use the validated/adjusted project ID
         const launchFeeBN = new BN(adminConfig.launch_fee_amount);
 
         console.log(`\n📝 Building initialize_project transaction with vault funding...`);
@@ -147,7 +223,7 @@ router.post('/build-initialize-project-tx', async (req, res) => {
         // Build the combined transaction
         const combinedTransaction = new Transaction();
 
-        // Step 1: Create vault ATA if it doesn't exist
+        // Step 1a: Create vault ATA if it doesn't exist
         if (vaultNeedsCreation) {
             const createVaultAtaIx = createAssociatedTokenAccountInstruction(
                 ownerPubkey, // payer
@@ -158,12 +234,25 @@ router.post('/build-initialize-project-tx', async (req, res) => {
             combinedTransaction.add(createVaultAtaIx);
         }
 
+        // Step 1b: Create treasury fee token account if it doesn't exist (for launch fee)
+        if (treasuryFeeNeedsCreation) {
+            const createTreasuryFeeAtaIx = createAssociatedTokenAccountInstruction(
+                ownerPubkey, // payer
+                treasuryFeeTokenAccount, // ata
+                treasuryPDA, // owner (treasury PDA)
+                feeTokenMintPubkey // mint (3EYES token)
+            );
+            combinedTransaction.add(createTreasuryFeeAtaIx);
+        }
+
         // Step 2: Build the Anchor initialize_project instruction
+        const luckIntervalBN = new BN(luckInterval);
         const initProjectTx = await program.methods
             .initializeProject(
                 projectIdBN,
                 boxPriceBN,
-                launchFeeBN
+                launchFeeBN,
+                luckIntervalBN
             )
             .accounts({
                 owner: ownerPubkey,
@@ -171,7 +260,7 @@ router.post('/build-initialize-project-tx', async (req, res) => {
                 vaultAuthority: vaultAuthorityPDA,
                 paymentTokenMint: paymentTokenMintPubkey,
                 ownerFeeTokenAccount: ownerFeeTokenAccount,
-                platformFeeTokenAccount: platformFeeTokenAccount,
+                platformFeeTokenAccount: treasuryFeeTokenAccount, // Launch fee goes to treasury PDA
                 feeTokenMint: feeTokenMintPubkey,
                 systemProgram: SystemProgram.programId,
                 tokenProgram: TOKEN_PROGRAM_ID,
@@ -207,14 +296,16 @@ router.post('/build-initialize-project-tx', async (req, res) => {
         console.log(`   Transaction includes:`);
         console.log(`   - Create vault ATA (if needed): ${vaultNeedsCreation}`);
         console.log(`   - Initialize project on-chain`);
-        console.log(`   - Fund vault with ${Number(vaultFundAmount) / 1e9} tokens`);
+        console.log(`   - Fund vault with ${Number(vaultFundAmount) / 1e9} tokens (dynamic: ~${Math.round(Number(vaultFundAmount) / Number(boxPriceBigInt))}x box price)`);
         console.log(`   Transaction will be signed by frontend wallet`);
 
         // Return transaction for frontend to sign and submit
         return res.json({
             success: true,
             transaction: serializedTransaction,
-            projectId,
+            projectId: currentProjectId, // Use the validated/adjusted project ID
+            originalProjectId: parseInt(projectId), // Include original for debugging
+            projectIdAdjusted: currentProjectId !== parseInt(projectId), // Flag if ID was changed
             pdas: {
                 projectConfig: projectConfigPDA.toString(),
                 vaultAuthority: vaultAuthorityPDA.toString(),
@@ -224,6 +315,10 @@ router.post('/build-initialize-project-tx', async (req, res) => {
             vaultFunding: {
                 amount: vaultFundAmount.toString(),
                 formatted: Number(vaultFundAmount) / 1e9,
+            },
+            launchFee: {
+                amount: adminConfig.launch_fee_amount.toString(),
+                formatted: Number(adminConfig.launch_fee_amount) / 1e9,
             },
             network: config.network,
         });
@@ -249,10 +344,11 @@ router.post('/build-initialize-project-tx', async (req, res) => {
  * - signature: string - Transaction signature
  * - pdas: object - PDA addresses { projectConfig, vaultAuthority, vaultTokenAccount }
  * - vaultFunding: object (optional) - { amount, formatted } - Vault funding details
+ * - launchFee: object (optional) - { amount, formatted } - Launch fee paid to treasury
  */
 router.post('/confirm-project-init', async (req, res) => {
     try {
-        const { projectId, signature, pdas, vaultFunding } = req.body;
+        const { projectId, signature, pdas, vaultFunding, launchFee } = req.body;
 
         if (!projectId || !signature || !pdas) {
             return res.status(400).json({
@@ -299,6 +395,48 @@ router.post('/confirm-project-init', async (req, res) => {
 
         const config = await getNetworkConfig();
 
+        // Fetch project details for logging
+        const { data: project } = await supabase
+            .from('projects')
+            .select('subdomain, owner_wallet, box_price, payment_token_mint')
+            .eq('project_numeric_id', projectId)
+            .single();
+
+        // Log project creation
+        await logger.logProjectCreated({
+            creatorWallet: project?.owner_wallet,
+            projectId,
+            subdomain: project?.subdomain,
+            txSignature: signature,
+            boxPrice: project?.box_price,
+            tokenMint: project?.payment_token_mint,
+        });
+
+        // Log launch fee payment (paid to platform treasury)
+        if (launchFee) {
+            await logger.logLaunchFeePaid({
+                creatorWallet: project?.owner_wallet,
+                projectId,
+                subdomain: project?.subdomain,
+                txSignature: signature,
+                amount: launchFee.amount,
+                tokenMint: project?.payment_token_mint,
+            });
+        }
+
+        // Log vault funding (creator funding their own project vault)
+        if (vaultFunding) {
+            await logger.logVaultFunded({
+                creatorWallet: project?.owner_wallet,
+                projectId,
+                subdomain: project?.subdomain,
+                txSignature: signature,
+                amount: vaultFunding.amount,
+                tokenMint: project?.payment_token_mint,
+                boxPrice: project?.box_price,
+            });
+        }
+
         return res.json({
             success: true,
             projectId,
@@ -309,6 +447,16 @@ router.post('/confirm-project-init', async (req, res) => {
 
     } catch (error) {
         console.error('❌ Error confirming project init:', error);
+
+        // Log the error
+        await logger.logTransactionError({
+            actorType: ActorTypes.CREATOR,
+            projectId: req.body?.projectId,
+            txSignature: req.body?.signature,
+            errorCode: 'PROJECT_INIT_FAILED',
+            errorMessage: error.message,
+            instruction: 'confirm-project-init',
+        });
 
         return res.status(500).json({
             success: false,
@@ -776,9 +924,14 @@ router.post('/build-create-box-tx', async (req, res) => {
         const paymentTokenMintPubkey = new PublicKey(project.payment_token_mint);
 
         // Derive PDAs
+        const [platformConfigPDA] = derivePlatformConfigPDA(programId);
         const [boxInstancePDA, boxInstanceBump] = deriveBoxInstancePDA(programId, projectId, nextBoxId);
         const [vaultAuthorityPDA] = deriveVaultAuthorityPDA(programId, projectId, paymentTokenMintPubkey);
         const vaultTokenAccount = await deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMintPubkey);
+
+        // Derive treasury PDAs for commission collection
+        const [treasuryPDA] = deriveTreasuryPDA(programId);
+        const treasuryTokenAccount = await deriveTreasuryTokenAccount(treasuryPDA, paymentTokenMintPubkey);
 
         // Derive buyer's token account
         const buyerTokenAccount = await getAssociatedTokenAddress(
@@ -786,9 +939,35 @@ router.post('/build-create-box-tx', async (req, res) => {
             buyerPubkey
         );
 
+        console.log(`   Platform config PDA: ${platformConfigPDA.toString()}`);
         console.log(`   Box instance PDA: ${boxInstancePDA.toString()}`);
         console.log(`   Vault token account: ${vaultTokenAccount.toString()}`);
+        console.log(`   Treasury PDA: ${treasuryPDA.toString()}`);
+        console.log(`   Treasury token account: ${treasuryTokenAccount.toString()}`);
         console.log(`   Buyer token account: ${buyerTokenAccount.toString()}`);
+
+        // Fetch platform config to get commission rate
+        const platformConfigInfo = await connection.getAccountInfo(platformConfigPDA);
+        let commissionBps = 500; // Default 5% if can't read
+        if (platformConfigInfo) {
+            // Commission is stored at a specific offset in the platform config
+            // Skip: discriminator(8) + admin(32) + initialized(1) + paused(1) + baseLuck(1) + maxLuck(1) + luckTimeInterval(8)
+            // + payouts(5*4=20) + tier1(1+4*2=9) + tier2(1+4*2=9) + tier3(4*2=8) = 8+32+1+1+1+1+8+20+9+9+8 = 98
+            const commissionOffset = 98;
+            commissionBps = platformConfigInfo.data.readUInt16LE(commissionOffset);
+        }
+
+        // Calculate fee split
+        const boxPriceRaw = BigInt(project.box_price);
+        const commissionAmount = (boxPriceRaw * BigInt(commissionBps)) / BigInt(10000);
+        const creatorAmount = boxPriceRaw - commissionAmount;
+        const decimals = project.payment_token_decimals;
+        const symbol = project.payment_token_symbol;
+
+        console.log(`\n💰 Fee split (${commissionBps / 100}% platform commission):`);
+        console.log(`   Total box price: ${Number(boxPriceRaw) / Math.pow(10, decimals)} ${symbol}`);
+        console.log(`   → Platform treasury: ${Number(commissionAmount) / Math.pow(10, decimals)} ${symbol} (${commissionBps / 100}%)`);
+        console.log(`   → Creator vault: ${Number(creatorAmount) / Math.pow(10, decimals)} ${symbol} (${(10000 - commissionBps) / 100}%)`);
 
         // Check if vault token account exists, create it if needed
         const vaultAccountInfo = await connection.getAccountInfo(vaultTokenAccount);
@@ -796,6 +975,14 @@ router.post('/build-create-box-tx', async (req, res) => {
 
         if (vaultNeedsCreation) {
             console.log(`   ⚠️  Vault token account doesn't exist - will create it`);
+        }
+
+        // Check if treasury token account exists, create it if needed
+        const treasuryAccountInfo = await connection.getAccountInfo(treasuryTokenAccount);
+        const treasuryNeedsCreation = !treasuryAccountInfo;
+
+        if (treasuryNeedsCreation) {
+            console.log(`   ⚠️  Treasury token account doesn't exist - will create it`);
         }
 
         // ========================================
@@ -817,23 +1004,39 @@ router.post('/build-create-box-tx', async (req, res) => {
             console.log(`   Added: Create vault ATA instruction`);
         }
 
-        // 2. Create box (no randomness - will be committed when user opens)
+        // 2. Create treasury ATA if needed (buyer pays - first box purchase for this token)
+        if (treasuryNeedsCreation) {
+            const createTreasuryIx = createAssociatedTokenAccountInstruction(
+                buyerPubkey, // payer
+                treasuryTokenAccount, // ata
+                treasuryPDA, // owner
+                paymentTokenMintPubkey // mint
+            );
+            transaction.add(createTreasuryIx);
+            console.log(`   Added: Create treasury ATA instruction`);
+        }
+
+        // 3. Create box (no randomness - will be committed when user opens)
+        // Payment is split: creator portion to vault, commission to treasury
         const projectIdBN = new BN(projectId);
         const boxPurchaseTx = await program.methods
             .createBox(projectIdBN)
             .accounts({
                 buyer: buyerPubkey,
+                platformConfig: platformConfigPDA,
                 projectConfig: projectConfigPDA,
                 boxInstance: boxInstancePDA,
-                vaultTokenAccount: vaultTokenAccount,
                 buyerTokenAccount: buyerTokenAccount,
+                vaultTokenAccount: vaultTokenAccount,
+                treasuryTokenAccount: treasuryTokenAccount,
+                treasury: treasuryPDA,
                 tokenProgram: TOKEN_PROGRAM_ID,
                 systemProgram: SystemProgram.programId,
             })
             .transaction();
 
         transaction.add(...boxPurchaseTx.instructions);
-        console.log(`   Added: Create box instruction (pending state)`);
+        console.log(`   Added: Create box instruction (pending state, with commission split)`);
 
         // Get recent blockhash
         const { blockhash } = await connection.getLatestBlockhash();
@@ -950,6 +1153,25 @@ router.post('/confirm-box-creation', async (req, res) => {
 
         const config = await getNetworkConfig();
 
+        // Fetch project details for logging
+        const { data: projectDetails } = await supabase
+            .from('projects')
+            .select('subdomain, box_price, payment_token_mint')
+            .eq('project_numeric_id', projectId)
+            .single();
+
+        // Log box purchase
+        await logger.logBoxPurchased({
+            buyerWallet,
+            projectId,
+            subdomain: projectDetails?.subdomain,
+            boxId,
+            txSignature: signature,
+            amount: projectDetails?.box_price,
+            tokenMint: projectDetails?.payment_token_mint,
+            boxPrice: projectDetails?.box_price,
+        });
+
         return res.json({
             success: true,
             projectId,
@@ -960,9 +1182,378 @@ router.post('/confirm-box-creation', async (req, res) => {
 
     } catch (error) {
         console.error('❌ Error confirming box creation:', error);
+
+        // Log the error
+        await logger.logTransactionError({
+            actorType: ActorTypes.USER,
+            wallet: req.body?.buyerWallet,
+            projectId: req.body?.projectId,
+            txSignature: req.body?.signature,
+            errorCode: 'BOX_CREATION_FAILED',
+            errorMessage: error.message,
+            instruction: 'confirm-box-creation',
+        });
+
         return res.status(500).json({
             success: false,
             error: 'Failed to confirm box creation',
+            details: error.message,
+        });
+    }
+});
+
+/**
+ * POST /api/program/build-create-boxes-batch-tx
+ * Build transactions for purchasing multiple lootboxes in batch
+ *
+ * Creates multiple transactions (up to 3 boxes per transaction) to handle
+ * Solana's transaction size limits while allowing batch purchases of up to 10 boxes.
+ *
+ * Body:
+ * - projectId: number - Numeric project ID
+ * - buyerWallet: string - Buyer's wallet address
+ * - quantity: number - Number of boxes to purchase (1-10)
+ *
+ * Returns:
+ * - transactions: Array of { transaction, boxIds, boxInstancePDAs } for sequential signing
+ * - totalBoxes: Total number of boxes being purchased
+ * - totalPrice: Total price in token base units
+ */
+router.post('/build-create-boxes-batch-tx', async (req, res) => {
+    try {
+        const { projectId, buyerWallet, quantity } = req.body;
+
+        // Validate input
+        if (!projectId || !buyerWallet || !quantity) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields: projectId, buyerWallet, quantity'
+            });
+        }
+
+        const boxQuantity = parseInt(quantity);
+        if (boxQuantity < 1 || boxQuantity > 10) {
+            return res.status(400).json({
+                success: false,
+                error: 'Quantity must be between 1 and 10'
+            });
+        }
+
+        console.log(`\n🎲 Building batch create box transaction for ${boxQuantity} boxes in project ${projectId}...`);
+        console.log(`   Buyer: ${buyerWallet}`);
+
+        // Get Anchor program and network config
+        const { program, provider, connection, programId } = await getAnchorProgram();
+        const config = await getNetworkConfig();
+
+        // Fetch project from database
+        const { data: project, error: dbError } = await supabase
+            .from('projects')
+            .select('*')
+            .eq('project_numeric_id', projectId)
+            .single();
+
+        if (dbError || !project) {
+            throw new Error('Project not found in database');
+        }
+
+        // Prevent project owners from buying their own boxes
+        if (project.owner_wallet === buyerWallet) {
+            return res.status(403).json({
+                success: false,
+                error: 'Project owners cannot purchase boxes from their own project',
+            });
+        }
+
+        console.log(`   Project: ${project.project_name}`);
+        console.log(`   Box price: ${project.box_price / Math.pow(10, project.payment_token_decimals)} ${project.payment_token_symbol}`);
+        console.log(`   Total: ${(project.box_price * boxQuantity) / Math.pow(10, project.payment_token_decimals)} ${project.payment_token_symbol}`);
+
+        // Fetch on-chain project config to get current box count
+        const [projectConfigPDA] = deriveProjectConfigPDAStandalone(new PublicKey(config.programId), projectId);
+        const accountInfo = await connection.getAccountInfo(projectConfigPDA);
+
+        if (!accountInfo) {
+            throw new Error('Project not initialized on-chain');
+        }
+
+        // Read total_boxes_created from on-chain data
+        let offset = 8 + 8 + 32 + 32 + 8 + 1;
+        const totalBoxesCreatedBN = new BN(accountInfo.data.slice(offset, offset + 8), 'le');
+        const startBoxId = totalBoxesCreatedBN.toNumber() + 1;
+
+        console.log(`   Current boxes created: ${totalBoxesCreatedBN.toNumber()}`);
+        console.log(`   Will create boxes ${startBoxId} to ${startBoxId + boxQuantity - 1}`);
+
+        // Convert addresses to PublicKeys
+        const buyerPubkey = new PublicKey(buyerWallet);
+        const paymentTokenMintPubkey = new PublicKey(project.payment_token_mint);
+
+        // Derive common PDAs (shared across all transactions)
+        const [platformConfigPDA] = derivePlatformConfigPDA(programId);
+        const [vaultAuthorityPDA] = deriveVaultAuthorityPDA(programId, projectId, paymentTokenMintPubkey);
+        const vaultTokenAccount = await deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMintPubkey);
+        const [treasuryPDA] = deriveTreasuryPDA(programId);
+        const treasuryTokenAccount = await deriveTreasuryTokenAccount(treasuryPDA, paymentTokenMintPubkey);
+        const buyerTokenAccount = await getAssociatedTokenAddress(paymentTokenMintPubkey, buyerPubkey);
+
+        // Fetch platform config to get commission rate
+        const platformConfigInfo = await connection.getAccountInfo(platformConfigPDA);
+        let commissionBps = 500;
+        if (platformConfigInfo) {
+            const commissionOffset = 98;
+            commissionBps = platformConfigInfo.data.readUInt16LE(commissionOffset);
+        }
+
+        // Check if ATAs exist (only need to create in first transaction)
+        const vaultAccountInfo = await connection.getAccountInfo(vaultTokenAccount);
+        const vaultNeedsCreation = !vaultAccountInfo;
+        const treasuryAccountInfo = await connection.getAccountInfo(treasuryTokenAccount);
+        const treasuryNeedsCreation = !treasuryAccountInfo;
+
+        // Calculate fee info for logging
+        const boxPriceRaw = BigInt(project.box_price);
+        const commissionAmount = (boxPriceRaw * BigInt(commissionBps)) / BigInt(10000);
+        const creatorAmount = boxPriceRaw - commissionAmount;
+        const decimals = project.payment_token_decimals;
+        const symbol = project.payment_token_symbol;
+
+        console.log(`\n💰 Fee split per box (${commissionBps / 100}% platform commission):`);
+        console.log(`   Box price: ${Number(boxPriceRaw) / Math.pow(10, decimals)} ${symbol}`);
+        console.log(`   → Platform treasury: ${Number(commissionAmount) / Math.pow(10, decimals)} ${symbol}`);
+        console.log(`   → Creator vault: ${Number(creatorAmount) / Math.pow(10, decimals)} ${symbol}`);
+
+        // Group boxes into transactions (max 3 per transaction to stay within size limits)
+        const MAX_BOXES_PER_TX = 3;
+        const transactions = [];
+        let currentBoxId = startBoxId;
+
+        while (currentBoxId < startBoxId + boxQuantity) {
+            const remainingBoxes = startBoxId + boxQuantity - currentBoxId;
+            const boxesInThisTx = Math.min(MAX_BOXES_PER_TX, remainingBoxes);
+            const isFirstTx = transactions.length === 0;
+
+            console.log(`\n📝 Building transaction ${transactions.length + 1} (boxes ${currentBoxId} to ${currentBoxId + boxesInThisTx - 1})...`);
+
+            const transaction = new Transaction();
+            const boxIdsInTx = [];
+            const boxPDAsInTx = [];
+
+            // Only create ATAs in the first transaction
+            if (isFirstTx) {
+                if (vaultNeedsCreation) {
+                    const createVaultIx = createAssociatedTokenAccountInstruction(
+                        buyerPubkey,
+                        vaultTokenAccount,
+                        vaultAuthorityPDA,
+                        paymentTokenMintPubkey
+                    );
+                    transaction.add(createVaultIx);
+                    console.log(`   Added: Create vault ATA instruction`);
+                }
+
+                if (treasuryNeedsCreation) {
+                    const createTreasuryIx = createAssociatedTokenAccountInstruction(
+                        buyerPubkey,
+                        treasuryTokenAccount,
+                        treasuryPDA,
+                        paymentTokenMintPubkey
+                    );
+                    transaction.add(createTreasuryIx);
+                    console.log(`   Added: Create treasury ATA instruction`);
+                }
+            }
+
+            // Add create_box instructions for each box in this transaction
+            for (let i = 0; i < boxesInThisTx; i++) {
+                const boxId = currentBoxId + i;
+                const [boxInstancePDA] = deriveBoxInstancePDA(programId, projectId, boxId);
+
+                const projectIdBN = new BN(projectId);
+                const boxPurchaseTx = await program.methods
+                    .createBox(projectIdBN)
+                    .accounts({
+                        buyer: buyerPubkey,
+                        platformConfig: platformConfigPDA,
+                        projectConfig: projectConfigPDA,
+                        boxInstance: boxInstancePDA,
+                        buyerTokenAccount: buyerTokenAccount,
+                        vaultTokenAccount: vaultTokenAccount,
+                        treasuryTokenAccount: treasuryTokenAccount,
+                        treasury: treasuryPDA,
+                        tokenProgram: TOKEN_PROGRAM_ID,
+                        systemProgram: SystemProgram.programId,
+                    })
+                    .transaction();
+
+                transaction.add(...boxPurchaseTx.instructions);
+                boxIdsInTx.push(boxId);
+                boxPDAsInTx.push(boxInstancePDA.toString());
+                console.log(`   Added: Create box ${boxId} instruction`);
+            }
+
+            // Get recent blockhash
+            const { blockhash } = await connection.getLatestBlockhash();
+            transaction.recentBlockhash = blockhash;
+            transaction.feePayer = buyerPubkey;
+
+            // Serialize transaction
+            const serializedTransaction = transaction.serialize({
+                requireAllSignatures: false,
+                verifySignatures: false,
+            }).toString('base64');
+
+            transactions.push({
+                transaction: serializedTransaction,
+                boxIds: boxIdsInTx,
+                boxInstancePDAs: boxPDAsInTx,
+                instructionCount: transaction.instructions.length,
+            });
+
+            currentBoxId += boxesInThisTx;
+        }
+
+        console.log(`\n✅ Batch transactions built successfully!`);
+        console.log(`   Total transactions: ${transactions.length}`);
+        console.log(`   Total boxes: ${boxQuantity}`);
+        console.log(`   Total price: ${(Number(boxPriceRaw) * boxQuantity) / Math.pow(10, decimals)} ${symbol}`);
+
+        return res.json({
+            success: true,
+            transactions,
+            totalBoxes: boxQuantity,
+            totalPrice: (boxPriceRaw * BigInt(boxQuantity)).toString(),
+            pricePerBox: boxPriceRaw.toString(),
+            projectId,
+            network: config.network,
+        });
+
+    } catch (error) {
+        console.error('❌ Error building batch create box transaction:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Failed to build batch create box transaction',
+            details: error.message,
+        });
+    }
+});
+
+/**
+ * POST /api/program/confirm-boxes-batch
+ * Record multiple box creations in database after on-chain confirmation
+ *
+ * Body:
+ * - projectId: number - Numeric project ID
+ * - boxIds: number[] - Array of box IDs
+ * - buyerWallet: string - Buyer's wallet address
+ * - signature: string - Transaction signature
+ * - boxInstancePDAs: string[] - Array of box instance PDA addresses
+ */
+router.post('/confirm-boxes-batch', async (req, res) => {
+    try {
+        const { projectId, boxIds, buyerWallet, signature, boxInstancePDAs } = req.body;
+
+        if (!projectId || !boxIds || !Array.isArray(boxIds) || !buyerWallet || !signature || !boxInstancePDAs) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields'
+            });
+        }
+
+        console.log(`\n✅ Confirming batch of ${boxIds.length} boxes for project ${projectId}...`);
+        console.log(`   Box IDs: ${boxIds.join(', ')}`);
+        console.log(`   Transaction: ${signature}`);
+
+        // Fetch project from database to get UUID
+        const { data: project, error: projectError } = await supabase
+            .from('projects')
+            .select('id')
+            .eq('project_numeric_id', projectId)
+            .single();
+
+        if (projectError || !project) {
+            throw new Error('Project not found');
+        }
+
+        // Build array of box records for batch insert
+        const boxRecords = boxIds.map((boxId, index) => ({
+            project_id: project.id,
+            box_number: boxId,
+            owner_wallet: buyerWallet,
+            box_result: 0, // Pending
+            payout_amount: 0,
+            opened_at: null,
+            created_at: new Date().toISOString(),
+            randomness_account: null,
+            randomness_committed: false,
+            purchase_tx_signature: signature,
+            box_pda: boxInstancePDAs[index],
+        }));
+
+        // Batch insert all boxes
+        const { error: insertError } = await supabase
+            .from('boxes')
+            .insert(boxRecords);
+
+        if (insertError) {
+            console.error('Failed to insert boxes into database:', insertError);
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to record boxes in database',
+                details: insertError.message,
+            });
+        }
+
+        // Update boxes_created counter to the highest box ID
+        const maxBoxId = Math.max(...boxIds);
+        const { error: updateError } = await supabase
+            .from('projects')
+            .update({ boxes_created: maxBoxId })
+            .eq('id', project.id);
+
+        if (updateError) {
+            console.warn('Warning: Failed to update boxes_created counter:', updateError);
+        }
+
+        console.log(`✅ ${boxIds.length} boxes recorded in database`);
+
+        const config = await getNetworkConfig();
+
+        // Fetch project details for logging
+        const { data: projectDetails } = await supabase
+            .from('projects')
+            .select('subdomain, box_price, payment_token_mint')
+            .eq('project_numeric_id', projectId)
+            .single();
+
+        // Log each box purchase
+        for (const boxId of boxIds) {
+            await logger.logBoxPurchased({
+                buyerWallet,
+                projectId,
+                subdomain: projectDetails?.subdomain,
+                boxId,
+                txSignature: signature,
+                amount: projectDetails?.box_price,
+                tokenMint: projectDetails?.payment_token_mint,
+                boxPrice: projectDetails?.box_price,
+            });
+        }
+
+        return res.json({
+            success: true,
+            projectId,
+            boxIds,
+            boxCount: boxIds.length,
+            signature,
+            explorerUrl: `https://explorer.solana.com/tx/${signature}?cluster=${config.network}`,
+        });
+
+    } catch (error) {
+        console.error('❌ Error confirming batch box creation:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Failed to confirm batch box creation',
             details: error.message,
         });
     }
@@ -1166,7 +1757,7 @@ router.post('/confirm-commit', async (req, res) => {
         // Fetch box from database
         const { data: box, error: boxError } = await supabase
             .from('boxes')
-            .select('id, projects!inner(project_numeric_id)')
+            .select('id, box_pda, projects!inner(project_numeric_id)')
             .eq('box_number', boxId)
             .eq('projects.project_numeric_id', projectId)
             .single();
@@ -1178,7 +1769,36 @@ router.post('/confirm-commit', async (req, res) => {
             });
         }
 
-        // Update box with commit info
+        // Read the on-chain created_at timestamp for accurate luck calculation
+        // The on-chain timestamp is set when the transaction was processed, not when DB recorded it
+        const config = await getNetworkConfig();
+        const { connection, programId } = await getAnchorProgram();
+
+        const [boxInstancePDA] = deriveBoxInstancePDA(programId, parseInt(projectId), parseInt(boxId));
+        const boxAccountInfo = await connection.getAccountInfo(boxInstancePDA);
+
+        let boxCreatedAt;
+        if (boxAccountInfo) {
+            // Parse on-chain created_at: skip discriminator(8) + box_id(8) + project_id(8) + owner(32)
+            const createdAtOffset = 8 + 8 + 8 + 32;
+            const createdAtBN = new BN(boxAccountInfo.data.subarray(createdAtOffset, createdAtOffset + 8), 'le');
+            boxCreatedAt = createdAtBN.toNumber(); // Unix timestamp in seconds
+            console.log(`   On-chain created_at: ${new Date(boxCreatedAt * 1000).toISOString()}`);
+        } else {
+            // Fallback to now if box not found on-chain (shouldn't happen)
+            boxCreatedAt = Math.floor(Date.now() / 1000);
+            console.warn('   Warning: Could not read on-chain created_at, using current time');
+        }
+
+        const now = Math.floor(Date.now() / 1000);
+        const holdTimeSeconds = now - boxCreatedAt;
+        const luckIntervalSeconds = config.luckIntervalSeconds || 3;
+        const calculatedLuck = calculateLuckScore(holdTimeSeconds, luckIntervalSeconds);
+
+        console.log(`   Hold time at commit: ${holdTimeSeconds} seconds`);
+        console.log(`   Luck locked in: ${calculatedLuck}/60`);
+
+        // Update box with commit info and locked-in luck value
         const committedAt = new Date().toISOString();
         const { error: updateError } = await supabase
             .from('boxes')
@@ -1187,6 +1807,8 @@ router.post('/confirm-commit', async (req, res) => {
                 randomness_committed: true,
                 committed_at: committedAt,
                 commit_tx_signature: signature,
+                luck_value: calculatedLuck,
+                max_luck: 60,
             })
             .eq('id', box.id);
 
@@ -1201,9 +1823,8 @@ router.post('/confirm-commit', async (req, res) => {
 
         console.log(`✅ Box commit recorded in database`);
         console.log(`   Committed at: ${committedAt}`);
+        console.log(`   Luck: ${calculatedLuck}/60 (locked in)`);
         console.log(`   User has until: ${new Date(Date.now() + 3600000).toISOString()} to reveal`);
-
-        const config = await getNetworkConfig();
 
         return res.json({
             success: true,
@@ -1470,19 +2091,13 @@ router.post('/build-reveal-box-tx', async (req, res) => {
             });
         }
 
-        // Calculate hold time and luck score
-        const boxCreatedAt = new Date(box.created_at).getTime() / 1000; // Unix timestamp
-        const now = Math.floor(Date.now() / 1000);
-        const holdTimeSeconds = now - boxCreatedAt;
-
-        // Get luck interval from config (default 3 seconds for dev)
-        const luckIntervalSeconds = config.luckIntervalSeconds || 3;
-        const calculatedLuck = calculateLuckScore(holdTimeSeconds, luckIntervalSeconds);
+        // Use the luck value that was locked in at commit time
+        // This ensures users can't game the system by waiting longer after committing
+        const lockedLuck = box.luck_value || 5; // Fallback to minimum if somehow not set
 
         console.log(`   Box created at: ${new Date(box.created_at).toISOString()}`);
-        console.log(`   Hold time: ${holdTimeSeconds} seconds`);
-        console.log(`   Luck interval: ${luckIntervalSeconds} seconds`);
-        console.log(`   Calculated luck: ${calculatedLuck}/60`);
+        console.log(`   Box committed at: ${box.committed_at}`);
+        console.log(`   Luck (locked at commit): ${lockedLuck}/60`);
 
         // ========================================
         // SWITCHBOARD VRF: Create reveal instruction
@@ -1546,18 +2161,74 @@ router.post('/build-reveal-box-tx', async (req, res) => {
             boxId,
             boxInstancePDA: boxInstancePDA.toString(),
             randomnessAccount: box.randomness_account,
-            luckScore: calculatedLuck,
-            holdTimeSeconds,
+            luckScore: lockedLuck,
             network: config.network,
-            message: 'Randomness will be read from Switchboard VRF on-chain. Reward calculated after reveal.',
+            message: 'Randomness will be read from Switchboard VRF on-chain. Luck was locked at commit time.',
         });
 
     } catch (error) {
         console.error('❌ Error building reveal box transaction:', error);
+
+        // Classify the error for better frontend handling
+        let errorCode = 'REVEAL_ERROR';
+        let errorMessage = 'Failed to build reveal box transaction';
+        let isRetryable = false;
+        let retryAfterSeconds = null;
+
+        // Check for Switchboard oracle/DNS failures
+        if (error.message?.includes('ENOTFOUND') ||
+            error.message?.includes('xip.switchboard-oracles') ||
+            error.message?.includes('getaddrinfo') ||
+            error.message?.includes('oracle unavailable')) {
+            errorCode = 'ORACLE_UNAVAILABLE';
+            errorMessage = 'Switchboard oracle service is temporarily unavailable. This is not your fault - the oracle network is experiencing issues.';
+            isRetryable = true;
+            retryAfterSeconds = 60; // Suggest retry after 1 minute
+        }
+        // Check for oracle timeout/503 errors
+        else if (error.message?.includes('503') ||
+                 error.message?.includes('Service Unavailable') ||
+                 error.message?.includes('ETIMEDOUT') ||
+                 error.message?.includes('ECONNREFUSED')) {
+            errorCode = 'ORACLE_TIMEOUT';
+            errorMessage = 'Switchboard oracle is not responding. Please try again in a few minutes.';
+            isRetryable = true;
+            retryAfterSeconds = 30;
+        }
+        // Check for insufficient funds
+        else if (error.message?.includes('insufficient') ||
+                 error.message?.includes('0x1') ||
+                 error.message?.includes('InsufficientFunds')) {
+            errorCode = 'INSUFFICIENT_FUNDS';
+            errorMessage = 'Insufficient SOL for transaction fees. Please add SOL to your wallet.';
+            isRetryable = true;
+        }
+        // Check for reveal window expired
+        else if (error.message?.includes('RevealWindowExpired') ||
+                 error.message?.includes('window expired')) {
+            errorCode = 'REVEAL_EXPIRED';
+            errorMessage = 'The 1-hour reveal window has expired. The box is now a Dud.';
+            isRetryable = false;
+        }
+
+        // Calculate time remaining in reveal window if box was committed
+        let timeRemainingSeconds = null;
+        if (box?.committed_at) {
+            const committedAt = new Date(box.committed_at).getTime();
+            const now = Date.now();
+            const oneHourMs = 60 * 60 * 1000;
+            const remaining = Math.max(0, oneHourMs - (now - committedAt));
+            timeRemainingSeconds = Math.floor(remaining / 1000);
+        }
+
         return res.status(500).json({
             success: false,
-            error: 'Failed to build reveal box transaction',
+            error: errorMessage,
+            errorCode,
             details: error.message,
+            isRetryable,
+            retryAfterSeconds,
+            timeRemainingSeconds,
         });
     }
 });
@@ -1689,6 +2360,24 @@ router.post('/confirm-reveal', async (req, res) => {
 
         const config = await getNetworkConfig();
 
+        // Fetch owner wallet from box record for logging
+        const { data: boxData } = await supabase
+            .from('boxes')
+            .select('owner_wallet')
+            .eq('project_id', project.id)
+            .eq('box_number', boxId)
+            .single();
+
+        // Log box opened (revealed)
+        await logger.logBoxOpened({
+            userWallet: boxData?.owner_wallet,
+            projectId,
+            boxId,
+            txSignature: signature,
+            luck,
+            holdTime: null, // Could calculate from created_at vs committed_at if needed
+        });
+
         return res.json({
             success: true,
             projectId,
@@ -1706,6 +2395,17 @@ router.post('/confirm-reveal', async (req, res) => {
 
     } catch (error) {
         console.error('❌ Error confirming box reveal:', error);
+
+        // Log the error
+        await logger.logTransactionError({
+            actorType: ActorTypes.USER,
+            projectId: req.body?.projectId,
+            txSignature: req.body?.signature,
+            errorCode: 'BOX_REVEAL_FAILED',
+            errorMessage: error.message,
+            instruction: 'confirm-reveal',
+        });
+
         return res.status(500).json({
             success: false,
             error: 'Failed to confirm box reveal',
@@ -1988,23 +2688,33 @@ router.post('/confirm-settle', async (req, res) => {
             console.warn('Warning: Failed to update box settled_at:', boxUpdateError);
         }
 
-        // Update project stats if jackpot was hit
-        if (box.box_result === 5) { // DB: 5 = Jackpot (on-chain: 4)
-            const { error: statsError } = await supabase
-                .from('projects')
-                .update({
-                    total_jackpots_hit: (project.total_jackpots_hit || 0) + 1,
-                })
-                .eq('id', project.id);
-
-            if (statsError) {
-                console.warn('Warning: Failed to update jackpot stats:', statsError);
-            }
-        }
-
         console.log(`✅ Box settlement confirmed`);
 
         const config = await getNetworkConfig();
+
+        // Fetch box owner wallet for logging
+        const { data: boxOwnerData } = await supabase
+            .from('boxes')
+            .select('owner_wallet, luck_value')
+            .eq('project_id', project.id)
+            .eq('box_number', boxId)
+            .single();
+
+        // Map tier ID to name
+        const tierNames = ['Pending', 'Dud', 'Rebate', 'Break-even', 'Profit', 'Jackpot'];
+
+        // Log box settled
+        await logger.logBoxSettled({
+            userWallet: boxOwnerData?.owner_wallet,
+            projectId,
+            boxId,
+            txSignature: signature,
+            payout: box.payout_amount,
+            outcome: tierNames[box.box_result] || 'Unknown',
+            tier: box.box_result,
+            multiplier: null, // Could calculate based on box_price vs payout
+            luck: boxOwnerData?.luck_value,
+        });
 
         return res.json({
             success: true,
@@ -2016,6 +2726,17 @@ router.post('/confirm-settle', async (req, res) => {
 
     } catch (error) {
         console.error('❌ Error confirming box settlement:', error);
+
+        // Log the error
+        await logger.logTransactionError({
+            actorType: ActorTypes.USER,
+            projectId: req.body?.projectId,
+            txSignature: req.body?.signature,
+            errorCode: 'BOX_SETTLE_FAILED',
+            errorMessage: error.message,
+            instruction: 'confirm-settle',
+        });
+
         return res.status(500).json({
             success: false,
             error: 'Failed to confirm box settlement',
@@ -2063,6 +2784,10 @@ router.get('/box/:projectId/:boxId', async (req, res) => {
         const createdAtBN = new BN(data.slice(offset, offset + 8), 'le');
         offset += 8;
 
+        // committed_at (8 bytes) - added in commit_box
+        const committedAtBN = new BN(data.slice(offset, offset + 8), 'le');
+        offset += 8;
+
         const luck = data[offset];
         offset += 1;
 
@@ -2093,6 +2818,7 @@ router.get('/box/:projectId/:boxId', async (req, res) => {
                 projectId: projectIdBN.toString(),
                 owner: owner.toString(),
                 createdAt: new Date(createdAtBN.toNumber() * 1000).toISOString(),
+                committedAt: committedAtBN.toNumber() > 0 ? new Date(committedAtBN.toNumber() * 1000).toISOString() : null,
                 luck,
                 revealed,
                 settled,
@@ -2108,6 +2834,102 @@ router.get('/box/:projectId/:boxId', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to fetch box',
+            details: error.message,
+        });
+    }
+});
+
+/**
+ * POST /api/program/build-update-project-tx
+ * Build transaction for updating project settings (box price, active status, luck interval)
+ *
+ * Body:
+ * - projectId: number - Numeric project ID
+ * - ownerWallet: string - Project owner wallet address
+ * - newBoxPrice: number (optional) - New box price
+ * - newActive: boolean (optional) - New active status
+ * - newLuckIntervalSeconds: number (optional) - New luck interval (0 = platform default)
+ */
+router.post('/build-update-project-tx', async (req, res) => {
+    try {
+        const { projectId, ownerWallet, newBoxPrice, newActive, newLuckIntervalSeconds } = req.body;
+
+        // Validate input
+        if (!projectId || !ownerWallet) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields: projectId, ownerWallet'
+            });
+        }
+
+        // At least one field must be provided to update
+        if (newBoxPrice === undefined && newActive === undefined && newLuckIntervalSeconds === undefined) {
+            return res.status(400).json({
+                success: false,
+                error: 'At least one field to update must be provided (newBoxPrice, newActive, or newLuckIntervalSeconds)'
+            });
+        }
+
+        console.log(`\n🔨 Building update project transaction for project ${projectId}...`);
+        console.log(`   Owner: ${ownerWallet}`);
+        if (newBoxPrice !== undefined) console.log(`   New box price: ${newBoxPrice}`);
+        if (newActive !== undefined) console.log(`   New active status: ${newActive}`);
+        if (newLuckIntervalSeconds !== undefined) console.log(`   New luck interval: ${newLuckIntervalSeconds}`);
+
+        // Get Anchor program
+        const { program, connection, programId } = await getAnchorProgram();
+        const config = await getNetworkConfig();
+
+        const ownerPubkey = new PublicKey(ownerWallet);
+
+        // Derive project config PDA
+        const [projectConfigPDA] = deriveProjectConfigPDAStandalone(programId, projectId);
+
+        // Build the update transaction
+        const projectIdBN = new BN(projectId);
+        const updateTx = await program.methods
+            .updateProject(
+                projectIdBN,
+                newBoxPrice !== undefined ? new BN(newBoxPrice) : null,
+                newActive !== undefined ? newActive : null,
+                newLuckIntervalSeconds !== undefined ? new BN(newLuckIntervalSeconds) : null
+            )
+            .accounts({
+                owner: ownerPubkey,
+                projectConfig: projectConfigPDA,
+            })
+            .transaction();
+
+        // Get recent blockhash
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+        updateTx.recentBlockhash = blockhash;
+        updateTx.feePayer = ownerPubkey;
+
+        // Serialize transaction
+        const serializedTransaction = updateTx.serialize({
+            requireAllSignatures: false,
+            verifySignatures: false,
+        }).toString('base64');
+
+        console.log(`\n✅ Update project transaction built successfully!`);
+
+        return res.json({
+            success: true,
+            transaction: serializedTransaction,
+            projectId,
+            updates: {
+                boxPrice: newBoxPrice,
+                active: newActive,
+                luckIntervalSeconds: newLuckIntervalSeconds,
+            },
+            network: config.network,
+        });
+
+    } catch (error) {
+        console.error('❌ Error building update project transaction:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Failed to build update project transaction',
             details: error.message,
         });
     }

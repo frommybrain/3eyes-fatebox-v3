@@ -13,10 +13,13 @@ import {
     DegenCard,
     DegenBadge,
     DegenLoadingState,
+    DegenInput,
     useToast,
 } from '@/components/ui';
 import { DegenWarningMessage } from '@/components/ui/DegenMessage';
 import { DegenTabs, DegenTabsList, DegenTabsTrigger, DegenTabsContent } from '@/components/ui/DegenTabs';
+import { formatTimeToMaxLuck, formatDuration, LUCK_INTERVAL_PRESETS } from '@/lib/luckHelpers';
+import useNetworkStore from '@/store/useNetworkStore';
 
 const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
 
@@ -25,6 +28,7 @@ export default function ManageProject({ projectId }) {
     const { toast } = useToast();
     const { publicKey, connected, signTransaction } = useWallet();
     const { connection } = useConnection();
+    const { config } = useNetworkStore();
     const [project, setProject] = useState(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -44,14 +48,36 @@ export default function ManageProject({ projectId }) {
     const [closingProject, setClosingProject] = useState(false);
     const [showReservedInfo, setShowReservedInfo] = useState(false);
 
-    useEffect(() => {
-        if (!connected) {
-            router.push('/');
-            return;
-        }
+    // Luck settings state
+    const [luckIntervalSeconds, setLuckIntervalSeconds] = useState(0);
+    const [updatingLuckInterval, setUpdatingLuckInterval] = useState(false);
 
-        loadProject();
-    }, [projectId, connected]);
+    // On-chain config for luck calculation (baseLuck, maxLuck)
+    const [onChainConfig, setOnChainConfig] = useState(null);
+
+    useEffect(() => {
+        if (connected && publicKey) {
+            loadProject();
+        }
+    }, [projectId, connected, publicKey]);
+
+    // Fetch on-chain platform config for baseLuck/maxLuck
+    useEffect(() => {
+        async function fetchOnChainConfig() {
+            try {
+                const response = await fetch(`${backendUrl}/api/admin/platform-config`);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success && data.platformConfig) {
+                        setOnChainConfig(data.platformConfig);
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching on-chain config:', error);
+            }
+        }
+        fetchOnChainConfig();
+    }, []);
 
     const loadProject = async () => {
         try {
@@ -71,6 +97,7 @@ export default function ManageProject({ projectId }) {
             }
 
             setProject(data);
+            setLuckIntervalSeconds(data.luck_interval_seconds || 0);
         } catch (error) {
             console.error('Error loading project:', error);
             toast.error('Failed to load project');
@@ -106,6 +133,60 @@ export default function ManageProject({ projectId }) {
 
     const toggleActive = () => {
         handleUpdate({ is_active: !project.is_active });
+    };
+
+    // Update luck interval (on-chain + database)
+    const handleUpdateLuckInterval = async () => {
+        if (!project || !publicKey || !signTransaction) return;
+
+        setUpdatingLuckInterval(true);
+        try {
+            // Step 1: Build transaction via backend
+            const response = await fetch(`${backendUrl}/api/program/build-update-project-tx`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    ownerWallet: publicKey.toString(),
+                    newLuckIntervalSeconds: luckIntervalSeconds,
+                }),
+            });
+
+            const buildResult = await response.json();
+
+            if (!buildResult.success) {
+                throw new Error(buildResult.error || 'Failed to build transaction');
+            }
+
+            // Step 2: Sign and send transaction
+            const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            transaction.recentBlockhash = blockhash;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+            transaction.feePayer = publicKey;
+
+            const signedTx = await signTransaction(transaction);
+            const signature = await connection.sendRawTransaction(signedTx.serialize());
+            await connection.confirmTransaction(signature, 'confirmed');
+
+            // Step 3: Update database
+            const { error: dbError } = await supabase
+                .from('projects')
+                .update({ luck_interval_seconds: luckIntervalSeconds || null })
+                .eq('id', projectId);
+
+            if (dbError) {
+                console.warn('DB update failed:', dbError);
+            }
+
+            toast.success('Luck interval updated successfully!');
+            loadProject();
+        } catch (error) {
+            console.error('Error updating luck interval:', error);
+            toast.error(error.message || 'Failed to update luck interval');
+        } finally {
+            setUpdatingLuckInterval(false);
+        }
     };
 
     // Load withdrawal info
@@ -222,9 +303,6 @@ export default function ManageProject({ projectId }) {
                     signature,
                     withdrawalAmount: profitAmount,
                     withdrawalType: 'profits',
-                    feeAmount: buildData.fee?.amountInPlatformToken || '0',
-                    feePercentage: buildData.fee?.percentage || 2.5,
-                    exchangeRate: buildData.fee?.exchangeRate,
                 }),
             });
 
@@ -296,9 +374,6 @@ export default function ManageProject({ projectId }) {
                     signature,
                     withdrawalAmount: withdrawAmount,
                     withdrawalType: 'full_close',
-                    feeAmount: buildData.fee?.amountInPlatformToken || '0',
-                    feePercentage: buildData.fee?.percentage || 2.5,
-                    exchangeRate: buildData.fee?.exchangeRate,
                 }),
             });
 
@@ -317,6 +392,32 @@ export default function ManageProject({ projectId }) {
         }
     };
 
+    if (!connected) {
+        return (
+            <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-6">
+                <div className="max-w-3xl mx-auto">
+                    <div className="mb-8">
+                        <Link
+                            href="/dashboard"
+                            className="inline-flex items-center text-degen-blue hover:underline mb-4 text-sm uppercase tracking-wider"
+                        >
+                            Back to Dashboard
+                        </Link>
+                        <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider">Manage Project</h1>
+                    </div>
+                    <DegenCard variant="white" padding="lg" className="text-center">
+                        <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-4">
+                            Connect Your Wallet
+                        </h2>
+                        <p className="text-degen-text-muted mb-6">
+                            Please connect your wallet to manage your project.
+                        </p>
+                    </DegenCard>
+                </div>
+            </div>
+        );
+    }
+
     if (loading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-degen-bg">
@@ -332,7 +433,7 @@ export default function ManageProject({ projectId }) {
 
     return (
         <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-6">
-            <div className="max-w-4xl mx-auto">
+            <div className="max-w-3xl mx-auto">
                 {/* Header */}
                 <div className="mb-8">
                     <Link
@@ -450,6 +551,113 @@ export default function ManageProject({ projectId }) {
                             </div>
                         </div>
                     )}
+                </DegenCard>
+
+                {/* Luck Settings */}
+                <DegenCard variant="white" padding="lg" className="mb-6">
+                    <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-6">Luck Settings</h2>
+
+                    <p className="text-degen-text-muted text-sm mb-4">
+                        Control how fast luck accumulates for box holders. This determines how long users need to hold boxes to reach maximum luck.
+                    </p>
+
+                    {/* Platform Default Info */}
+                    <div className="bg-blue-50 border border-blue-200 p-3 mb-4">
+                        <p className="text-blue-800 text-sm">
+                            <strong>Platform Default:</strong> {config?.luckIntervalSeconds ? formatDuration(config.luckIntervalSeconds) : '...'} per +1 luck
+                            {config?.luckIntervalSeconds && (
+                                <span className="text-blue-600"> ({formatTimeToMaxLuck(config.luckIntervalSeconds, onChainConfig?.baseLuck, onChainConfig?.maxLuck)} to max luck)</span>
+                            )}
+                        </p>
+                    </div>
+
+                    {/* Current Setting Display */}
+                    <div className="bg-degen-bg p-4 border border-degen-black mb-4">
+                        <div className="flex justify-between items-center">
+                            <div>
+                                <p className="text-degen-text-muted text-xs uppercase mb-1">Current Setting</p>
+                                <p className="text-degen-black font-medium">
+                                    {project.luck_interval_seconds
+                                        ? `${formatDuration(project.luck_interval_seconds)} per +1 luck`
+                                        : `Platform default (${config?.luckIntervalSeconds ? formatDuration(config.luckIntervalSeconds) : '...'})`}
+                                </p>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-degen-text-muted text-xs uppercase mb-1">Time to Max Luck</p>
+                                <p className="text-degen-black font-medium">
+                                    {formatTimeToMaxLuck(project.luck_interval_seconds || config?.luckIntervalSeconds || 10800, onChainConfig?.baseLuck, onChainConfig?.maxLuck)}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Edit Luck Interval */}
+                    <div className="space-y-4">
+                        <DegenInput
+                            label="Luck Interval (seconds)"
+                            type="number"
+                            value={luckIntervalSeconds || ''}
+                            onChange={(e) => setLuckIntervalSeconds(parseInt(e.target.value) || 0)}
+                            placeholder="Leave empty to use platform default"
+                            min="0"
+                            hint="Seconds per +1 luck"
+                        />
+
+                        {/* Quick Presets */}
+                        <div className="flex flex-wrap gap-2">
+                            {/* Platform Default button */}
+                            <button
+                                type="button"
+                                onClick={() => setLuckIntervalSeconds(0)}
+                                className={`px-3 py-1 text-xs border transition-colors ${
+                                    luckIntervalSeconds === 0
+                                        ? 'bg-degen-black text-degen-white border-degen-black'
+                                        : 'bg-degen-white text-degen-black border-degen-text-light hover:border-degen-black'
+                                }`}
+                            >
+                                Platform Default ({config?.luckIntervalSeconds ? formatDuration(config.luckIntervalSeconds) : '...'})
+                            </button>
+                            {/* Other presets */}
+                            {LUCK_INTERVAL_PRESETS.slice(0, 5).map((preset) => (
+                                <button
+                                    key={preset.value}
+                                    type="button"
+                                    onClick={() => setLuckIntervalSeconds(preset.value)}
+                                    className={`px-3 py-1 text-xs border transition-colors ${
+                                        luckIntervalSeconds === preset.value
+                                            ? 'bg-degen-black text-degen-white border-degen-black'
+                                            : 'bg-degen-white text-degen-black border-degen-text-light hover:border-degen-black'
+                                    }`}
+                                >
+                                    {preset.label}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Projection */}
+                        <div className="p-3 bg-degen-container border border-degen-text-light">
+                            <div className="flex justify-between items-center">
+                                <span className="text-degen-text-muted text-sm">New time to max luck ({onChainConfig?.maxLuck ?? 60}):</span>
+                                <span className="text-degen-black font-medium">
+                                    {formatTimeToMaxLuck(luckIntervalSeconds || config?.luckIntervalSeconds || 10800, onChainConfig?.baseLuck, onChainConfig?.maxLuck)}
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Save Button */}
+                        <DegenButton
+                            onClick={handleUpdateLuckInterval}
+                            disabled={updatingLuckInterval || luckIntervalSeconds === (project.luck_interval_seconds || 0)}
+                            variant="primary"
+                            size="md"
+                        >
+                            {updatingLuckInterval ? 'Updating...' : 'Update Luck Interval'}
+                        </DegenButton>
+
+                        <p className="text-degen-text-muted text-xs">
+                            Note: This requires an on-chain transaction to update. Changes will affect all future box openings (existing unopened boxes will use the new interval when opened).
+                        </p>
+                    </div>
                 </DegenCard>
 
                 {/* Vault Withdrawal */}
@@ -599,35 +807,12 @@ export default function ManageProject({ projectId }) {
 
                                                 {/* Inline info display */}
                                                 <div className="bg-green-50 border border-green-300 p-4">
-                                                    <div className="flex flex-wrap items-center justify-between gap-4">
-                                                        <div>
-                                                            <p className="text-green-600 text-xs uppercase">Available Profit</p>
-                                                            <p className="text-green-800 font-bold text-xl">
-                                                                {parseFloat(withdrawalInfo.withdrawable.profitOnly.formatted).toLocaleString(undefined, { maximumFractionDigits: 4 })} {project.payment_token_symbol}
-                                                            </p>
-                                                        </div>
-                                                        {withdrawalInfo.feeEstimate && !withdrawalInfo.feeEstimate.error && (
-                                                            <div className="text-right">
-                                                                <p className="text-gray-500 text-xs uppercase">Platform Fee ({withdrawalInfo.feeEstimate.feePercentage}%)</p>
-                                                                <p className="text-gray-700 font-medium">
-                                                                    ~{(() => {
-                                                                        const profitAmount = parseFloat(withdrawalInfo.withdrawable.profitOnly.raw);
-                                                                        const maxAmount = parseFloat(withdrawalInfo.withdrawable.maxAmount.raw);
-                                                                        const maxFee = Number(withdrawalInfo.feeEstimate.feeInPlatformToken) / 1e9;
-                                                                        const profitFee = (profitAmount / maxAmount) * maxFee;
-                                                                        return profitFee.toLocaleString(undefined, { maximumFractionDigits: 4 });
-                                                                    })()} {withdrawalInfo.creatorFeeWallet?.tokenSymbol || '$3EYES'}
-                                                                </p>
-                                                            </div>
-                                                        )}
-                                                        {withdrawalInfo?.creatorFeeWallet && (
-                                                            <div className="text-right">
-                                                                <p className="text-gray-500 text-xs uppercase">Your {withdrawalInfo.creatorFeeWallet.tokenSymbol}</p>
-                                                                <p className="text-gray-700 font-medium">
-                                                                    {parseFloat(withdrawalInfo.creatorFeeWallet.balance.formatted).toLocaleString(undefined, { maximumFractionDigits: 4 })}
-                                                                </p>
-                                                            </div>
-                                                        )}
+                                                    <div>
+                                                        <p className="text-green-600 text-xs uppercase">Available Profit</p>
+                                                        <p className="text-green-800 font-bold text-xl">
+                                                            {parseFloat(withdrawalInfo.withdrawable.profitOnly.formatted).toLocaleString(undefined, { maximumFractionDigits: 4 })} {project.payment_token_symbol}
+                                                        </p>
+                                                        <p className="text-green-600 text-xs mt-1">No platform fee on vault withdrawals</p>
                                                     </div>
                                                 </div>
 
@@ -699,15 +884,6 @@ export default function ManageProject({ projectId }) {
                                                         )}
                                                     </ul>
                                                 </DegenWarningMessage>
-
-                                                {withdrawalInfo.feeEstimate && !withdrawalInfo.feeEstimate.error && (
-                                                    <div className="bg-gray-100 p-3 border border-gray-300 text-sm">
-                                                        <p className="text-gray-700">
-                                                            Platform fee: ~{(Number(withdrawalInfo.feeEstimate.feeInPlatformToken) / 1e9).toLocaleString(undefined, { maximumFractionDigits: 4 })} {withdrawalInfo.creatorFeeWallet?.tokenSymbol || '$3EYES'}
-                                                            <span className="text-gray-500 ml-1">({withdrawalInfo.feeEstimate.feePercentage}%)</span>
-                                                        </p>
-                                                    </div>
-                                                )}
 
                                                 {withdrawError && (
                                                     <div className="text-red-600 p-3 bg-red-50 border border-red-200 text-sm">
@@ -792,24 +968,18 @@ export default function ManageProject({ projectId }) {
                                         </DegenBadge>
                                     </div>
 
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
-                                        <div>
-                                            <p className="text-degen-text-muted text-xs uppercase">Fee Paid</p>
-                                            <p className="text-degen-black">
-                                                {parseFloat(entry.fee.amountInPlatformToken.formatted).toLocaleString(undefined, { maximumFractionDigits: 4 })} $3EYES
-                                            </p>
-                                        </div>
+                                    <div className="grid grid-cols-3 gap-3 text-sm mb-3">
                                         <div>
                                             <p className="text-degen-text-muted text-xs uppercase">Vault Before</p>
-                                            <p className="text-degen-black">{entry.vaultState.balanceBefore}</p>
+                                            <p className="text-degen-black">{entry.vaultState?.balanceBefore || '-'}</p>
                                         </div>
                                         <div>
                                             <p className="text-degen-text-muted text-xs uppercase">Vault After</p>
-                                            <p className="text-degen-black">{entry.vaultState.balanceAfter}</p>
+                                            <p className="text-degen-black">{entry.vaultState?.balanceAfter || '-'}</p>
                                         </div>
                                         <div>
                                             <p className="text-degen-text-muted text-xs uppercase">Unopened Boxes</p>
-                                            <p className="text-degen-black">{entry.vaultState.unopenedBoxes}</p>
+                                            <p className="text-degen-black">{entry.vaultState?.unopenedBoxes || '-'}</p>
                                         </div>
                                     </div>
 
@@ -826,9 +996,6 @@ export default function ManageProject({ projectId }) {
                                             </svg>
                                         </a>
                                     )}
-                                    <p className="text-degen-text-muted text-xs mt-1">
-                                        Transaction includes withdrawal + fee transfer
-                                    </p>
                                 </div>
                             ))}
                         </div>

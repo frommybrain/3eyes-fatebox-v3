@@ -19,7 +19,7 @@ import { Connection, Keypair, PublicKey, Transaction, SystemProgram, SYSVAR_RENT
 import * as anchor from '@coral-xyz/anchor';
 import BN from 'bn.js';
 import { createClient } from '@supabase/supabase-js';
-import { derivePlatformConfigPDA } from '../lib/pdaHelpers.js';
+import { derivePlatformConfigPDA, deriveTreasuryPDA } from '../lib/pdaHelpers.js';
 import { getAnchorProgram } from '../lib/anchorClient.js';
 import { getNetworkConfig } from '../lib/getNetworkConfig.js';
 
@@ -81,6 +81,11 @@ async function main() {
     console.log(`\nPlatform Config PDA: ${platformConfigPDA.toString()}`);
     console.log(`Bump: ${bump}`);
 
+    // Derive treasury PDA (for commission collection)
+    const [treasuryPDA, treasuryBump] = deriveTreasuryPDA(programId);
+    console.log(`Treasury PDA: ${treasuryPDA.toString()}`);
+    console.log(`Treasury Bump: ${treasuryBump}`);
+
     // Check if already initialized
     const existingAccount = await connection.getAccountInfo(platformConfigPDA);
     if (existingAccount) {
@@ -133,6 +138,8 @@ async function main() {
     console.log('  Tier 1 (luck 0-5): 55% dud, 30% rebate, 10% break-even, 4.5% profit, 0.5% jackpot');
     console.log('  Tier 2 (luck 6-13): 45% dud, 30% rebate, 15% break-even, 8.5% profit, 1.5% jackpot');
     console.log('  Tier 3 (luck 14-60): 30% dud, 25% rebate, 20% break-even, 20% profit, 5% jackpot');
+    console.log('  Platform commission: 5% (500 basis points)');
+    console.log(`  Treasury PDA: ${treasuryPDA.toString()}`);
 
     try {
         // Build initialize_platform_config transaction
@@ -143,8 +150,8 @@ async function main() {
             .accounts({
                 admin: adminKeypair.publicKey,
                 platformConfig: platformConfigPDA,
+                treasury: treasuryPDA,
                 systemProgram: SystemProgram.programId,
-                rent: SYSVAR_RENT_PUBKEY,
             })
             .transaction();
 

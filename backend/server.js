@@ -13,6 +13,10 @@ const app = express();
 const PORT = process.env.PORT || 3333;
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
+// Trust proxy - needed for rate limiting behind Render/Vercel/etc.
+// This tells Express to trust X-Forwarded-For headers from the proxy
+app.set('trust proxy', 1);
+
 // =============================================================================
 // SECURITY MIDDLEWARE
 // =============================================================================

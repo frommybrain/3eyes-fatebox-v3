@@ -369,6 +369,11 @@ const HEALTH_CACHE_TTL = 30000; // 30 seconds
  * Check if Switchboard oracles are healthy/reachable
  * Uses a simple DNS check for the xip.switchboard-oracles.xyz domain
  *
+ * NOTE: This only tests DNS resolution, not actual oracle connectivity.
+ * Individual oracles may still refuse connections even if DNS works.
+ * This is a "canary" check - if DNS fails, oracles are definitely down,
+ * but if DNS works, oracles might still have issues.
+ *
  * @param {string} network - 'devnet' or 'mainnet'
  * @returns {Promise<{healthy: boolean, message: string, cachedAt: number}>}
  */
@@ -403,14 +408,14 @@ export async function checkOracleHealth(network = 'devnet') {
         oracleHealthCache = {
             status: 'healthy',
             lastCheck: now,
-            message: 'Oracle service is available',
+            message: 'Oracle DNS reachable (individual oracles may vary)',
         };
 
         console.log(`[Switchboard] Oracle health check: HEALTHY`);
 
         return {
             healthy: true,
-            message: 'Oracle service is available',
+            message: 'Oracle DNS reachable',
             cachedAt: now,
             cached: false,
         };

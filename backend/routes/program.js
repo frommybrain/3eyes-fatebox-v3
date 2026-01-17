@@ -2373,15 +2373,8 @@ router.post('/build-reveal-box-tx', async (req, res) => {
             isRetryable = false;
         }
 
-        // Calculate time remaining in reveal window if box was committed
-        let timeRemainingSeconds = null;
-        if (box?.committed_at) {
-            const committedAt = new Date(box.committed_at).getTime();
-            const now = Date.now();
-            const oneHourMs = 60 * 60 * 1000;
-            const remaining = Math.max(0, oneHourMs - (now - committedAt));
-            timeRemainingSeconds = Math.floor(remaining / 1000);
-        }
+        // Note: We can't calculate time remaining here since 'box' is not in scope
+        // The frontend can re-fetch box data if needed for the countdown
 
         return res.status(500).json({
             success: false,
@@ -2390,7 +2383,6 @@ router.post('/build-reveal-box-tx', async (req, res) => {
             details: error.message,
             isRetryable,
             retryAfterSeconds,
-            timeRemainingSeconds,
         });
     }
 });

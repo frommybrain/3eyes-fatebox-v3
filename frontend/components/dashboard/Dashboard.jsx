@@ -199,7 +199,7 @@ function OracleHealthIndicator({ health, isChecking, onRefresh }) {
             onClick={onRefresh}
         >
             <div className={`w-2 h-2 rounded-full flex-shrink-0 ${statusColor} ${shouldPulse ? 'animate-pulse' : ''}`} />
-            <span className={`w-20 ${textClass}`}>
+            <span className={`w-26 ${textClass}`}>
                 {statusText}
             </span>
 

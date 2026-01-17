@@ -165,21 +165,31 @@ function MyProjectsTab({ projects, projectsLoading, projectsError }) {
 /**
  * Oracle Health Indicator - shows Switchboard oracle status
  */
-function OracleHealthIndicator({ health, onRefresh }) {
+function OracleHealthIndicator({ health, isChecking, onRefresh }) {
     const [showTooltip, setShowTooltip] = useState(false);
 
-    if (health === null) {
-        // Loading state
-        return (
-            <div className="flex items-center gap-1.5 text-xs text-degen-text-muted">
-                <div className="w-2 h-2 rounded-full bg-gray-300 animate-pulse" />
-                <span>Checking oracle...</span>
-            </div>
-        );
-    }
+    // Determine visual state
+    let statusColor, statusText, textClass, shouldPulse;
 
-    const statusColor = health.healthy ? 'bg-green-500' : 'bg-red-500';
-    const statusText = health.healthy ? 'Oracle Online' : 'Oracle Issues';
+    if (health === null || isChecking) {
+        // Loading/checking state - yellow
+        statusColor = 'bg-yellow-500';
+        statusText = isChecking ? 'Checking...' : 'Checking oracle...';
+        textClass = 'text-degen-text-muted';
+        shouldPulse = true;
+    } else if (health.healthy) {
+        // Healthy - green
+        statusColor = 'bg-green-500';
+        statusText = 'Oracle Online';
+        textClass = 'text-degen-text-muted';
+        shouldPulse = false;
+    } else {
+        // Unhealthy - red
+        statusColor = 'bg-red-500';
+        statusText = 'Oracle Issues';
+        textClass = 'text-red-600 font-medium';
+        shouldPulse = true;
+    }
 
     return (
         <div
@@ -188,13 +198,13 @@ function OracleHealthIndicator({ health, onRefresh }) {
             onMouseLeave={() => setShowTooltip(false)}
             onClick={onRefresh}
         >
-            <div className={`w-2 h-2 rounded-full ${statusColor} ${health.healthy ? '' : 'animate-pulse'}`} />
-            <span className={health.healthy ? 'text-degen-text-muted' : 'text-red-600 font-medium'}>
+            <div className={`w-2 h-2 rounded-full ${statusColor} ${shouldPulse ? 'animate-pulse' : ''}`} />
+            <span className={textClass}>
                 {statusText}
             </span>
 
             {/* Tooltip */}
-            {showTooltip && (
+            {showTooltip && !isChecking && health && (
                 <div className="absolute right-0 top-full mt-2 z-50 w-64 p-3 bg-degen-black text-white text-xs rounded shadow-lg">
                     <div className="font-medium mb-1">
                         {health.healthy ? 'Switchboard Oracle is healthy' : 'Oracle Service Issue'}
@@ -219,9 +229,11 @@ function MyBoxesTab({ walletAddress }) {
 
     // Oracle health state
     const [oracleHealth, setOracleHealth] = useState(null); // null = loading, { healthy, message }
+    const [oracleChecking, setOracleChecking] = useState(false);
 
     // Fetch oracle health
     const fetchOracleHealth = useCallback(async () => {
+        setOracleChecking(true);
         try {
             const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
             const response = await fetch(`${backendUrl}/api/oracle-health`);
@@ -234,6 +246,8 @@ function MyBoxesTab({ walletAddress }) {
         } catch (err) {
             console.error('Error checking oracle health:', err);
             setOracleHealth({ healthy: false, message: 'Unable to check oracle status' });
+        } finally {
+            setOracleChecking(false);
         }
     }, []);
 
@@ -316,7 +330,7 @@ function MyBoxesTab({ walletAddress }) {
                     </div>
                     <div className="flex items-center gap-4">
                         {/* Oracle Health Indicator */}
-                        <OracleHealthIndicator health={oracleHealth} onRefresh={fetchOracleHealth} />
+                        <OracleHealthIndicator health={oracleHealth} isChecking={oracleChecking} onRefresh={fetchOracleHealth} />
                         {isPending && (
                             <div className="text-degen-text-muted text-sm animate-pulse">
                                 Updating...

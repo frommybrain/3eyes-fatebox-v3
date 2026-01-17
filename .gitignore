@@ -5,6 +5,9 @@ node_modules/
 
 # Build outputs
 backend/program/target/
+# But keep the IDL (needed for deployment)
+!backend/program/target/idl/
+!backend/program/target/idl/lootbox_platform.json
 .next/
 out/
 build/

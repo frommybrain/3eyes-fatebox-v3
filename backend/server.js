@@ -195,37 +195,6 @@ app.get('/api/config', async (req, res) => {
 });
 
 // =============================================================================
-// ORACLE HEALTH CHECK
-// =============================================================================
-
-import { checkOracleHealth } from './lib/switchboard.js';
-
-/**
- * GET /api/oracle-health
- * Check if Switchboard oracles are reachable
- * Frontend can use this to warn users before opening boxes
- */
-app.get('/api/oracle-health', async (req, res) => {
-    try {
-        const config = await getPlatformConfig();
-        const health = await checkOracleHealth(config.network);
-
-        res.json({
-            success: true,
-            ...health,
-            network: config.network,
-        });
-    } catch (error) {
-        console.error('Error checking oracle health:', error.message);
-        res.status(500).json({
-            success: false,
-            healthy: false,
-            message: 'Failed to check oracle health',
-        });
-    }
-});
-
-// =============================================================================
 // API ROUTES
 // =============================================================================
 

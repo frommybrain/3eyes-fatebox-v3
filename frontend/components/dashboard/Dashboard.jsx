@@ -198,8 +198,8 @@ function OracleHealthIndicator({ health, isChecking, onRefresh }) {
             onMouseLeave={() => setShowTooltip(false)}
             onClick={onRefresh}
         >
-            <div className={`w-2 h-2 rounded-full ${statusColor} ${shouldPulse ? 'animate-pulse' : ''}`} />
-            <span className={textClass}>
+            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${statusColor} ${shouldPulse ? 'animate-pulse' : ''}`} />
+            <span className={`w-20 ${textClass}`}>
                 {statusText}
             </span>
 

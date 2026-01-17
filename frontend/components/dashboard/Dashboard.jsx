@@ -877,6 +877,50 @@ function BoxCard({ box, project, onRefresh }) {
         } catch (err) {
             console.error('Error revealing box:', err);
 
+            // Check if this is "already processed" error - means the reveal happened but we missed it
+            // Retry the reveal call to trigger backend's recovery flow
+            if (err.message?.includes('already been processed') || err.message?.includes('AlreadyProcessed')) {
+                console.log('Transaction already processed - retrying to trigger recovery flow...');
+                addLog('Recovering result...');
+
+                try {
+                    const retryResponse = await fetch(`${backendUrl}/api/program/build-reveal-box-tx`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            projectId: project.project_numeric_id,
+                            boxId: box.box_number,
+                            ownerWallet: walletAddress,
+                        }),
+                    });
+
+                    const retryResult = await retryResponse.json();
+
+                    if (retryResult.alreadyRevealed && retryResult.reward) {
+                        // Recovery succeeded!
+                        startBoxTransition(() => {
+                            setOptimisticBox({
+                                box_result: retryResult.reward.tier,
+                                payout_amount: retryResult.reward.payoutAmount,
+                                randomness_committed: false
+                            });
+                        });
+                        setRevealResult(retryResult.reward);
+
+                        const tierName = getTierName(retryResult.reward.tier);
+                        const payout = retryResult.reward.payoutAmount
+                            ? (retryResult.reward.payoutAmount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
+                            : '0';
+                        endTransaction(true, `Recovered: ${tierName}! Payout: ${payout} ${project.payment_token_symbol}`);
+
+                        if (onRefresh) onRefresh();
+                        return;
+                    }
+                } catch (retryErr) {
+                    console.error('Recovery retry failed:', retryErr);
+                }
+            }
+
             let errorMessage = err.message;
             if (err.logs) {
                 console.error('Transaction logs:', err.logs);

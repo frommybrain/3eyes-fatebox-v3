@@ -2196,6 +2196,72 @@ router.post('/build-reveal-box-tx', async (req, res) => {
         if (!randomnessAlreadyRevealed) {
             // Create Switchboard reveal instruction - pass owner as payer and network for crossbar fallback
             const revealIx = await createRevealInstruction(randomness, ownerPubkey, config.network);
+
+            // Re-check if randomness was revealed during the revealIx call (can take 4-5 seconds)
+            // This prevents "Transaction already processed" errors from race conditions
+            try {
+                const recheckResult = await readRandomnessValue(connection, randomnessAccountPubkey);
+                if (recheckResult.revealSlot > 0) {
+                    console.log(`   ⚠️ Race condition detected! Randomness was revealed during revealIx call`);
+                    console.log(`   Triggering recovery flow instead of returning stale transaction...`);
+
+                    // Re-read on-chain box state to get the result
+                    const boxAccountInfoRefresh = await connection.getAccountInfo(boxInstancePDA);
+                    if (boxAccountInfoRefresh) {
+                        const dataRefresh = boxAccountInfoRefresh.data;
+                        let offsetRefresh = 8 + 8 + 8 + 32 + 8 + 8; // Skip to luck
+                        const luckRefresh = dataRefresh[offsetRefresh];
+                        offsetRefresh += 1;
+                        const revealedRefresh = dataRefresh[offsetRefresh] === 1;
+                        offsetRefresh += 1;
+
+                        if (revealedRefresh) {
+                            // Parse the result same as the recovery flow above
+                            const settledRefresh = dataRefresh[offsetRefresh] === 1;
+                            offsetRefresh += 1;
+                            const rewardAmountRefresh = dataRefresh.readBigUInt64LE(offsetRefresh);
+                            offsetRefresh += 8;
+                            const isJackpotRefresh = dataRefresh[offsetRefresh] === 1;
+                            offsetRefresh += 1;
+                            const randomPercentageRefresh = dataRefresh.readDoubleLE(offsetRefresh);
+                            offsetRefresh += 8;
+                            const rewardTierOnChainRefresh = dataRefresh[offsetRefresh];
+                            const rewardTierDBRefresh = rewardTierOnChainRefresh + 1;
+
+                            // Update database
+                            await supabase
+                                .from('boxes')
+                                .update({
+                                    box_result: rewardTierDBRefresh,
+                                    payout_amount: Number(rewardAmountRefresh),
+                                    luck_value: luckRefresh,
+                                    opened_at: new Date().toISOString(),
+                                })
+                                .eq('id', box.id);
+
+                            const tierNames = ['Dud', 'Rebate', 'Break-even', 'Profit', 'Jackpot'];
+                            return res.json({
+                                success: true,
+                                alreadyRevealed: true,
+                                recovered: true,
+                                reward: {
+                                    tier: rewardTierDBRefresh,
+                                    tierName: tierNames[rewardTierOnChainRefresh] || 'Unknown',
+                                    payoutAmount: Number(rewardAmountRefresh),
+                                    isJackpot: isJackpotRefresh,
+                                    randomPercentage: randomPercentageRefresh,
+                                    luck: luckRefresh,
+                                },
+                                message: 'Race condition detected - result recovered from on-chain.',
+                            });
+                        }
+                    }
+                }
+            } catch (recheckError) {
+                // Still not revealed, continue with normal flow
+                console.log(`   Randomness still not revealed after revealIx call - continuing...`);
+            }
+
             transaction.add(revealIx);
             console.log(`   Added: Switchboard reveal instruction`);
         } else {

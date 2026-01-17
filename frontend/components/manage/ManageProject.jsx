@@ -26,7 +26,7 @@ const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333
 export default function ManageProject({ projectId }) {
     const router = useRouter();
     const { toast } = useToast();
-    const { publicKey, connected, signTransaction } = useWallet();
+    const { publicKey, connected, sendTransaction } = useWallet();
     const { connection } = useConnection();
     const { config } = useNetworkStore();
     const [project, setProject] = useState(null);
@@ -137,7 +137,7 @@ export default function ManageProject({ projectId }) {
 
     // Update luck interval (on-chain + database)
     const handleUpdateLuckInterval = async () => {
-        if (!project || !publicKey || !signTransaction) return;
+        if (!project || !publicKey || !sendTransaction) return;
 
         setUpdatingLuckInterval(true);
         try {
@@ -158,15 +158,15 @@ export default function ManageProject({ projectId }) {
                 throw new Error(buildResult.error || 'Failed to build transaction');
             }
 
-            // Step 2: Sign and send transaction
+            // Step 2: Send transaction using wallet adapter
             const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
             const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
             transaction.recentBlockhash = blockhash;
             transaction.lastValidBlockHeight = lastValidBlockHeight;
-            transaction.feePayer = publicKey;
 
-            const signedTx = await signTransaction(transaction);
-            const signature = await connection.sendRawTransaction(signedTx.serialize());
+            const signature = await sendTransaction(transaction, connection, {
+                skipPreflight: true,
+            });
             await connection.confirmTransaction(signature, 'confirmed');
 
             // Step 3: Update database
@@ -252,7 +252,7 @@ export default function ManageProject({ projectId }) {
 
     // Handle profit withdrawal (withdraws only profit, keeps project active)
     const handleWithdrawProfits = async () => {
-        if (!project || !publicKey || !signTransaction || !withdrawalInfo) return;
+        if (!project || !publicKey || !sendTransaction || !withdrawalInfo) return;
 
         // Use profit-only amount (in raw/smallest units)
         const profitAmount = withdrawalInfo.withdrawable.profitOnly.raw;
@@ -282,13 +282,16 @@ export default function ManageProject({ projectId }) {
                 throw new Error(buildData.error || 'Failed to build transaction');
             }
 
-            // Deserialize and sign transaction
+            // Deserialize and send transaction using wallet adapter
             const txBuffer = Buffer.from(buildData.transaction, 'base64');
             const transaction = Transaction.from(txBuffer);
-            const signedTx = await signTransaction(transaction);
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            transaction.recentBlockhash = blockhash;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
 
-            // Send transaction
-            const signature = await connection.sendRawTransaction(signedTx.serialize());
+            const signature = await sendTransaction(transaction, connection, {
+                skipPreflight: true,
+            });
             console.log('Profit withdrawal transaction sent:', signature);
 
             // Wait for confirmation
@@ -323,7 +326,7 @@ export default function ManageProject({ projectId }) {
 
     // Handle close project (withdraws max available and closes project)
     const handleCloseProject = async () => {
-        if (!project || !publicKey || !signTransaction || !withdrawalInfo) return;
+        if (!project || !publicKey || !sendTransaction || !withdrawalInfo) return;
 
         // Use max withdrawable amount (accounts for reserved funds)
         const withdrawAmount = withdrawalInfo.withdrawable.maxAmount.raw;
@@ -353,13 +356,16 @@ export default function ManageProject({ projectId }) {
                 throw new Error(buildData.error || 'Failed to build transaction');
             }
 
-            // Deserialize and sign transaction
+            // Deserialize and send transaction using wallet adapter
             const txBuffer = Buffer.from(buildData.transaction, 'base64');
             const transaction = Transaction.from(txBuffer);
-            const signedTx = await signTransaction(transaction);
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            transaction.recentBlockhash = blockhash;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
 
-            // Send transaction
-            const signature = await connection.sendRawTransaction(signedTx.serialize());
+            const signature = await sendTransaction(transaction, connection, {
+                skipPreflight: true,
+            });
             console.log('Close project transaction sent:', signature);
 
             // Wait for confirmation

@@ -356,6 +356,9 @@ function ProjectBoxesGroup({ projectGroup, onRefresh }) {
     const { project, boxes } = projectGroup;
     const projectUrl = getProjectUrl(project.subdomain);
 
+    // Sort boxes by box_number in reverse order (newest first)
+    const sortedBoxes = [...boxes].sort((a, b) => b.box_number - a.box_number);
+
     // Count box states
     const pendingBoxes = boxes.filter(b => b.box_result === 0).length;
     const revealedBoxes = boxes.filter(b => b.box_result !== 0).length;
@@ -391,7 +394,7 @@ function ProjectBoxesGroup({ projectGroup, onRefresh }) {
             {/* Boxes Grid */}
             <div className="p-6">
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                    {boxes.map((box) => (
+                    {sortedBoxes.map((box) => (
                         <BoxCard
                             key={box.id}
                             box={box}
@@ -495,7 +498,7 @@ function ExpiryPieClock({ expiryCountdown, formatExpiryTime }) {
 }
 
 function BoxCard({ box, project, onRefresh }) {
-    const { publicKey, signTransaction } = useWallet();
+    const { publicKey, signTransaction, sendTransaction } = useWallet();
     const { connection } = useConnection();
     const { config } = useNetworkStore();
     const { toast } = useToast();
@@ -802,7 +805,7 @@ function BoxCard({ box, project, onRefresh }) {
 
     // Handle reveal box (step 2 - after commit)
     const handleReveal = async () => {
-        if (!publicKey || !signTransaction) return;
+        if (!publicKey || !sendTransaction) return;
 
         // Check if reveal is too soon (need to wait ~10 seconds for oracle)
         if (revealCountdown > 0) {
@@ -907,31 +910,19 @@ function BoxCard({ box, project, onRefresh }) {
             const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
             transaction.recentBlockhash = blockhash;
             transaction.lastValidBlockHeight = lastValidBlockHeight;
-            transaction.feePayer = publicKey;
 
-            // Step 3: Sign with user's wallet
+            // Step 3: Send transaction using wallet adapter
             addLog('Requesting wallet signature...');
-            const signedTransaction = await signTransaction(transaction);
-
-            // Step 4: Send the signed transaction
-            addLog('Submitting to Solana...');
-            const signature = await connection.sendRawTransaction(signedTransaction.serialize(), {
-                skipPreflight: false, // Enable preflight to catch errors early
-                preflightCommitment: 'confirmed',
+            const signature = await sendTransaction(transaction, connection, {
+                skipPreflight: true,
             });
             addLog(`TX: ${signature.slice(0, 8)}...`);
 
-            // Step 5: Wait for confirmation and check for errors
+            // Step 4: Wait for confirmation
             addLog('Waiting for confirmation...');
-            const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+            await connection.confirmTransaction(signature, 'confirmed');
 
-            // Check if transaction actually succeeded
-            if (confirmation.value?.err) {
-                console.error('Transaction failed:', confirmation.value.err);
-                throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
-            }
-
-            // Step 6: Confirm with backend to read on-chain reward
+            // Step 5: Confirm with backend to read on-chain reward
             addLog('Reading on-chain result...');
             const confirmResponse = await fetch(`${backendUrl}/api/program/confirm-reveal`, {
                 method: 'POST',
@@ -1038,7 +1029,7 @@ function BoxCard({ box, project, onRefresh }) {
 
     // Handle claim reward (settle)
     const handleClaim = async () => {
-        if (!publicKey || !signTransaction) return;
+        if (!publicKey || !sendTransaction) return;
 
         setIsProcessing(true);
         setProcessingStep('claim');
@@ -1079,28 +1070,18 @@ function BoxCard({ box, project, onRefresh }) {
             transaction.recentBlockhash = blockhash;
             transaction.lastValidBlockHeight = lastValidBlockHeight;
 
-            // Step 3: Sign with user's wallet
+            // Step 3: Send transaction using wallet adapter (handles signing internally)
             addLog('Requesting wallet signature...');
-            const signedTransaction = await signTransaction(transaction);
-
-            // Step 4: Send the signed transaction
-            addLog('Submitting to Solana...');
-            const signature = await connection.sendRawTransaction(signedTransaction.serialize(), {
-                skipPreflight: false,
-                preflightCommitment: 'confirmed',
+            const signature = await sendTransaction(transaction, connection, {
+                skipPreflight: true,
             });
             addLog(`TX: ${signature.slice(0, 8)}...`);
 
-            // Step 5: Wait for confirmation and check for errors
+            // Step 4: Wait for confirmation
             addLog('Waiting for confirmation...');
-            const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+            await connection.confirmTransaction(signature, 'confirmed');
 
-            // Check if transaction actually succeeded
-            if (confirmation.value?.err) {
-                console.error('Transaction failed:', confirmation.value.err);
-                throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
-            }
-            // Step 6: Confirm with backend
+            // Step 5: Confirm with backend
             addLog('Confirming with backend...');
             await fetch(`${backendUrl}/api/program/confirm-settle`, {
                 method: 'POST',

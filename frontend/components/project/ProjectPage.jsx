@@ -35,7 +35,7 @@ export default function ProjectPage({ subdomain }) {
     const [tokenBalance, setTokenBalance] = useState(null);
 
     // Wallet hooks
-    const { publicKey, connected, signTransaction } = useWallet();
+    const { publicKey, connected, sendTransaction } = useWallet();
     const { connection } = useConnection();
 
     // Zustand stores
@@ -186,50 +186,17 @@ export default function ProjectPage({ subdomain }) {
                 const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
                 transaction.recentBlockhash = blockhash;
                 transaction.lastValidBlockHeight = lastValidBlockHeight;
-                transaction.feePayer = publicKey;
 
                 console.log('🔑 Requesting wallet signature...');
 
-                // Sign with user's wallet
-                const signedTransaction = await signTransaction(transaction);
-
-                console.log('📤 Sending signed transaction...');
-
-                // Send the signed transaction
-                // Note: We skip preflight to avoid "already processed" errors during simulation
-                // The actual transaction will still be validated by validators
-                let signature;
-                try {
-                    signature = await connection.sendRawTransaction(signedTransaction.serialize(), {
-                        skipPreflight: true, // Skip simulation to avoid "already processed" errors
-                        maxRetries: 3,
-                    });
-                    console.log('📤 Transaction sent:', signature);
-                } catch (sendError) {
-                    // Check if error is "already processed" - this means the tx succeeded
-                    if (sendError.message?.includes('already been processed') ||
-                        sendError.message?.includes('AlreadyProcessed')) {
-                        console.log('⚠️ Transaction was already processed - checking status...');
-                        // Get signature from the signed transaction
-                        // The signature is the first signature in the signatures array
-                        const txSig = signedTransaction.signatures[0];
-                        if (txSig) {
-                            signature = bs58.encode(txSig);
-                            console.log('📋 Retrieved signature from signed tx:', signature);
-                        } else {
-                            throw sendError;
-                        }
-                    } else {
-                        throw sendError;
-                    }
-                }
+                // Send transaction using wallet adapter
+                const signature = await sendTransaction(transaction, connection, {
+                    skipPreflight: true,
+                });
+                console.log('📤 Transaction sent:', signature);
 
                 // Wait for confirmation
-                const confirmation = await connection.confirmTransaction(signature, 'confirmed');
-
-                if (confirmation.value.err) {
-                    throw new Error(`Transaction ${i + 1} failed: ${JSON.stringify(confirmation.value.err)}`);
-                }
+                await connection.confirmTransaction(signature, 'confirmed');
 
                 console.log('✅ Transaction confirmed!');
 

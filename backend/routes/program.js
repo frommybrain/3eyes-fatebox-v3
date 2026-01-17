@@ -26,6 +26,7 @@ import {
     createCommitInstruction,
     createRevealInstruction,
     loadRandomness,
+    readRandomnessValue,
     serializeKeypair,
     getSwitchboardConstants,
     getSwitchboardProgram
@@ -2100,15 +2101,26 @@ router.post('/build-reveal-box-tx', async (req, res) => {
         console.log(`   Luck (locked at commit): ${lockedLuck}/60`);
 
         // ========================================
-        // SWITCHBOARD VRF: Create reveal instruction
+        // SWITCHBOARD VRF: Check if already revealed, otherwise create reveal instruction
         // ========================================
-        console.log(`\n🎰 Creating Switchboard VRF reveal instruction...`);
+        console.log(`\n🎰 Checking Switchboard VRF randomness status...`);
 
         // Load the existing randomness account
         const randomness = await loadRandomness(provider, randomnessAccountPubkey, config.network);
 
-        // Create Switchboard reveal instruction - pass owner as payer and network for crossbar fallback
-        const revealIx = await createRevealInstruction(randomness, ownerPubkey, config.network);
+        // Check if randomness is already revealed by reading the account
+        let randomnessAlreadyRevealed = false;
+        try {
+            const result = await readRandomnessValue(connection, randomnessAccountPubkey);
+            if (result.revealSlot > 0) {
+                console.log(`   ✅ Randomness already revealed at slot ${result.revealSlot}`);
+                console.log(`   Random value: ${result.randomU64}`);
+                randomnessAlreadyRevealed = true;
+            }
+        } catch (error) {
+            // Not revealed yet - this is expected
+            console.log(`   Randomness not revealed yet - will include reveal instruction`);
+        }
 
         // ========================================
         // BUILD COMBINED TRANSACTION
@@ -2117,9 +2129,15 @@ router.post('/build-reveal-box-tx', async (req, res) => {
 
         const transaction = new Transaction();
 
-        // 1. Switchboard reveal instruction (reveals the committed randomness)
-        transaction.add(revealIx);
-        console.log(`   Added: Switchboard reveal instruction`);
+        // 1. Switchboard reveal instruction (only if not already revealed)
+        if (!randomnessAlreadyRevealed) {
+            // Create Switchboard reveal instruction - pass owner as payer and network for crossbar fallback
+            const revealIx = await createRevealInstruction(randomness, ownerPubkey, config.network);
+            transaction.add(revealIx);
+            console.log(`   Added: Switchboard reveal instruction`);
+        } else {
+            console.log(`   Skipping: Switchboard reveal (already revealed)`);
+        }
 
         // 2. Our program's reveal_box instruction (reads randomness from account)
         const projectIdBN = new BN(projectId);

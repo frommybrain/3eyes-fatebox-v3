@@ -2546,11 +2546,14 @@ router.post('/confirm-reveal', async (req, res) => {
             boxId,
             signature,
             reward: {
-                amount: rewardAmount,
-                formatted: Number(rewardAmount) / Math.pow(10, project.payment_token_decimals || 9),
-                tierId: rewardTier,
+                // Use consistent field names that frontend expects
+                tier: rewardTier + 1, // Frontend expects 1-indexed (1=Dud, 2=Rebate, etc.)
                 tierName,
+                payoutAmount: Number(rewardAmount), // Raw amount in base units
+                formatted: Number(rewardAmount) / Math.pow(10, project.payment_token_decimals || 9),
                 isJackpot,
+                luck,
+                randomPercentage,
             },
             explorerUrl: `https://explorer.solana.com/tx/${signature}?cluster=${config.network}`,
         });

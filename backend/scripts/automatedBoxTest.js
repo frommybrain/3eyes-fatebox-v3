@@ -31,6 +31,8 @@ const RPC_URL = process.env.RPC_URL || 'https://api.devnet.solana.com';
 const COMMIT_COOLDOWN_MIN = 31; // Minimum seconds to wait before commit (30s + buffer)
 const COMMIT_COOLDOWN_MAX = 45; // Maximum seconds for randomization
 const REVEAL_COOLDOWN = 11; // Seconds to wait before reveal (10s + buffer)
+const TX_TIMEOUT_MS = 60000; // 60 second timeout for transaction confirmation
+const MAX_RETRIES = 3; // Max retries for each operation
 
 // Parse command line arguments
 function parseArgs() {
@@ -173,6 +175,79 @@ async function fetchWithRetry(url, options, retries = 3) {
     }
 }
 
+// Helper: Promise with timeout
+function withTimeout(promise, ms, errorMessage = 'Operation timed out') {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(errorMessage)), ms)
+        )
+    ]);
+}
+
+// Helper: Confirm transaction with timeout and retry
+async function confirmTransactionWithTimeout(connection, signature, timeoutMs = TX_TIMEOUT_MS) {
+    try {
+        await withTimeout(
+            connection.confirmTransaction(signature, 'confirmed'),
+            timeoutMs,
+            `Transaction confirmation timed out after ${timeoutMs / 1000}s`
+        );
+        return { success: true };
+    } catch (err) {
+        // Check if transaction actually succeeded despite timeout
+        try {
+            const status = await connection.getSignatureStatus(signature);
+            if (status?.value?.confirmationStatus === 'confirmed' ||
+                status?.value?.confirmationStatus === 'finalized') {
+                return { success: true };
+            }
+        } catch (statusErr) {
+            // Ignore status check errors
+        }
+        throw err;
+    }
+}
+
+// Helper: Send and confirm transaction with retries
+async function sendAndConfirmWithRetry(connection, transaction, wallet, maxRetries = MAX_RETRIES) {
+    let lastError;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            // Get fresh blockhash for each attempt
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            transaction.recentBlockhash = blockhash;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+            transaction.feePayer = wallet.publicKey;
+
+            // Re-sign with fresh blockhash
+            transaction.signatures = [];
+            transaction.sign(wallet);
+
+            const signature = await connection.sendRawTransaction(transaction.serialize(), {
+                skipPreflight: true,
+            });
+
+            await confirmTransactionWithTimeout(connection, signature);
+            return { signature, attempts: attempt };
+        } catch (err) {
+            lastError = err;
+            const isTimeout = err.message.includes('timed out');
+            const isBlockhash = err.message.includes('blockhash');
+
+            if (attempt < maxRetries && (isTimeout || isBlockhash)) {
+                console.log(`      Retry ${attempt}/${maxRetries} (${isTimeout ? 'timeout' : 'blockhash expired'})...`);
+                await sleep(2000);
+            } else {
+                throw err;
+            }
+        }
+    }
+
+    throw lastError;
+}
+
 // Get project details
 async function getProject(projectId) {
     const response = await fetchWithRetry(`${BACKEND_URL}/api/projects/by-numeric-id/${projectId}`);
@@ -192,7 +267,7 @@ async function getTokenBalance(connection, walletPubkey, tokenMint) {
     }
 }
 
-// Buy a single box
+// Buy a single box (with timeout and retry)
 async function buyBox(connection, wallet, project) {
     const walletAddress = wallet.publicKey.toString();
 
@@ -211,18 +286,9 @@ async function buyBox(connection, wallet, project) {
         throw new Error(`Build failed: ${buildResult.error}`);
     }
 
-    // Sign and send
+    // Sign and send with retry logic
     const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-    transaction.recentBlockhash = blockhash;
-    transaction.lastValidBlockHeight = lastValidBlockHeight;
-    transaction.feePayer = wallet.publicKey;
-    transaction.sign(wallet);
-
-    const signature = await connection.sendRawTransaction(transaction.serialize(), {
-        skipPreflight: true,
-    });
-    await connection.confirmTransaction(signature, 'confirmed');
+    const { signature } = await sendAndConfirmWithRetry(connection, transaction, wallet);
 
     // Confirm with backend
     const confirmResponse = await fetchWithRetry(`${BACKEND_URL}/api/program/confirm-box-creation`, {
@@ -268,21 +334,46 @@ async function commitBox(connection, wallet, project, boxNumber) {
         throw new Error(`Commit build failed: ${buildResult.error}`);
     }
 
-    // Sign and send with randomness keypair
+    // Sign and send with randomness keypair (with timeout and retry)
     const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
     const randomnessKeypair = Keypair.fromSecretKey(Buffer.from(buildResult.randomnessKeypair, 'base64'));
 
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-    transaction.recentBlockhash = blockhash;
-    transaction.lastValidBlockHeight = lastValidBlockHeight;
-    transaction.feePayer = wallet.publicKey;
-    transaction.partialSign(wallet);
-    transaction.partialSign(randomnessKeypair);
+    let signature;
+    let lastError;
 
-    const signature = await connection.sendRawTransaction(transaction.serialize(), {
-        skipPreflight: true,
-    });
-    await connection.confirmTransaction(signature, 'confirmed');
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            transaction.recentBlockhash = blockhash;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+            transaction.feePayer = wallet.publicKey;
+
+            // Clear previous signatures and re-sign
+            transaction.signatures = [];
+            transaction.partialSign(wallet);
+            transaction.partialSign(randomnessKeypair);
+
+            signature = await connection.sendRawTransaction(transaction.serialize(), {
+                skipPreflight: true,
+            });
+
+            await confirmTransactionWithTimeout(connection, signature);
+            break; // Success
+        } catch (err) {
+            lastError = err;
+            const isTimeout = err.message.includes('timed out');
+            const isBlockhash = err.message.includes('blockhash');
+
+            if (attempt < MAX_RETRIES && (isTimeout || isBlockhash)) {
+                console.log(`      Commit retry ${attempt}/${MAX_RETRIES}...`);
+                await sleep(2000);
+            } else {
+                throw err;
+            }
+        }
+    }
+
+    if (!signature) throw lastError;
 
     // Confirm with backend
     await fetchWithRetry(`${BACKEND_URL}/api/program/confirm-commit`, {
@@ -327,18 +418,9 @@ async function revealBox(connection, wallet, project, boxNumber) {
         throw new Error(`Reveal build failed: ${buildResult.error}`);
     }
 
-    // Sign and send
+    // Sign and send with retry logic
     const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-    transaction.recentBlockhash = blockhash;
-    transaction.lastValidBlockHeight = lastValidBlockHeight;
-    transaction.feePayer = wallet.publicKey;
-    transaction.sign(wallet);
-
-    const signature = await connection.sendRawTransaction(transaction.serialize(), {
-        skipPreflight: true,
-    });
-    await connection.confirmTransaction(signature, 'confirmed');
+    const { signature } = await sendAndConfirmWithRetry(connection, transaction, wallet);
 
     // Confirm with backend to get reward
     const confirmResponse = await fetchWithRetry(`${BACKEND_URL}/api/program/confirm-reveal`, {
@@ -360,7 +442,7 @@ async function revealBox(connection, wallet, project, boxNumber) {
     };
 }
 
-// Settle a box
+// Settle a box (with timeout and retry)
 async function settleBox(connection, wallet, project, boxNumber) {
     const walletAddress = wallet.publicKey.toString();
 
@@ -380,18 +462,9 @@ async function settleBox(connection, wallet, project, boxNumber) {
         throw new Error(`Settle build failed: ${buildResult.error}`);
     }
 
-    // Sign and send
+    // Sign and send with retry logic
     const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-    transaction.recentBlockhash = blockhash;
-    transaction.lastValidBlockHeight = lastValidBlockHeight;
-    transaction.feePayer = wallet.publicKey;
-    transaction.sign(wallet);
-
-    const signature = await connection.sendRawTransaction(transaction.serialize(), {
-        skipPreflight: true,
-    });
-    await connection.confirmTransaction(signature, 'confirmed');
+    const { signature } = await sendAndConfirmWithRetry(connection, transaction, wallet);
 
     // Confirm with backend
     await fetchWithRetry(`${BACKEND_URL}/api/program/confirm-settle`, {

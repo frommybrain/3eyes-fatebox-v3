@@ -3,11 +3,16 @@
 // Example: catbox.degenbox.fun → /project/catbox
 
 import ProjectPage from '@/components/project/ProjectPage';
+import BetaGate from '@/components/auth/BetaGate';
 
 export default async function Project({ params }) {
     const { subdomain } = await params;
 
-    return <ProjectPage subdomain={subdomain} />;
+    return (
+        <BetaGate>
+            <ProjectPage subdomain={subdomain} />
+        </BetaGate>
+    );
 }
 
 // Generate metadata for SEO (optional but recommended)

@@ -1,6 +1,6 @@
 # 3Eyes FateBox v3 - Master Project Specification
 
-**Last Updated:** January 18, 2026 (Updated: Refund System)
+**Last Updated:** January 18, 2026 (Updated: VRF Rent Reclaim)
 **Version:** 3.0 (Development)
 **Network:** Devnet (Solana)
 
@@ -648,6 +648,7 @@ See **[/database/current_schema_130126_1337.sql](/database/current_schema_130126
 15. `016_add_refund_columns.sql` - Add refund tracking columns (refund_eligible, reveal_failure_reason, etc.)
 16. `017_add_refund_tx_signature.sql` - Add refund_tx_signature column
 17. `018_allow_refunded_box_result.sql` - Update valid_box_result constraint to allow value 6 (REFUNDED)
+18. `019_add_randomness_closed_column.sql` - Track if Switchboard randomness account was closed (rent reclaimed)
 
 ---
 
@@ -1435,7 +1436,47 @@ const commitIx = await randomness.commitIx(queue, authority);
 
 // Reveal - SDK contacts the SAME oracle that committed
 const revealIx = await randomness.revealIx(payer);
+
+// Close - reclaim rent after reveal completes
+const closeIx = await randomness.closeIx();
 ```
+
+### Randomness Account Lifecycle & Rent Reclaim
+
+Each VRF request creates a temporary randomness account that costs ~0.006 SOL in rent. To minimize costs for users, we close the account after reveal to reclaim this rent.
+
+**Transaction Order (Critical):**
+```
+revealIx → reveal_box (on-chain) → closeIx
+```
+
+The close instruction MUST come AFTER the `reveal_box` instruction reads the randomness value. If closed too early, the on-chain program can't read the random data.
+
+**Implementation:**
+
+```javascript
+// In build-reveal-box-tx endpoint
+const revealIx = await createRevealInstruction(randomness, buyerWallet, network);
+transaction.add(revealIx);
+transaction.add(revealBoxInstruction);
+
+// Close after reveal_box reads the randomness
+const closeIx = await createCloseInstruction(randomness);
+transaction.add(closeIx);
+```
+
+**Cost Breakdown per Box (with rent reclaim):**
+| Component | Cost |
+|-----------|------|
+| Randomness Account Rent | ~0.006 SOL (temporary) |
+| Oracle Fee | ~0.002 SOL |
+| Transaction Fees | ~0.00001 SOL |
+| **Rent Reclaimed** | **+0.006 SOL** |
+| **Net Cost** | **~0.002 SOL** |
+
+**Database Tracking:**
+- `boxes.randomness_closed` (boolean) - tracks if rent was reclaimed
+- Migration: `019_add_randomness_closed_column.sql`
 
 ### Important Notes
 

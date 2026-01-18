@@ -1,7 +1,8 @@
-// app/create/page.js
+// app/dashboard/create/page.js
 // Create new project flow
 
 import CreateProject from '@/components/create/CreateProject';
+import BetaGate from '@/components/auth/BetaGate';
 
 export const metadata = {
     title: 'Create Project | DegenBox',
@@ -9,5 +10,9 @@ export const metadata = {
 };
 
 export default function CreatePage() {
-    return <CreateProject />;
+    return (
+        <BetaGate>
+            <CreateProject />
+        </BetaGate>
+    );
 }

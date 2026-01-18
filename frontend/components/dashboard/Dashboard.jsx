@@ -24,6 +24,11 @@ import {
     useTransaction,
 } from '@/components/ui';
 
+// ===== TESTING CONFIG =====
+// Set to 30 for quick testing, 3600 for production (1 hour)
+const REVEAL_WINDOW_SECONDS = 3600;
+// ===========================
+
 export default function Dashboard() {
     const { publicKey, connected } = useWallet();
     const searchParams = useSearchParams();
@@ -316,12 +321,57 @@ function ProjectBoxesGroup({ projectGroup, onRefresh }) {
     );
 }
 
+// Question mark tooltip component for explanations
+function QuestionMarkTooltip({ children, variant = 'info' }) {
+    const [showTooltip, setShowTooltip] = useState(false);
+
+    const handleClick = (e) => {
+        e.stopPropagation();
+        setShowTooltip(prev => !prev);
+    };
+
+    const handleClose = (e) => {
+        e.stopPropagation();
+        setShowTooltip(false);
+    };
+
+    // Color variants
+    const colors = {
+        info: 'bg-degen-blue text-white',
+        warning: 'bg-degen-yellow text-degen-black',
+        danger: 'bg-red-500 text-white',
+        refund: 'bg-degen-black text-white'
+    };
+
+    return (
+        <div className="relative inline-block">
+            <button
+                onClick={handleClick}
+                className={`w-4 h-4 rounded-full flex items-center justify-center text-xs font-bold cursor-pointer ${colors[variant]}`}
+                title="Click for info"
+            >
+                ?
+            </button>
+            {showTooltip && (
+                <>
+                    <div className="fixed inset-0 z-10" onClick={handleClose} />
+                    <div className="absolute right-0 top-full mt-1 z-20 w-48 bg-degen-white border border-degen-black shadow-lg">
+                        <div className="px-3 py-2 text-xs text-degen-black">
+                            {children}
+                        </div>
+                    </div>
+                </>
+            )}
+        </div>
+    );
+}
+
 // Pie clock timer component for expiry countdown
 function ExpiryPieClock({ expiryCountdown, formatExpiryTime }) {
     const [showTooltip, setShowTooltip] = useState(false);
 
     // Calculate remaining time as a fraction (1 = full, 0 = empty)
-    const totalSeconds = 60 * 60; // 1 hour
+    const totalSeconds = REVEAL_WINDOW_SECONDS;
     const remaining = expiryCountdown > 0 ? (expiryCountdown / totalSeconds) : 0;
 
     // SVG arc calculation for pie slice
@@ -438,10 +488,14 @@ function BoxCard({ box, project, onRefresh }) {
     const isPending = displayBox.box_result === 0 && !displayBox.randomness_committed;
     const hasReward = displayBox.payout_amount > 0;
     const isJackpot = displayBox.box_result === 5;
+    const isRefunded = displayBox.box_result === 6;
+    // Use actual box prop for refund_eligible (not optimistic state) since it's set by backend
+    // Also check optimistic state in case we just marked it eligible in this session
+    const isRefundEligible = (box.refund_eligible === true || displayBox.refund_eligible === true) && !isRefunded;
 
-    // Check if commit has expired (1 hour limit)
+    // Check if commit has expired (uses REVEAL_WINDOW_SECONDS config)
     const isExpired = isCommitted && box.committed_at &&
-        (Date.now() - new Date(box.committed_at).getTime() > 60 * 60 * 1000);
+        (Date.now() - new Date(box.committed_at).getTime() > REVEAL_WINDOW_SECONDS * 1000);
 
     // Cooldown timer for pending boxes (must wait 30s after purchase before opening)
     useEffect(() => {
@@ -472,7 +526,7 @@ function BoxCard({ box, project, onRefresh }) {
 
         const committedTime = new Date(box.committed_at).getTime();
         const REVEAL_DELAY = 10 * 1000; // 10 seconds before reveal enabled (oracles need time to process)
-        const EXPIRY_TIME = 60 * 60 * 1000; // 1 hour
+        const EXPIRY_TIME = REVEAL_WINDOW_SECONDS * 1000;
 
         const updateCountdowns = () => {
             const now = Date.now();
@@ -547,11 +601,19 @@ function BoxCard({ box, project, onRefresh }) {
             });
         }
 
-        // Settle/Claim transaction (if claimed)
-        if (box.settle_tx_signature) {
+        // Settle/Claim transaction (if claimed, not refunded)
+        if (box.settle_tx_signature && !isRefunded) {
             items.push({
                 label: 'Claim Tx',
                 onClick: () => window.open(getSolscanTxUrl(box.settle_tx_signature), '_blank'),
+            });
+        }
+
+        // Refund transaction (if refunded)
+        if (box.refund_tx_signature) {
+            items.push({
+                label: 'Refund Tx',
+                onClick: () => window.open(getSolscanTxUrl(box.refund_tx_signature), '_blank'),
             });
         }
 
@@ -563,8 +625,8 @@ function BoxCard({ box, project, onRefresh }) {
             });
         }
 
-        // If revealed, show the result details
-        if (isRevealed && (box.luck_value !== undefined || box.random_percentage !== undefined)) {
+        // If revealed (and not refunded), show the result details
+        if (isRevealed && !isRefunded && (box.luck_value !== undefined || box.random_percentage !== undefined)) {
             items.push({
                 label: `Luck: ${box.luck_value || '?'}/${box.max_luck || '?'}`,
                 onClick: () => { },
@@ -581,7 +643,7 @@ function BoxCard({ box, project, onRefresh }) {
     };
 
     // Get tier name from result
-    // DB values: 0=pending, 1=dud, 2=rebate, 3=break-even, 4=profit, 5=jackpot
+    // DB values: 0=pending, 1=dud, 2=rebate, 3=break-even, 4=profit, 5=jackpot, 6=refunded
     const getTierName = (result) => {
         switch (result) {
             case 1: return 'Dud';
@@ -589,6 +651,7 @@ function BoxCard({ box, project, onRefresh }) {
             case 3: return 'Break-even';
             case 4: return 'Profit';
             case 5: return 'Jackpot';
+            case 6: return 'Refunded';
             default: return 'Pending';
         }
     };
@@ -752,6 +815,36 @@ function BoxCard({ box, project, onRefresh }) {
                         ? ` Try again in ${buildResult.retryAfterSeconds} seconds.`
                         : ' Please try again shortly.';
 
+                    // If less than 5 minutes remaining and oracle still failing, mark as refund-eligible
+                    if (timeRemaining && timeRemaining < 300) {
+                        try {
+                            const markResponse = await fetch(`${backendUrl}/api/program/mark-reveal-failed`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    projectId: project.project_numeric_id,
+                                    boxId: box.box_number,
+                                    ownerWallet: walletAddress,
+                                    failureReason: `oracle_unavailable: ${buildResult.error}`,
+                                }),
+                            });
+                            const markResult = await markResponse.json();
+                            if (markResult.success) {
+                                console.log('Box marked as refund-eligible due to oracle failure');
+                                // Update optimistic state to immediately show refund button
+                                startBoxTransition(() => {
+                                    setOptimisticBox({ refund_eligible: true });
+                                });
+                                // Show refund available message instead of retry message
+                                setError('Oracle unavailable. A refund is now available for this box.');
+                                endTransaction(false, 'Refund available');
+                                return;
+                            }
+                        } catch (markErr) {
+                            console.error('Failed to mark box as refund-eligible:', markErr);
+                        }
+                    }
+
                     const fullErrorMsg = buildResult.error + timeMsg + retryMsg;
                     setError(fullErrorMsg);
                     endTransaction(false, 'Oracle temporarily unavailable');
@@ -904,10 +997,44 @@ function BoxCard({ box, project, onRefresh }) {
             if (err.message?.includes('custom program error')) {
                 errorMessage = `Program error: ${err.message}`;
             }
-            // Provide helpful message for Switchboard errors
-            if (err.message?.includes('0x1780') || err.message?.includes('InvalidSecpSignature')) {
-                errorMessage = 'Switchboard oracle error. Please wait a few seconds and try again.';
+
+            // Check if this is a user-caused error (they let the box expire)
+            // Only user-caused expiry should NOT be refund-eligible
+            const isUserCausedExpiry = err.message?.includes('expired') ||
+                                       err.message?.includes('Expired');
+
+            // Any reveal failure that isn't user-caused expiry should be refund-eligible
+            // This includes: oracle errors, network issues, backend failures, etc.
+            if (!isUserCausedExpiry) {
+                errorMessage = 'System error during reveal. Please try again. If the issue persists and time runs out, a refund will be available.';
+
+                // Mark box as refund-eligible for any system error
+                try {
+                    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+                    const markResponse = await fetch(`${backendUrl}/api/program/mark-reveal-failed`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            projectId: project.project_numeric_id,
+                            boxId: box.box_number,
+                            ownerWallet: walletAddress,
+                            failureReason: `system_error: ${err.message?.substring(0, 200)}`,
+                        }),
+                    });
+                    const markResult = await markResponse.json();
+                    if (markResult.success) {
+                        console.log('Box marked as refund-eligible due to system error');
+                        // Update optimistic state to immediately show refund button
+                        startBoxTransition(() => {
+                            setOptimisticBox({ refund_eligible: true });
+                        });
+                        errorMessage = 'System error occurred. A refund is now available for this box.';
+                    }
+                } catch (markErr) {
+                    console.error('Failed to mark box as refund-eligible:', markErr);
+                }
             }
+
             setError(errorMessage);
             setRevealResult(null);
             endTransaction(false, errorMessage);
@@ -1007,9 +1134,104 @@ function BoxCard({ box, project, onRefresh }) {
         }
     };
 
+    // Handle refund (for boxes that failed due to system issues)
+    const handleRefund = async () => {
+        if (!publicKey || !sendTransaction) return;
+
+        setIsProcessing(true);
+        setProcessingStep('refund');
+        setError(null);
+
+        startTransaction(`Refunding Box #${box.box_number}...`);
+
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+
+            // Step 1: Build refund transaction
+            addLog('Building refund transaction...');
+            const buildResponse = await fetch(`${backendUrl}/api/program/build-refund-box-tx`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    ownerWallet: walletAddress,
+                }),
+            });
+
+            const buildResult = await buildResponse.json();
+
+            if (!buildResult.success) {
+                throw new Error(buildResult.details || buildResult.error);
+            }
+            addLog('Transaction built');
+
+            // Step 2: Deserialize transaction and update blockhash
+            const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            transaction.recentBlockhash = blockhash;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+
+            // Step 3: Send transaction using wallet adapter
+            addLog('Requesting wallet signature...');
+            const signature = await sendTransaction(transaction, connection, {
+                skipPreflight: true,
+            });
+            addLog(`TX: ${signature.slice(0, 8)}...`);
+
+            // Step 4: Wait for confirmation
+            addLog('Waiting for confirmation...');
+            await connection.confirmTransaction(signature, 'confirmed');
+
+            // Step 5: Confirm with backend
+            addLog('Confirming refund...');
+            await fetch(`${backendUrl}/api/program/confirm-refund`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    ownerWallet: walletAddress,
+                    signature,
+                }),
+            });
+
+            // Optimistic update
+            startBoxTransition(() => {
+                setOptimisticBox({
+                    box_result: 6,
+                    refund_eligible: false,
+                    payout_amount: buildResult.refundAmount
+                });
+            });
+
+            const refundFormatted = buildResult.refundAmount
+                ? (buildResult.refundAmount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
+                : payoutFormatted;
+
+            endTransaction(true, `Refunded ${refundFormatted} ${project.payment_token_symbol}!`);
+            toast.success(`Successfully refunded ${refundFormatted} ${project.payment_token_symbol}!`);
+            if (onRefresh) onRefresh();
+
+        } catch (err) {
+            console.error('Error refunding box:', err);
+            let errorMessage = err.message;
+            if (err.logs) {
+                console.error('Transaction logs:', err.logs);
+            }
+            setError(errorMessage);
+            endTransaction(false, errorMessage);
+        } finally {
+            setIsProcessing(false);
+            setProcessingStep(null);
+        }
+    };
+
     // Get box status text (no emojis)
     const getBoxStatusText = () => {
         if (isProcessing) return 'Processing';
+        if (isRefunded) return 'Refunded';
+        if (isRefundEligible) return 'Refund Available';
         if (isExpired) return 'Expired';
         if (isCommitted) return 'Opened';
         if (isPending) return 'Sealed';
@@ -1039,17 +1261,19 @@ function BoxCard({ box, project, onRefresh }) {
                 relative p-4 text-center transition-all duration-100
                 border
                 ${isPending ? 'bg-degen-yellow/10 border-degen-yellow hover:bg-degen-yellow/20' : ''}
-                ${isCommitted && !isExpired ? 'bg-degen-yellow/10 border-degen-yellow hover:bg-degen-yellow/20' : ''}
-                ${isExpired ? 'bg-degen-feature/10 border-degen-feature' : ''}
+                ${isCommitted && !isExpired && !isRefundEligible ? 'bg-degen-yellow/10 border-degen-yellow hover:bg-degen-yellow/20' : ''}
+                ${isRefundEligible ? 'bg-degen-container border-degen-black' : ''}
+                ${isRefunded ? 'bg-degen-container border-degen-black' : ''}
+                ${isExpired && !isRefundEligible ? 'bg-degen-feature/10 border-degen-feature' : ''}
                 ${isJackpot ? 'bg-degen-yellow/20 border-degen-yellow' : ''}
-                ${hasReward && !isJackpot ? 'bg-degen-green/10 border-degen-green hover:bg-degen-green/20' : ''}
-                ${isRevealed && !hasReward ? 'bg-degen-container border-degen-black hover:bg-degen-white' : ''}
+                ${hasReward && !isJackpot && !isRefunded ? 'bg-degen-green/10 border-degen-green hover:bg-degen-green/20' : ''}
+                ${isRevealed && !hasReward && !isRefunded && !isRefundEligible ? 'bg-degen-container border-degen-black hover:bg-degen-white' : ''}
             `}
         >
-            {/* Top right icons: Pie clock (for committed) + Proof Menu Dropdown */}
+            {/* Top right icons: Pie clock (for committed, not refund-eligible) + Proof Menu Dropdown */}
             <div className="absolute top-1 right-1 flex items-center gap-1">
-                {/* Pie clock for committed boxes */}
-                {isCommitted && !isExpired && expiryCountdown !== null && expiryCountdown > 0 && (
+                {/* Pie clock for committed boxes - hide if refund-eligible */}
+                {isCommitted && !isExpired && !isRefundEligible && expiryCountdown !== null && expiryCountdown > 0 && (
                     <ExpiryPieClock expiryCountdown={expiryCountdown} formatExpiryTime={formatExpiryTime} />
                 )}
                 {/* Proof Menu Dropdown */}
@@ -1069,10 +1293,44 @@ function BoxCard({ box, project, onRefresh }) {
                 <DegenBadge variant="warning" size="sm" className="mt-2">
                     Ready to Open
                 </DegenBadge>
+            ) : isRefundEligible ? (
+                <div className="mt-2">
+                    <div className="flex items-center justify-center gap-1">
+                        <DegenBadge variant="default" size="sm">
+                            Refund Available
+                        </DegenBadge>
+                        <QuestionMarkTooltip variant="info">
+                            <strong>System Error</strong><br />
+                            This box failed to reveal due to an oracle or network issue - not your fault. You can claim a full refund of the box price.
+                            {box.reveal_failure_reason && (
+                                <><br /><br /><em>Reason: {box.reveal_failure_reason}</em></>
+                            )}
+                        </QuestionMarkTooltip>
+                    </div>
+                </div>
+            ) : isRefunded ? (
+                <div className="mt-2">
+                    <DegenBadge variant="default" size="sm">
+                        Refunded
+                    </DegenBadge>
+                    {box.payout_amount > 0 && (
+                        <p className="text-degen-text-muted text-xs mt-1 font-medium">
+                            {payoutFormatted} {project.payment_token_symbol}
+                        </p>
+                    )}
+                </div>
             ) : isExpired ? (
-                <DegenBadge variant="danger" size="sm" className="mt-2">
-                    Expired - Dud
-                </DegenBadge>
+                <div className="mt-2">
+                    <div className="flex items-center justify-center gap-1">
+                        <DegenBadge variant="danger" size="sm">
+                            Expired - Dud
+                        </DegenBadge>
+                        <QuestionMarkTooltip variant="danger">
+                            <strong>Reveal Window Expired</strong><br />
+                            This box was opened but not revealed within the 1-hour time limit. Boxes must be revealed promptly after opening to claim rewards.
+                        </QuestionMarkTooltip>
+                    </div>
+                </div>
             ) : isCommitted ? (
                 <div className="mt-2">
                     <DegenBadge variant="warning" size="sm">
@@ -1084,7 +1342,7 @@ function BoxCard({ box, project, onRefresh }) {
                     <DegenBadge variant={getTierBadgeVariant()} size="sm">
                         {getTierName(box.box_result)}
                     </DegenBadge>
-                    {hasReward && (
+                    {hasReward && !isRefunded && (
                         <p className="text-degen-black text-xs mt-1 font-medium">
                             {payoutFormatted} {project.payment_token_symbol}
                         </p>
@@ -1140,6 +1398,18 @@ function BoxCard({ box, project, onRefresh }) {
                             </span>
                         </button>
                     </div>
+                ) : isRefundEligible ? (
+                    // Refund available - show refund button (same style as dud/default)
+                    <button
+                        onClick={handleRefund}
+                        disabled={isProcessing}
+                        className="w-full px-4 py-2 text-sm font-medium uppercase tracking-wider bg-degen-black text-degen-white border border-degen-black hover:bg-degen-primary transition-all duration-100"
+                    >
+                        {isProcessing && processingStep === 'refund' ? 'Refunding...' : 'Claim Refund'}
+                    </button>
+                ) : isRefunded ? (
+                    // Already refunded
+                    <span className="text-degen-text-muted text-xs font-medium">Refund claimed</span>
                 ) : isExpired ? (
                     // Expired - show dud state
                     <span className="text-degen-text-muted text-xs">Reveal window expired</span>

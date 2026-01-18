@@ -1,6 +1,6 @@
 # 3Eyes FateBox v3 - Master Project Specification
 
-**Last Updated:** January 17, 2026 (Updated: Oracle Health Check)
+**Last Updated:** January 18, 2026 (Updated: Refund System)
 **Version:** 3.0 (Development)
 **Network:** Devnet (Solana)
 
@@ -153,6 +153,7 @@ The Anchor IDL auto-generates TypeScript types and is used by the backend for in
 | `commit_box` | User opens box, commits VRF | owner, platformConfig, boxInstance |
 | `reveal_box` | Reveal with VRF randomness | owner, platformConfig, boxInstance, randomnessAccount |
 | `settle_box` | Transfer reward to user | owner, projectConfig, boxInstance, vaultTokenAccount |
+| `refund_box` | Refund box price to user (system errors) | owner, projectConfig, boxInstance, vaultTokenAccount |
 | `withdraw_earnings` | Creator withdraws from vault | owner, projectConfig, vaultTokenAccount |
 | `withdraw_treasury` | Admin withdraws from treasury | admin, platformConfig, treasury, treasuryTokenAccount |
 | `update_project` | Pause/resume, change price, update luck interval | owner, projectConfig |
@@ -333,6 +334,9 @@ Checks if Switchboard oracles are reachable by testing DNS resolution for the xi
 | POST | `/confirm-reveal` | Record reveal (reads on-chain result) |
 | POST | `/build-settle-box-tx` | Build claim transaction |
 | POST | `/confirm-settle` | Record settlement |
+| POST | `/mark-reveal-failed` | Mark box as refund-eligible (system error) |
+| POST | `/build-refund-box-tx` | Build refund transaction |
+| POST | `/confirm-refund` | Verify on-chain refund, update database |
 | POST | `/derive-pdas` | Derive all PDAs for a project |
 | GET | `/project/:projectId` | Get on-chain project state |
 | GET | `/box/:projectId/:boxId` | Get on-chain box state |
@@ -554,8 +558,10 @@ settled_at: timestamp
 | 3 | Break-even | 2 | 1.0x box price |
 | 4 | Profit | 3 | 2.5x box price |
 | 5 | Jackpot | 4 | 10x box price |
+| 6 | Refunded | 6 | Full refund (system error) |
 
 **Formula:** `DB value = On-chain tier + 1` (to reserve 0 for pending state)
+**Exception:** Refunded uses value 6 in both DB and on-chain (migration 018)
 
 **Code checks:**
 - `box_result === 0` → Box is pending/not revealed
@@ -639,6 +645,9 @@ See **[/database/current_schema_130126_1337.sql](/database/current_schema_130126
 12. `013_add_project_luck_interval.sql` - Per-project luck interval column
 13. `014_activity_logs.sql` - Enterprise activity logging system
 14. `015_remove_withdrawal_fee_percentage.sql` - Remove deprecated withdrawal_fee_percentage column
+15. `016_add_refund_columns.sql` - Add refund tracking columns (refund_eligible, reveal_failure_reason, etc.)
+16. `017_add_refund_tx_signature.sql` - Add refund_tx_signature column
+17. `018_allow_refunded_box_result.sql` - Update valid_box_result constraint to allow value 6 (REFUNDED)
 
 ---
 
@@ -1104,6 +1113,7 @@ The platform uses a **no-dud model** for normal gameplay, providing a better pla
 | Break-even | 1.0x | 2 | 3 | Get your money back |
 | Profit | 1.5x | 3 | 4 | 50% profit |
 | Jackpot | 4x | 4 | 5 | Big win |
+| Refunded | 1.0x | 6 | 6 | System error refund (full box price) |
 
 **Note:** DB values are on-chain tier + 1 (0 is reserved for "pending/unrevealed" in DB)
 
@@ -1209,6 +1219,123 @@ if (now - committedAtTime > oneHourMs) {
 ```
 
 This is the **only scenario where duds occur** - it's a penalty for user inaction, not random bad luck.
+
+### Refund System (System Error Recovery)
+
+The platform includes a comprehensive refund system for boxes that fail due to system errors (oracle failures, network issues, etc.) - NOT user inaction.
+
+**Key Principle:** Any error that isn't the user failing to reveal within the 1-hour window qualifies for a refund.
+
+#### Dud vs Refund
+
+| Scenario | Result | User's Fault? |
+|----------|--------|---------------|
+| User didn't reveal within 1 hour | Dud (0x) | Yes |
+| Oracle unavailable during reveal | Refund (1x) | No |
+| Network error during reveal | Refund (1x) | No |
+| Switchboard DNS failure | Refund (1x) | No |
+| Backend error during reveal | Refund (1x) | No |
+
+#### Refund Flow
+
+```
+1. Box commit succeeds (user opens box)
+       ↓
+2. Reveal fails due to system error (oracle/network)
+       ↓
+3. Backend marks box as refund_eligible = true
+   (immediately, no 1-hour wait needed)
+       ↓
+4. Frontend shows "Refund Available" button
+       ↓
+5. User clicks "Claim Refund"
+       ↓
+6. Frontend: POST /api/program/build-refund-box-tx
+       ↓
+7. On-chain: refund_box instruction
+   - Returns full box price to user
+   - Sets reward_tier = 6 (REFUNDED)
+   - Marks box as settled
+       ↓
+8. Frontend: POST /api/program/confirm-refund
+       ↓
+9. Backend: Verifies on-chain state (reward_tier === 6)
+   - Updates database: box_result = 6
+   - Records refund_tx_signature
+```
+
+#### On-Chain Implementation
+
+**In `refund_box` instruction:**
+```rust
+// Transfer full box price back to user
+let box_price = project_config.box_price;
+transfer(ctx.accounts.vault_to_owner_context(), box_price)?;
+
+// Mark as refunded
+box_instance.reward_tier = 6;  // REFUNDED
+box_instance.reward_amount = box_price;
+box_instance.settled = true;
+box_instance.revealed = true;
+```
+
+**Note:** The refund instruction does NOT check the 1-hour reveal window. Refund eligibility is determined off-chain based on system error detection.
+
+#### Backend Endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /api/program/mark-reveal-failed` | Mark box as refund-eligible (called on system errors) |
+| `POST /api/program/build-refund-box-tx` | Build refund transaction |
+| `POST /api/program/confirm-refund` | Verify on-chain refund and update database |
+
+#### On-Chain Verification (Security)
+
+The `confirm-refund` endpoint verifies the refund actually happened on-chain before updating the database:
+
+```javascript
+// Read on-chain box state
+const onChainBox = await program.account.boxInstance.fetch(boxInstancePDA);
+
+// Verify refund occurred
+if (onChainBox.rewardTier !== 6 || !onChainBox.settled) {
+    return res.status(400).json({
+        error: 'On-chain refund not confirmed'
+    });
+}
+
+// Only then update database
+await supabase.from('boxes').update({ box_result: 6 });
+```
+
+#### Database Schema
+
+Refund-related columns in `boxes` table:
+- `refund_eligible: boolean` - Set by backend when system error detected
+- `reveal_failure_reason: text` - Reason for failure (e.g., "oracle_unavailable: DNS error")
+- `reveal_failed_at: timestamp` - When failure occurred
+- `refund_tx_signature: text` - Solana transaction signature for refund
+- `refunded_at: timestamp` - When refund was processed
+
+**Constraint:** `valid_box_result CHECK (box_result BETWEEN 0 AND 6)` - Migration 018 added value 6
+
+#### Frontend UI
+
+Refund-eligible boxes display:
+- Neutral/blank styling (same as dud boxes)
+- "Refund Available" badge
+- Tooltip explaining the system error
+- "Claim Refund" button (immediately available, no 1-hour wait)
+
+Refunded boxes display:
+- Neutral/blank styling (same as dud boxes)
+- "Refunded" badge
+- "Refund Tx" in dropdown menu (links to Solscan)
+- No luck/random values shown (since reveal didn't complete)
+
+#### Automated Testing Script
+
+The automated box test script (`backend/scripts/automatedBoxTest.js`) automatically marks boxes as refund-eligible when reveal fails due to system errors (not user expiry).
 
 ### Reveal Window
 
@@ -1385,6 +1512,7 @@ When reveal fails, backend returns structured errors:
 | Switchboard SDK | Complete | Migrated from manual parsing |
 | Multi-tenant Subdomain Routing | Complete | proxy.js with wildcard DNS |
 | Oracle Health Check | Complete | Pre-commit warning, `/api/oracle-health` endpoint |
+| Refund System | Complete | System error detection, on-chain verification, immediate refund availability |
 
 ### Incomplete / TODO
 

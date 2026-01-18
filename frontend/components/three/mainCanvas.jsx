@@ -3,7 +3,7 @@
 
 import { useRef } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { PerspectiveCamera, Lightformer, Environment, OrbitControls, SoftShadows, AccumulativeShadows, RandomizedLight } from '@react-three/drei'
+import { PerspectiveCamera, Lightformer, Environment, OrbitControls, SoftShadows, AccumulativeShadows, RandomizedLight, CameraShake } from '@react-three/drei'
 import Lights from './lights'
 import MainScene from './mainScene'
 import { easing } from 'maath'
@@ -52,7 +52,7 @@ export default function MainCanvas({ purchasing = false }) {
     // See PURCHASING STATE FLAG comment at top of file for usage details
 
     return (
-        <div className="fixed top-0 left-0 w-screen h-screen z-10">
+        <div className="fixed top-0 left-0 w-screen h-screen z-0">
 
             <Canvas
                 shadows
@@ -74,7 +74,6 @@ export default function MainCanvas({ purchasing = false }) {
                 <AccumulativeShadows temporal frames={10} scale={10} colorBlend={1} opacity={0.5}>
                     <RandomizedLight amount={8} position={[20, 30, 20]} />
                 </AccumulativeShadows>
-
 
             </Canvas>
         </div>

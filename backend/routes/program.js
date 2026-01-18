@@ -40,6 +40,11 @@ import logger, { EventTypes, Severity, ActorTypes } from '../lib/logger.js';
 
 const router = express.Router();
 
+// ===== TESTING CONFIG =====
+// Set to 30 for quick testing, 3600 for production (1 hour)
+const REVEAL_WINDOW_SECONDS = 3600;
+// ===========================
+
 // Initialize Supabase client
 const supabase = createClient(
     process.env.SUPABASE_URL,
@@ -1827,7 +1832,7 @@ router.post('/confirm-commit', async (req, res) => {
         console.log(`✅ Box commit recorded in database`);
         console.log(`   Committed at: ${committedAt}`);
         console.log(`   Luck: ${calculatedLuck}/60 (locked in)`);
-        console.log(`   User has until: ${new Date(Date.now() + 3600000).toISOString()} to reveal`);
+        console.log(`   User has until: ${new Date(Date.now() + REVEAL_WINDOW_SECONDS * 1000).toISOString()} to reveal`);
 
         return res.json({
             success: true,
@@ -1835,7 +1840,7 @@ router.post('/confirm-commit', async (req, res) => {
             boxId,
             signature,
             committedAt,
-            expiresAt: new Date(Date.now() + 3600000).toISOString(), // 1 hour from now
+            expiresAt: new Date(Date.now() + REVEAL_WINDOW_SECONDS * 1000).toISOString(),
             explorerUrl: `https://explorer.solana.com/tx/${signature}?cluster=${config.network}`,
         });
 
@@ -2007,13 +2012,13 @@ router.post('/build-reveal-box-tx', async (req, res) => {
             });
         }
 
-        // Check if commit has expired (1 hour limit)
+        // Check if commit has expired (uses REVEAL_WINDOW_SECONDS config)
         if (box.committed_at) {
             const committedAtTime = new Date(box.committed_at).getTime();
             const now = Date.now();
-            const oneHourMs = 60 * 60 * 1000; // 1 hour in milliseconds
+            const revealWindowMs = REVEAL_WINDOW_SECONDS * 1000;
 
-            if (now - committedAtTime > oneHourMs) {
+            if (now - committedAtTime > revealWindowMs) {
                 // Mark box as expired/dud in database
                 console.log(`   ⚠️ Box commit has EXPIRED - marking as Dud`);
 
@@ -2032,11 +2037,11 @@ router.post('/build-reveal-box-tx', async (req, res) => {
                     error: 'Reveal window expired. Box has become a Dud.',
                     expired: true,
                     committedAt: box.committed_at,
-                    expiredAt: new Date(committedAtTime + oneHourMs).toISOString(),
+                    expiredAt: new Date(committedAtTime + revealWindowMs).toISOString(),
                 });
             }
 
-            const timeRemaining = oneHourMs - (now - committedAtTime);
+            const timeRemaining = revealWindowMs - (now - committedAtTime);
             console.log(`   Time remaining to reveal: ${Math.floor(timeRemaining / 1000)} seconds`);
         }
 
@@ -3090,6 +3095,375 @@ router.post('/build-update-project-tx', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to build update project transaction',
+            details: error.message,
+        });
+    }
+});
+
+/**
+ * POST /api/program/mark-reveal-failed
+ * Mark a box as failed to reveal due to system issues (oracle unavailable, etc.)
+ * This makes the box eligible for a refund after the reveal window expires.
+ *
+ * Body:
+ * - projectId: number - Numeric project ID
+ * - boxId: number - Box ID
+ * - ownerWallet: string - Box owner's wallet address
+ * - failureReason: string - Reason for failure (oracle_unavailable, randomness_account_missing, etc.)
+ */
+router.post('/mark-reveal-failed', async (req, res) => {
+    try {
+        const { projectId, boxId, ownerWallet, failureReason } = req.body;
+
+        if (!projectId || boxId === undefined || !ownerWallet || !failureReason) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields: projectId, boxId, ownerWallet, failureReason',
+            });
+        }
+
+        console.log(`\n⚠️ Marking box as reveal failed...`);
+        console.log(`   Project ID: ${projectId}`);
+        console.log(`   Box ID: ${boxId}`);
+        console.log(`   Owner: ${ownerWallet}`);
+        console.log(`   Reason: ${failureReason}`);
+
+        // Get project UUID from numeric ID
+        const { data: project, error: projectError } = await supabase
+            .from('projects')
+            .select('id')
+            .eq('project_numeric_id', projectId)
+            .single();
+
+        if (projectError || !project) {
+            return res.status(404).json({
+                success: false,
+                error: 'Project not found',
+            });
+        }
+
+        // Update box with failure info
+        const { data: box, error: updateError } = await supabase
+            .from('boxes')
+            .update({
+                reveal_failed_at: new Date().toISOString(),
+                reveal_failure_reason: failureReason,
+                refund_eligible: true,
+            })
+            .eq('project_id', project.id)
+            .eq('box_number', boxId)
+            .eq('owner_wallet', ownerWallet)
+            .select()
+            .single();
+
+        if (updateError) {
+            console.error('Database update error:', updateError);
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to update box',
+                details: updateError.message,
+            });
+        }
+
+        console.log(`✅ Box marked as refund-eligible`);
+
+        return res.json({
+            success: true,
+            message: 'Box marked as refund-eligible',
+            box: {
+                boxId,
+                projectId,
+                refundEligible: true,
+                failureReason,
+            },
+        });
+
+    } catch (error) {
+        console.error('❌ Error marking reveal failed:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Failed to mark reveal failed',
+            details: error.message,
+        });
+    }
+});
+
+/**
+ * POST /api/program/build-refund-box-tx
+ * Build a transaction to refund a box that failed due to system issues.
+ *
+ * Requirements:
+ * - Box must be marked as refund_eligible in database
+ * - Box must be committed but not revealed
+ * - Reveal window must have expired (1 hour)
+ *
+ * Body:
+ * - projectId: number - Numeric project ID
+ * - boxId: number - Box ID
+ * - ownerWallet: string - Box owner's wallet address
+ */
+router.post('/build-refund-box-tx', async (req, res) => {
+    try {
+        const { projectId, boxId, ownerWallet } = req.body;
+
+        if (!projectId || boxId === undefined || !ownerWallet) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields: projectId, boxId, ownerWallet',
+            });
+        }
+
+        console.log(`\n💰 Building refund box transaction...`);
+        console.log(`   Project ID: ${projectId}`);
+        console.log(`   Box ID: ${boxId}`);
+        console.log(`   Owner: ${ownerWallet}`);
+
+        // Get project from database
+        const { data: project, error: projectError } = await supabase
+            .from('projects')
+            .select('*')
+            .eq('project_numeric_id', projectId)
+            .single();
+
+        if (projectError || !project) {
+            return res.status(404).json({
+                success: false,
+                error: 'Project not found',
+            });
+        }
+
+        // Get box from database
+        const { data: box, error: boxError } = await supabase
+            .from('boxes')
+            .select('*')
+            .eq('project_id', project.id)
+            .eq('box_number', boxId)
+            .eq('owner_wallet', ownerWallet)
+            .single();
+
+        if (boxError || !box) {
+            return res.status(404).json({
+                success: false,
+                error: 'Box not found',
+            });
+        }
+
+        // Verify box is eligible for refund
+        if (!box.refund_eligible) {
+            return res.status(400).json({
+                success: false,
+                error: 'Box is not eligible for refund. Only boxes that failed due to system issues can be refunded.',
+            });
+        }
+
+        if (!box.randomness_committed) {
+            return res.status(400).json({
+                success: false,
+                error: 'Box has not been committed yet',
+            });
+        }
+
+        if (box.box_result !== 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'Box has already been revealed or settled',
+            });
+        }
+
+        // Note: We do NOT check the reveal window expiry here.
+        // If a box is marked as refund_eligible, it means a system fault was detected
+        // (oracle error, network issue, etc.) and the user should be able to claim
+        // their refund immediately - they don't need to wait for the 1 hour window.
+        // The 1-hour window only applies to normal reveals, not refunds for system errors.
+
+        // Initialize Anchor program
+        const { program, connection, programId } = await getAnchorProgram();
+        const config = await getNetworkConfig();
+
+        const ownerPubkey = new PublicKey(ownerWallet);
+        const paymentTokenMintPubkey = new PublicKey(project.payment_token_mint);
+
+        // Derive PDAs
+        const [projectConfigPDA] = deriveProjectConfigPDAStandalone(programId, projectId);
+        const [vaultAuthorityPDA] = deriveVaultAuthorityPDA(programId, projectId, paymentTokenMintPubkey);
+        const vaultTokenAccount = await deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMintPubkey);
+
+        // Get owner's token account
+        const ownerTokenAccount = await getAssociatedTokenAddress(
+            paymentTokenMintPubkey,
+            ownerPubkey
+        );
+
+        // Build refund transaction
+        const projectIdBN = new BN(projectId);
+        const boxIdBN = new BN(boxId);
+
+        const refundTx = await program.methods
+            .refundBox(projectIdBN, boxIdBN)
+            .accounts({
+                owner: ownerPubkey,
+                projectConfig: projectConfigPDA,
+                boxInstance: new PublicKey(box.box_pda),
+                vaultAuthority: vaultAuthorityPDA,
+                paymentTokenMint: paymentTokenMintPubkey,
+                vaultTokenAccount: vaultTokenAccount,
+                ownerTokenAccount: ownerTokenAccount,
+                tokenProgram: TOKEN_PROGRAM_ID,
+            })
+            .transaction();
+
+        // Get recent blockhash
+        const { blockhash } = await connection.getLatestBlockhash();
+        refundTx.recentBlockhash = blockhash;
+        refundTx.feePayer = ownerPubkey;
+
+        // Serialize transaction
+        const serializedTransaction = refundTx.serialize({
+            requireAllSignatures: false,
+            verifySignatures: false,
+        }).toString('base64');
+
+        console.log(`\n✅ Refund transaction built successfully!`);
+        console.log(`   Refund amount: ${project.box_price / Math.pow(10, project.payment_token_decimals)} ${project.payment_token_symbol}`);
+
+        return res.json({
+            success: true,
+            transaction: serializedTransaction,
+            refundAmount: project.box_price,
+            refundAmountFormatted: `${project.box_price / Math.pow(10, project.payment_token_decimals)} ${project.payment_token_symbol}`,
+            projectId,
+            boxId,
+            network: config.network,
+        });
+
+    } catch (error) {
+        console.error('❌ Error building refund transaction:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Failed to build refund transaction',
+            details: error.message,
+        });
+    }
+});
+
+/**
+ * POST /api/program/confirm-refund
+ * Update database after refund transaction confirms
+ *
+ * Body:
+ * - projectId: number - Numeric project ID
+ * - boxId: number - Box ID
+ * - ownerWallet: string - Box owner's wallet address
+ * - signature: string - Transaction signature
+ */
+router.post('/confirm-refund', async (req, res) => {
+    try {
+        const { projectId, boxId, ownerWallet, signature } = req.body;
+
+        if (!projectId || boxId === undefined || !ownerWallet || !signature) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields: projectId, boxId, ownerWallet, signature',
+            });
+        }
+
+        console.log(`\n✅ Confirming refund...`);
+        console.log(`   Project ID: ${projectId}`);
+        console.log(`   Box ID: ${boxId}`);
+        console.log(`   Signature: ${signature}`);
+
+        // Initialize Anchor program to verify on-chain state
+        const { program, programId } = await getAnchorProgram();
+
+        // Derive box PDA
+        const [boxInstancePDA] = deriveBoxInstancePDA(programId, projectId, boxId);
+
+        // Read on-chain box state to verify refund actually happened
+        let onChainBox;
+        try {
+            onChainBox = await program.account.boxInstance.fetch(boxInstancePDA);
+        } catch (fetchError) {
+            console.error('Failed to fetch on-chain box:', fetchError);
+            return res.status(400).json({
+                success: false,
+                error: 'Could not verify on-chain refund status',
+                details: fetchError.message,
+            });
+        }
+
+        // Verify the box was actually refunded on-chain
+        // On-chain: reward_tier = 6, settled = true, revealed = true
+        if (onChainBox.rewardTier !== 6 || !onChainBox.settled) {
+            console.error('On-chain verification failed:', {
+                rewardTier: onChainBox.rewardTier,
+                settled: onChainBox.settled,
+                revealed: onChainBox.revealed,
+            });
+            return res.status(400).json({
+                success: false,
+                error: 'On-chain refund not confirmed. The refund transaction may have failed.',
+            });
+        }
+
+        console.log(`   On-chain verified: reward_tier=${onChainBox.rewardTier}, settled=${onChainBox.settled}`);
+
+        // Get project UUID from numeric ID
+        const { data: project, error: projectError } = await supabase
+            .from('projects')
+            .select('id, box_price')
+            .eq('project_numeric_id', projectId)
+            .single();
+
+        if (projectError || !project) {
+            return res.status(404).json({
+                success: false,
+                error: 'Project not found',
+            });
+        }
+
+        // Update box with refund info (on-chain verified)
+        const { data: box, error: updateError } = await supabase
+            .from('boxes')
+            .update({
+                box_result: 6, // REFUNDED (must match on-chain reward_tier)
+                payout_amount: project.box_price,
+                refunded_at: new Date().toISOString(),
+                refund_tx_signature: signature,
+                settled_at: new Date().toISOString(),
+            })
+            .eq('project_id', project.id)
+            .eq('box_number', boxId)
+            .eq('owner_wallet', ownerWallet)
+            .select()
+            .single();
+
+        if (updateError) {
+            console.error('Database update error:', updateError);
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to update box in database (refund was successful on-chain)',
+                details: updateError.message,
+            });
+        }
+
+        console.log(`✅ Refund confirmed and recorded (on-chain verified)`);
+
+        return res.json({
+            success: true,
+            message: 'Refund confirmed',
+            box: {
+                boxId,
+                projectId,
+                result: 'REFUNDED',
+                refundAmount: project.box_price,
+            },
+        });
+
+    } catch (error) {
+        console.error('❌ Error confirming refund:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Failed to confirm refund',
             details: error.message,
         });
     }

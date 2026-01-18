@@ -270,6 +270,49 @@ router.post('/create', async (req, res) => {
 });
 
 /**
+ * GET /api/projects/by-numeric-id/:numericId
+ * Get project details by numeric ID (used by test scripts)
+ */
+router.get('/by-numeric-id/:numericId', async (req, res) => {
+    try {
+        const numericId = parseInt(req.params.numericId, 10);
+
+        if (isNaN(numericId)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid numeric ID'
+            });
+        }
+
+        const { data: project, error } = await supabase
+            .from('projects')
+            .select('*')
+            .eq('project_numeric_id', numericId)
+            .single();
+
+        if (error || !project) {
+            return res.status(404).json({
+                success: false,
+                error: 'Project not found'
+            });
+        }
+
+        return res.json({
+            success: true,
+            project
+        });
+
+    } catch (error) {
+        console.error('Error fetching project by numeric ID:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Internal server error',
+            details: error.message
+        });
+    }
+});
+
+/**
  * GET /api/projects/:projectId
  * Get project details by ID
  */
@@ -390,6 +433,9 @@ router.get('/boxes/by-owner/:walletAddress', async (req, res) => {
                 luck_value,
                 max_luck,
                 random_percentage,
+                refund_eligible,
+                reveal_failure_reason,
+                refund_tx_signature,
                 projects (
                     id,
                     project_numeric_id,

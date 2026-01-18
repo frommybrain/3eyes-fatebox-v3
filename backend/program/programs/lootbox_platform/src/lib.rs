@@ -675,6 +675,94 @@ pub mod lootbox_platform {
         Ok(())
     }
 
+    /// Refund a box that failed due to system issues (oracle unavailable, etc.)
+    /// This allows users to recover their funds when the system fails them.
+    ///
+    /// Requirements:
+    /// - Box must be committed (randomness_committed = true)
+    /// - Box must NOT be revealed (revealed = false)
+    /// - Box must NOT be settled (settled = false)
+    ///
+    /// Note: The backend tracks which boxes are eligible for refund (system errors)
+    /// vs which expired due to user inaction (duds). Refund eligibility is checked
+    /// off-chain in the database before this instruction is called.
+    ///
+    /// We do NOT enforce the 1-hour reveal window here because:
+    /// - System failures (oracle errors, network issues) can happen at any time
+    /// - Users should be able to claim refunds immediately when a fault is detected
+    /// - The backend only allows refund for boxes marked refund_eligible in DB
+    pub fn refund_box(
+        ctx: Context<RefundBox>,
+        project_id: u64,
+        box_id: u64,
+    ) -> Result<()> {
+        let box_instance = &mut ctx.accounts.box_instance;
+        let project_config = &ctx.accounts.project_config;
+
+        // Verify ownership
+        require!(
+            box_instance.owner == ctx.accounts.owner.key(),
+            LootboxError::NotBoxOwner
+        );
+
+        // Verify box is committed but NOT revealed
+        require!(
+            box_instance.randomness_committed,
+            LootboxError::BoxNotCommitted
+        );
+        require!(!box_instance.revealed, LootboxError::BoxAlreadyRevealed);
+        require!(!box_instance.settled, LootboxError::BoxAlreadySettled);
+
+        // Note: We intentionally do NOT check the reveal window expiry here.
+        // Refund eligibility (system error vs user inaction) is determined off-chain.
+        // The backend only calls this instruction for boxes marked refund_eligible.
+
+        // Calculate refund amount (box price minus commission that was already taken)
+        // Commission was taken at purchase time, so refund = box_price - commission
+        // Actually, let's refund the full box price from vault
+        // The commission was sent to treasury at purchase, we'll eat that as platform cost
+        let refund_amount = project_config.box_price;
+
+        // Verify vault has sufficient balance
+        require!(
+            ctx.accounts.vault_token_account.amount >= refund_amount,
+            LootboxError::InsufficientVaultBalance
+        );
+
+        // Transfer refund from vault to owner using PDA signer
+        let project_id_bytes = project_id.to_le_bytes();
+        let payment_token_key = ctx.accounts.payment_token_mint.key();
+        let seeds = &[
+            b"vault",
+            project_id_bytes.as_ref(),
+            payment_token_key.as_ref(),
+            &[project_config.vault_authority_bump],
+        ];
+        let signer = &[&seeds[..]];
+
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.vault_token_account.to_account_info(),
+            to: ctx.accounts.owner_token_account.to_account_info(),
+            authority: ctx.accounts.vault_authority.to_account_info(),
+        };
+        let cpi_program = ctx.accounts.token_program.to_account_info();
+        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+        token::transfer(cpi_ctx, refund_amount)?;
+
+        // Mark as settled with refund (reward_amount = box_price for refund)
+        box_instance.settled = true;
+        box_instance.revealed = true;  // Mark as revealed to prevent further actions
+        box_instance.reward_amount = refund_amount;
+        box_instance.reward_tier = 6;  // 6 = REFUNDED (new tier)
+
+        msg!("Box refunded!");
+        msg!("Box ID: {}", box_id);
+        msg!("Refund amount: {}", refund_amount);
+        msg!("Owner: {}", ctx.accounts.owner.key());
+
+        Ok(())
+    }
+
     /// Update project settings (pause/resume, change box price)
     pub fn update_project(
         ctx: Context<UpdateProject>,
@@ -1214,6 +1302,57 @@ pub struct SettleBox<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(project_id: u64, box_id: u64)]
+pub struct RefundBox<'info> {
+    pub owner: Signer<'info>,
+
+    #[account(
+        seeds = [b"project", project_id.to_le_bytes().as_ref()],
+        bump
+    )]
+    pub project_config: Account<'info, ProjectConfig>,
+
+    #[account(
+        mut,
+        seeds = [b"box", project_id.to_le_bytes().as_ref(), box_id.to_le_bytes().as_ref()],
+        bump,
+        constraint = box_instance.owner == owner.key() @ LootboxError::NotBoxOwner
+    )]
+    pub box_instance: Account<'info, BoxInstance>,
+
+    /// CHECK: Vault authority PDA
+    #[account(
+        seeds = [b"vault", project_id.to_le_bytes().as_ref(), payment_token_mint.key().as_ref()],
+        bump = project_config.vault_authority_bump
+    )]
+    pub vault_authority: AccountInfo<'info>,
+
+    /// Payment token mint - must match project's configured token
+    #[account(
+        constraint = payment_token_mint.key() == project_config.payment_token_mint @ LootboxError::InvalidVaultTokenAccount
+    )]
+    pub payment_token_mint: Account<'info, Mint>,
+
+    /// Vault token account - must match project's payment token and be owned by vault authority
+    #[account(
+        mut,
+        constraint = vault_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidVaultTokenAccount,
+        constraint = vault_token_account.owner == vault_authority.key() @ LootboxError::InvalidVaultTokenAccount
+    )]
+    pub vault_token_account: Account<'info, TokenAccount>,
+
+    /// Owner's token account - must match project's payment token and be owned by signer
+    #[account(
+        mut,
+        constraint = owner_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidOwnerTokenAccount,
+        constraint = owner_token_account.owner == owner.key() @ LootboxError::InvalidOwnerTokenAccount
+    )]
+    pub owner_token_account: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
 #[instruction(project_id: u64)]
 pub struct WithdrawEarnings<'info> {
     pub owner: Signer<'info>,
@@ -1532,4 +1671,10 @@ pub enum LootboxError {
 
     #[msg("Invalid probability configuration (must sum to <= 10000)")]
     InvalidProbabilitySum,
+
+    #[msg("Box has not been committed yet")]
+    BoxNotCommitted,
+
+    #[msg("Reveal window has not expired yet (must wait 1 hour after commit)")]
+    RevealWindowNotExpired,
 }

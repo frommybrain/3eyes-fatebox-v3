@@ -1,7 +1,6 @@
 'use client';
 
 import { useWallet } from '@solana/wallet-adapter-react';
-import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import WalletButton from '@/components/wallet/WalletButton';
@@ -11,28 +10,6 @@ export default function Header() {
   const { publicKey } = useWallet();
   const { config } = useNetworkStore();
   const isAdmin = publicKey && config?.adminWallet && publicKey.toString() === config.adminWallet.toString();
-  const [isVisible, setIsVisible] = useState(false);
-  const [keySequence, setKeySequence] = useState('');
-
-  // Listen for "iii" keyboard sequence to show header
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      const newSequence = (keySequence + e.key).slice(-3);
-      setKeySequence(newSequence);
-
-      if (newSequence === 'iii') {
-        setIsVisible(true);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [keySequence]);
-
-  // Don't render if not visible
-  if (!isVisible) {
-    return null;
-  }
 
   return (
     <header className="fixed top-0 left-0 w-full h-14 flex items-center justify-between px-4 bg-degen-bg border-b border-degen-black z-50">

@@ -645,6 +645,149 @@ export type LootboxPlatform = {
       ]
     },
     {
+      "name": "refundBox",
+      "docs": [
+        "Refund a box that failed due to system issues (oracle unavailable, etc.)",
+        "This allows users to recover their funds when the system fails them.",
+        "",
+        "Requirements:",
+        "- Box must be committed (randomness_committed = true)",
+        "- Box must NOT be revealed (revealed = false)",
+        "- Box must NOT be settled (settled = false)",
+        "",
+        "Note: The backend tracks which boxes are eligible for refund (system errors)",
+        "vs which expired due to user inaction (duds). Refund eligibility is checked",
+        "off-chain in the database before this instruction is called.",
+        "",
+        "We do NOT enforce the 1-hour reveal window here because:",
+        "- System failures (oracle errors, network issues) can happen at any time",
+        "- Users should be able to claim refunds immediately when a fault is detected",
+        "- The backend only allows refund for boxes marked refund_eligible in DB"
+      ],
+      "discriminator": [
+        48,
+        123,
+        185,
+        24,
+        58,
+        138,
+        98,
+        118
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true
+        },
+        {
+          "name": "projectConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  106,
+                  101,
+                  99,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "projectId"
+              }
+            ]
+          }
+        },
+        {
+          "name": "boxInstance",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  120
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "projectId"
+              },
+              {
+                "kind": "arg",
+                "path": "boxId"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vaultAuthority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "projectId"
+              },
+              {
+                "kind": "account",
+                "path": "paymentTokenMint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "paymentTokenMint",
+          "docs": [
+            "Payment token mint - must match project's configured token"
+          ]
+        },
+        {
+          "name": "vaultTokenAccount",
+          "docs": [
+            "Vault token account - must match project's payment token and be owned by vault authority"
+          ],
+          "writable": true
+        },
+        {
+          "name": "ownerTokenAccount",
+          "docs": [
+            "Owner's token account - must match project's payment token and be owned by signer"
+          ],
+          "writable": true
+        },
+        {
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "projectId",
+          "type": "u64"
+        },
+        {
+          "name": "boxId",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "revealBox",
       "docs": [
         "Reveal box with Switchboard VRF randomness",
@@ -1626,6 +1769,16 @@ export type LootboxPlatform = {
       "code": 6026,
       "name": "invalidProbabilitySum",
       "msg": "Invalid probability configuration (must sum to <= 10000)"
+    },
+    {
+      "code": 6027,
+      "name": "boxNotCommitted",
+      "msg": "Box has not been committed yet"
+    },
+    {
+      "code": 6028,
+      "name": "revealWindowNotExpired",
+      "msg": "Reveal window has not expired yet (must wait 1 hour after commit)"
     }
   ],
   "types": [

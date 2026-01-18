@@ -337,6 +337,31 @@ export async function waitForRandomness(
 }
 
 /**
+ * Create a close instruction for closing a randomness account
+ * This reclaims the rent (~0.006 SOL) back to the authority (user)
+ *
+ * IMPORTANT: Only call this AFTER the reveal has been processed
+ * Order matters: revealIx -> reveal_box instruction -> closeIx
+ *
+ * @param {Object} randomness - Switchboard Randomness instance
+ * @returns {Promise<TransactionInstruction>} Close instruction
+ */
+export async function createCloseInstruction(randomness) {
+    console.log(`[Switchboard] Creating close instruction to reclaim rent...`);
+    console.log(`   Randomness account: ${randomness.pubkey.toString()}`);
+
+    try {
+        const closeIx = await randomness.closeIx();
+        console.log(`   Close instruction created successfully`);
+        console.log(`   Rent will be returned to the authority (user)`);
+        return closeIx;
+    } catch (error) {
+        console.error(`[Switchboard] Error creating close instruction:`, error.message);
+        throw error;
+    }
+}
+
+/**
  * Serialize a keypair to base64 for frontend transmission
  *
  * @param {Keypair} keypair - Solana keypair

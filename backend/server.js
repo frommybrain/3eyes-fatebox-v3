@@ -69,10 +69,14 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Wallet-Address', 'X-Request-ID'],
 }));
 
+// Check if rate limiting should be disabled (for stress testing)
+const disableRateLimit = process.env.DISABLE_RATE_LIMIT === 'true';
+
 // Rate limiting - general API
 const generalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: isDevelopment ? 1000 : 100, // Higher limit in dev
+    max: isDevelopment ? 10000 : 100, // 10k in dev for stress testing, 100 in prod
+    skip: () => disableRateLimit,
     message: {
         success: false,
         error: 'Too many requests, please try again later',
@@ -84,7 +88,8 @@ const generalLimiter = rateLimit({
 // Rate limiting - stricter for admin endpoints
 const adminLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
-    max: isDevelopment ? 100 : 20, // 20 requests per hour in production
+    max: isDevelopment ? 1000 : 20, // 1k in dev, 20 in prod
+    skip: () => disableRateLimit,
     message: {
         success: false,
         error: 'Too many admin requests, please try again later',
@@ -96,7 +101,8 @@ const adminLimiter = rateLimit({
 // Rate limiting - transaction building (expensive operations)
 const transactionLimiter = rateLimit({
     windowMs: 60 * 1000, // 1 minute
-    max: isDevelopment ? 100 : 30, // 30 transactions per minute
+    max: isDevelopment ? 1000 : 30, // 1k/min in dev for stress testing, 30 in prod
+    skip: () => disableRateLimit,
     message: {
         success: false,
         error: 'Too many transaction requests, please slow down',

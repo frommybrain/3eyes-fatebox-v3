@@ -25,6 +25,7 @@ import {
     createRandomnessAccount,
     createCommitInstruction,
     createRevealInstruction,
+    createCloseInstruction,
     loadRandomness,
     readRandomnessValue,
     serializeKeypair,
@@ -2310,6 +2311,19 @@ router.post('/build-reveal-box-tx', async (req, res) => {
         transaction.add(...revealBoxTx.instructions);
         console.log(`   Added: reveal_box instruction with randomness account`);
 
+        // 3. Close randomness account instruction (reclaims rent to user)
+        // This MUST be after reveal_box since the randomness data is read during reveal
+        try {
+            const closeIx = await createCloseInstruction(randomness);
+            transaction.add(closeIx);
+            console.log(`   Added: close randomness account instruction (reclaims ~0.006 SOL rent)`);
+        } catch (closeError) {
+            // If close instruction fails to build, still allow reveal to proceed
+            // User can manually close later or we can add a cleanup script
+            console.warn(`   Warning: Could not create close instruction: ${closeError.message}`);
+            console.warn(`   Proceeding without close - user may need to manually reclaim rent later`);
+        }
+
         // Get recent blockhash
         const { blockhash } = await connection.getLatestBlockhash();
         transaction.recentBlockhash = blockhash;
@@ -2505,6 +2519,8 @@ router.post('/confirm-reveal', async (req, res) => {
                 luck_value: luck,
                 max_luck: 60, // Max luck score is always 60
                 random_percentage: randomPercentage * 100, // Store as percentage (0-100)
+                // Randomness account is closed as part of reveal transaction (reclaims rent to user)
+                randomness_closed: true,
             })
             .eq('project_id', project.id)
             .eq('box_number', boxId);

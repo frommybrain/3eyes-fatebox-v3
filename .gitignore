@@ -44,3 +44,8 @@ coverage/
 # Anchor/Solana specific
 test-ledger/
 .anchor/
+
+# Test wallets (contain private keys!)
+backend/test-buyer-wallet.json
+*-wallet.json
+!package*.json

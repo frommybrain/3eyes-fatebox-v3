@@ -6,8 +6,11 @@ import { persist } from 'zustand/middleware';
 
 // Beta tester wallet addresses (add your testers here)
 const BETA_WALLETS = [
-    // Add wallet addresses that should have beta access
-    // Example: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU'
+    'Fop6HTZr57VAHw8t2S8MGwJvxJ9BGWHvLfLrRajKMv6', // dep
+    'DAuiBQ1guy3Djhidr15qpJYbRXk6mfSfMy9tWJfosWgN',
+    'GrYR77SL36BTUMN3Sb6muAsY3KExGJ7hrWPcqMLCkawF',
+    'EBTBZAMbacjommLBDKYhfNGwnKK7Fise5gvwmqDZFsGh',
+    '5vnjoqgwjoosmCRLzNNKPHd5U8tYfTJxtaLytMzTm9Vn'
 ];
 
 const useBetaAccessStore = create(

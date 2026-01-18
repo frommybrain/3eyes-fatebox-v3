@@ -1,8 +1,9 @@
 'use client';
 
 import { useWallet } from '@solana/wallet-adapter-react';
-import { useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import WalletButton from '@/components/wallet/WalletButton';
 import useNetworkStore from '@/store/useNetworkStore';
 
@@ -11,8 +12,6 @@ import useNetworkStore from '@/store/useNetworkStore';
  * This ensures navigation links always go to the main domain
  */
 function getBaseDomainUrl() {
-  if (typeof window === 'undefined') return '';
-
   const hostname = window.location.hostname;
   const protocol = window.location.protocol;
 
@@ -33,52 +32,121 @@ function getBaseDomainUrl() {
   return `${protocol}//${hostname}`;
 }
 
+/**
+ * Check if we're on a subdomain (not the base domain)
+ */
+function isOnSubdomain() {
+  const hostname = window.location.hostname;
+
+  // Local development - never on subdomain
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return false;
+  }
+
+  // Production - check if more than 2 parts (e.g., catbox.degenbox.fun)
+  return hostname.split('.').length > 2;
+}
+
 export default function Header() {
   const { publicKey } = useWallet();
   const { config } = useNetworkStore();
   const isAdmin = publicKey && config?.adminWallet && publicKey.toString() === config.adminWallet.toString();
 
-  // Memoize base URL to avoid recalculating on every render
-  const baseUrl = useMemo(() => getBaseDomainUrl(), []);
+  // Track if we're on a subdomain (client-side only to avoid hydration mismatch)
+  const [onSubdomain, setOnSubdomain] = useState(false);
+  const [baseUrl, setBaseUrl] = useState('');
+
+  useEffect(() => {
+    // Only run on client
+    setOnSubdomain(isOnSubdomain());
+    setBaseUrl(getBaseDomainUrl());
+  }, []);
+
+  // Build href - use absolute URL only when on subdomain, otherwise use relative path
+  const getHref = (path) => {
+    if (onSubdomain && baseUrl) {
+      return `${baseUrl}${path}`;
+    }
+    return path;
+  };
 
   return (
     <header className="fixed top-0 left-0 w-full h-14 flex items-center justify-between px-4 bg-degen-bg border-b border-degen-black z-50">
       {/* Logo / Brand - links to base domain homepage */}
-      <a href={baseUrl || '/'} className="flex items-center hover:opacity-80 transition-opacity">
-        <Image
-          src="/images/degenboxlogo.svg"
-          alt="DegenBox"
-          width={40}
-          height={40}
-          className="h-[35px] w-auto"
-        />
-      </a>
+      {onSubdomain ? (
+        <a href={baseUrl || '/'} className="flex items-center hover:opacity-80 transition-opacity">
+          <Image
+            src="/images/degenboxlogo.svg"
+            alt="DegenBox"
+            width={40}
+            height={40}
+            className="h-[35px] w-auto"
+          />
+        </a>
+      ) : (
+        <Link href="/" className="flex items-center hover:opacity-80 transition-opacity">
+          <Image
+            src="/images/degenboxlogo.svg"
+            alt="DegenBox"
+            width={40}
+            height={40}
+            className="h-[35px] w-auto"
+          />
+        </Link>
+      )}
 
       {/* Navigation & Wallet */}
       <div className="flex items-center">
         {publicKey && (
           <>
-            <a
-              href={`${baseUrl}/dashboard`}
-              className="px-4 py-2 text-degen-black/80 hover:text-degen-black hover:bg-degen-black/5 transition-colors font-medium text-sm uppercase tracking-wider"
-            >
-              Dashboard
-            </a>
+            {onSubdomain ? (
+              <a
+                href={getHref('/dashboard')}
+                className="px-4 py-2 text-degen-black/80 hover:text-degen-black hover:bg-degen-black/5 transition-colors font-medium text-sm uppercase tracking-wider"
+              >
+                Dashboard
+              </a>
+            ) : (
+              <Link
+                href="/dashboard"
+                className="px-4 py-2 text-degen-black/80 hover:text-degen-black hover:bg-degen-black/5 transition-colors font-medium text-sm uppercase tracking-wider"
+              >
+                Dashboard
+              </Link>
+            )}
 
-            <a
-              href={`${baseUrl}/projects`}
-              className="px-4 py-2 text-degen-black/80 hover:text-degen-black hover:bg-degen-black/5 transition-colors font-medium text-sm uppercase tracking-wider"
-            >
-              Projects
-            </a>
+            {onSubdomain ? (
+              <a
+                href={getHref('/projects')}
+                className="px-4 py-2 text-degen-black/80 hover:text-degen-black hover:bg-degen-black/5 transition-colors font-medium text-sm uppercase tracking-wider"
+              >
+                Projects
+              </a>
+            ) : (
+              <Link
+                href="/projects"
+                className="px-4 py-2 text-degen-black/80 hover:text-degen-black hover:bg-degen-black/5 transition-colors font-medium text-sm uppercase tracking-wider"
+              >
+                Projects
+              </Link>
+            )}
 
             {isAdmin && (
-              <a
-                href={`${baseUrl}/admin`}
-                className="px-4 py-2 text-degen-feature hover:bg-degen-feature/10 transition-colors font-medium text-sm uppercase tracking-wider"
-              >
-                Admin
-              </a>
+              onSubdomain ? (
+                <a
+                  href={getHref('/admin')}
+                  className="px-4 py-2 text-degen-feature hover:bg-degen-feature/10 transition-colors font-medium text-sm uppercase tracking-wider"
+                >
+                  Admin
+                </a>
+              ) : (
+                <Link
+                  href="/admin"
+                  className="px-4 py-2 text-degen-feature hover:bg-degen-feature/10 transition-colors font-medium text-sm uppercase tracking-wider"
+                >
+                  Admin
+                </Link>
+              )
             )}
           </>
         )}

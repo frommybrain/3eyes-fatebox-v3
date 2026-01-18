@@ -3,9 +3,9 @@
 // components/auth/BetaGate.jsx
 // Protects routes during beta - requires wallet connection and allowlist verification
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
-import useBetaAccessStore from '@/store/useBetaAccessStore';
+import useBetaAccessStore, { BETA_MODE_ENABLED } from '@/store/useBetaAccessStore';
 import WalletButton from '@/components/wallet/WalletButton';
 
 /**
@@ -15,29 +15,21 @@ import WalletButton from '@/components/wallet/WalletButton';
  * 1. Connect their wallet
  * 2. Have their wallet in the BETA_WALLETS allowlist
  *
- * Once verified, access persists in local storage even if wallet disconnects
+ * Once verified, access persists for the session even if wallet disconnects
  */
 export default function BetaGate({ children }) {
     const { publicKey, connected } = useWallet();
-    const { hasAccess, checkAccess, grantAccess, betaModeEnabled } = useBetaAccessStore();
-    const [checking, setChecking] = useState(true);
+    const { hasAccess, checkAccess, grantAccess } = useBetaAccessStore();
 
     useEffect(() => {
-        // If beta mode is disabled, grant access immediately
-        if (!betaModeEnabled) {
+        // If beta mode is disabled at build time, grant access immediately
+        if (!BETA_MODE_ENABLED) {
             grantAccess('public');
-            setChecking(false);
             return;
         }
 
-        // If already has access (from previous session), allow through
-        if (hasAccess) {
-            setChecking(false);
-            return;
-        }
-
-        // If wallet is connected, check if it's in the allowlist
-        if (connected && publicKey) {
+        // If wallet is connected and not already granted, check allowlist
+        if (connected && publicKey && !hasAccess) {
             const walletAddress = publicKey.toString();
             const isAllowed = checkAccess(walletAddress);
 
@@ -45,17 +37,11 @@ export default function BetaGate({ children }) {
                 grantAccess(walletAddress);
             }
         }
+    }, [connected, publicKey, hasAccess, checkAccess, grantAccess]);
 
-        setChecking(false);
-    }, [connected, publicKey, hasAccess, checkAccess, grantAccess, betaModeEnabled]);
-
-    // Still checking - show loading
-    if (checking) {
-        return (
-            <div className="min-h-screen bg-degen-bg flex items-center justify-center pt-14">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-degen-black"></div>
-            </div>
-        );
+    // If beta mode disabled, always show content
+    if (!BETA_MODE_ENABLED) {
+        return children;
     }
 
     // Has access - render children

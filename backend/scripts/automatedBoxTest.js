@@ -83,13 +83,21 @@ Usage: node scripts/automatedBoxTest.js [options]
 Options:
   --boxes, -n <number>      Number of boxes to test (default: 10)
   --project, -p <id>        Project numeric ID (required)
-  --wallet, -w <path>       Path to wallet keypair JSON file (required)
+  --wallet, -w <path>       Path to wallet keypair JSON file (optional if TEST_WALLET_JSON env is set)
   --concurrency, -c <num>   Max parallel operations (default: 5)
   --dry-run                 Show what would happen without executing
   --help, -h                Show this help message
 
+Environment Variables:
+  TEST_WALLET_JSON          JSON array of wallet keypair bytes (alternative to --wallet)
+  BACKEND_URL               Backend API URL (default: http://localhost:3333)
+  RPC_URL                   Solana RPC URL (default: https://api.devnet.solana.com)
+
 Example:
   node scripts/automatedBoxTest.js --boxes 20 --project 1 --wallet ./test-wallet.json
+
+  # Or using environment variable:
+  TEST_WALLET_JSON='[1,2,3,...]' node scripts/automatedBoxTest.js --boxes 20 --project 1
 `);
 }
 
@@ -673,20 +681,34 @@ async function main() {
         process.exit(1);
     }
 
-    if (!config.walletPath) {
-        console.error('Error: --wallet is required');
+    // Load wallet - try file first, then environment variable
+    let wallet;
+    let walletSource;
+
+    if (config.walletPath) {
+        // Load from file
+        if (!fs.existsSync(config.walletPath)) {
+            console.error(`Error: Wallet file not found: ${config.walletPath}`);
+            process.exit(1);
+        }
+        const walletData = JSON.parse(fs.readFileSync(config.walletPath, 'utf8'));
+        wallet = Keypair.fromSecretKey(new Uint8Array(walletData));
+        walletSource = `file: ${config.walletPath}`;
+    } else if (process.env.TEST_WALLET_JSON) {
+        // Load from environment variable
+        try {
+            const walletData = JSON.parse(process.env.TEST_WALLET_JSON);
+            wallet = Keypair.fromSecretKey(new Uint8Array(walletData));
+            walletSource = 'env: TEST_WALLET_JSON';
+        } catch (err) {
+            console.error(`Error: Failed to parse TEST_WALLET_JSON: ${err.message}`);
+            process.exit(1);
+        }
+    } else {
+        console.error('Error: --wallet or TEST_WALLET_JSON environment variable is required');
         printUsage();
         process.exit(1);
     }
-
-    // Load wallet
-    if (!fs.existsSync(config.walletPath)) {
-        console.error(`Error: Wallet file not found: ${config.walletPath}`);
-        process.exit(1);
-    }
-
-    const walletData = JSON.parse(fs.readFileSync(config.walletPath, 'utf8'));
-    const wallet = Keypair.fromSecretKey(new Uint8Array(walletData));
 
     console.log('='.repeat(60));
     console.log('     AUTOMATED BOX TESTING SCRIPT');
@@ -695,6 +717,7 @@ async function main() {
     console.log(`  Boxes to test:  ${config.boxes}`);
     console.log(`  Project ID:     ${config.projectId}`);
     console.log(`  Wallet:         ${wallet.publicKey.toString()}`);
+    console.log(`  Wallet Source:  ${walletSource}`);
     console.log(`  Concurrency:    ${config.concurrency}`);
     console.log(`  Backend URL:    ${BACKEND_URL}`);
     console.log(`  RPC URL:        ${RPC_URL}`);

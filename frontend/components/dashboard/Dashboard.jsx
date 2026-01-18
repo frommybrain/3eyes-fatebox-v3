@@ -795,8 +795,16 @@ function BoxCard({ box, project, onRefresh }) {
                 // Handle specific error codes from backend
                 const errorCode = buildResult.errorCode;
 
-                // Check if expired
+                // Check if expired - box becomes a Dud
                 if (buildResult.expired || errorCode === 'REVEAL_EXPIRED') {
+                    // Update UI immediately to show Dud state
+                    startBoxTransition(() => {
+                        setOptimisticBox({
+                            box_result: 1, // Dud tier
+                            payout_amount: 0,
+                            randomness_committed: false,
+                        });
+                    });
                     endTransaction(false, 'Reveal window expired - box is now a Dud');
                     if (onRefresh) onRefresh();
                     return;
@@ -804,6 +812,18 @@ function BoxCard({ box, project, onRefresh }) {
 
                 // Handle oracle unavailability with helpful messaging
                 if (errorCode === 'ORACLE_UNAVAILABLE' || errorCode === 'ORACLE_TIMEOUT') {
+                    // Backend already marked box as refund-eligible, update UI immediately
+                    if (buildResult.refundEligible) {
+                        console.log('Box marked as refund-eligible by backend');
+                        startBoxTransition(() => {
+                            setOptimisticBox({ refund_eligible: true });
+                        });
+                        setError('Oracle unavailable. A refund is now available for this box.');
+                        endTransaction(false, 'Refund available');
+                        return;
+                    }
+
+                    // Fallback: show retry message if not yet refund-eligible
                     const timeRemaining = buildResult.timeRemainingSeconds;
                     let timeMsg = '';
                     if (timeRemaining && timeRemaining > 0) {
@@ -814,36 +834,6 @@ function BoxCard({ box, project, onRefresh }) {
                     const retryMsg = buildResult.retryAfterSeconds
                         ? ` Try again in ${buildResult.retryAfterSeconds} seconds.`
                         : ' Please try again shortly.';
-
-                    // If less than 5 minutes remaining and oracle still failing, mark as refund-eligible
-                    if (timeRemaining && timeRemaining < 300) {
-                        try {
-                            const markResponse = await fetch(`${backendUrl}/api/program/mark-reveal-failed`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    projectId: project.project_numeric_id,
-                                    boxId: box.box_number,
-                                    ownerWallet: walletAddress,
-                                    failureReason: `oracle_unavailable: ${buildResult.error}`,
-                                }),
-                            });
-                            const markResult = await markResponse.json();
-                            if (markResult.success) {
-                                console.log('Box marked as refund-eligible due to oracle failure');
-                                // Update optimistic state to immediately show refund button
-                                startBoxTransition(() => {
-                                    setOptimisticBox({ refund_eligible: true });
-                                });
-                                // Show refund available message instead of retry message
-                                setError('Oracle unavailable. A refund is now available for this box.');
-                                endTransaction(false, 'Refund available');
-                                return;
-                            }
-                        } catch (markErr) {
-                            console.error('Failed to mark box as refund-eligible:', markErr);
-                        }
-                    }
 
                     const fullErrorMsg = buildResult.error + timeMsg + retryMsg;
                     setError(fullErrorMsg);

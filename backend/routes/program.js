@@ -3,7 +3,7 @@
 
 import express from 'express';
 import { PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY, Transaction } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } from '@solana/spl-token';
+import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createAssociatedTokenAccountIdempotentInstruction } from '@solana/spl-token';
 import * as anchor from '@coral-xyz/anchor';
 import BN from 'bn.js';
 import {
@@ -204,22 +204,6 @@ router.post('/build-initialize-project-tx', async (req, res) => {
 
         console.log(`   Owner payment token account: ${ownerPaymentTokenAccount.toString()}`);
 
-        // Check if vault token account already exists
-        const vaultAccountInfo = await connection.getAccountInfo(vaultTokenAccount);
-        const vaultNeedsCreation = !vaultAccountInfo;
-
-        if (vaultNeedsCreation) {
-            console.log(`   ⚠️  Vault token account doesn't exist - will create it`);
-        }
-
-        // Check if treasury fee token account already exists (for launch fee)
-        const treasuryFeeAccountInfo = await connection.getAccountInfo(treasuryFeeTokenAccount);
-        const treasuryFeeNeedsCreation = !treasuryFeeAccountInfo;
-
-        if (treasuryFeeNeedsCreation) {
-            console.log(`   ⚠️  Treasury fee token account doesn't exist - will create it`);
-        }
-
         // Convert box price and launch fee to BN
         const boxPriceBN = new BN(boxPrice);
         const projectIdBN = new BN(currentProjectId); // Use the validated/adjusted project ID
@@ -230,27 +214,25 @@ router.post('/build-initialize-project-tx', async (req, res) => {
         // Build the combined transaction
         const combinedTransaction = new Transaction();
 
-        // Step 1a: Create vault ATA if it doesn't exist
-        if (vaultNeedsCreation) {
-            const createVaultAtaIx = createAssociatedTokenAccountInstruction(
-                ownerPubkey, // payer
-                vaultTokenAccount, // ata
-                vaultAuthorityPDA, // owner
-                paymentTokenMintPubkey // mint
-            );
-            combinedTransaction.add(createVaultAtaIx);
-        }
+        // Step 1a: Create vault ATA (idempotent - no-op if exists, avoids RPC cache issues)
+        const createVaultAtaIx = createAssociatedTokenAccountIdempotentInstruction(
+            ownerPubkey, // payer
+            vaultTokenAccount, // ata
+            vaultAuthorityPDA, // owner
+            paymentTokenMintPubkey // mint
+        );
+        combinedTransaction.add(createVaultAtaIx);
+        console.log(`   Added: Create vault ATA instruction (idempotent)`);
 
-        // Step 1b: Create treasury fee token account if it doesn't exist (for launch fee)
-        if (treasuryFeeNeedsCreation) {
-            const createTreasuryFeeAtaIx = createAssociatedTokenAccountInstruction(
-                ownerPubkey, // payer
-                treasuryFeeTokenAccount, // ata
-                treasuryPDA, // owner (treasury PDA)
-                feeTokenMintPubkey // mint (3EYES token)
-            );
-            combinedTransaction.add(createTreasuryFeeAtaIx);
-        }
+        // Step 1b: Create treasury fee token account (idempotent - for launch fee)
+        const createTreasuryFeeAtaIx = createAssociatedTokenAccountIdempotentInstruction(
+            ownerPubkey, // payer
+            treasuryFeeTokenAccount, // ata
+            treasuryPDA, // owner (treasury PDA)
+            feeTokenMintPubkey // mint (3EYES token)
+        );
+        combinedTransaction.add(createTreasuryFeeAtaIx);
+        console.log(`   Added: Create treasury fee ATA instruction (idempotent)`);
 
         // Step 2: Build the Anchor initialize_project instruction
         const luckIntervalBN = new BN(luckInterval);
@@ -301,7 +283,8 @@ router.post('/build-initialize-project-tx', async (req, res) => {
 
         console.log(`\n✅ Transaction built successfully!`);
         console.log(`   Transaction includes:`);
-        console.log(`   - Create vault ATA (if needed): ${vaultNeedsCreation}`);
+        console.log(`   - Create vault ATA (idempotent)`);
+        console.log(`   - Create treasury fee ATA (idempotent)`);
         console.log(`   - Initialize project on-chain`);
         console.log(`   - Fund vault with ${Number(vaultFundAmount) / 1e9} tokens (dynamic: ~${Math.round(Number(vaultFundAmount) / Number(boxPriceBigInt))}x box price)`);
         console.log(`   Transaction will be signed by frontend wallet`);
@@ -547,27 +530,18 @@ router.post('/build-fund-vault-tx', async (req, res) => {
         console.log(`   Vault token account: ${vaultTokenAccount.toString()}`);
         console.log(`   Owner token account: ${ownerTokenAccount.toString()}`);
 
-        // Check if vault token account exists
-        const vaultAccountInfo = await connection.getAccountInfo(vaultTokenAccount);
-        const vaultNeedsCreation = !vaultAccountInfo;
-
-        if (vaultNeedsCreation) {
-            console.log(`   ⚠️  Vault token account doesn't exist - will create it`);
-        }
-
         // Build transaction
         const transaction = new Transaction();
 
-        // If vault ATA doesn't exist, add instruction to create it
-        if (vaultNeedsCreation) {
-            const createVaultAtaIx = createAssociatedTokenAccountInstruction(
-                ownerPubkey, // payer
-                vaultTokenAccount, // ata
-                vaultAuthorityPDA, // owner
-                paymentTokenMintPubkey // mint
-            );
-            transaction.add(createVaultAtaIx);
-        }
+        // Create vault ATA (idempotent - no-op if exists, avoids RPC cache issues)
+        const createVaultAtaIx = createAssociatedTokenAccountIdempotentInstruction(
+            ownerPubkey, // payer
+            vaultTokenAccount, // ata
+            vaultAuthorityPDA, // owner
+            paymentTokenMintPubkey // mint
+        );
+        transaction.add(createVaultAtaIx);
+        console.log(`   Added: Create vault ATA instruction (idempotent)`);
 
         // Add SPL token transfer instruction
         // Using @solana/spl-token's createTransferInstruction
@@ -976,22 +950,6 @@ router.post('/build-create-box-tx', async (req, res) => {
         console.log(`   → Platform treasury: ${Number(commissionAmount) / Math.pow(10, decimals)} ${symbol} (${commissionBps / 100}%)`);
         console.log(`   → Creator vault: ${Number(creatorAmount) / Math.pow(10, decimals)} ${symbol} (${(10000 - commissionBps) / 100}%)`);
 
-        // Check if vault token account exists, create it if needed
-        const vaultAccountInfo = await connection.getAccountInfo(vaultTokenAccount);
-        const vaultNeedsCreation = !vaultAccountInfo;
-
-        if (vaultNeedsCreation) {
-            console.log(`   ⚠️  Vault token account doesn't exist - will create it`);
-        }
-
-        // Check if treasury token account exists, create it if needed
-        const treasuryAccountInfo = await connection.getAccountInfo(treasuryTokenAccount);
-        const treasuryNeedsCreation = !treasuryAccountInfo;
-
-        if (treasuryNeedsCreation) {
-            console.log(`   ⚠️  Treasury token account doesn't exist - will create it`);
-        }
-
         // ========================================
         // BUILD TRANSACTION (no Switchboard - that happens at commit time)
         // ========================================
@@ -999,29 +957,26 @@ router.post('/build-create-box-tx', async (req, res) => {
 
         const transaction = new Transaction();
 
-        // 1. Create vault ATA if needed (buyer pays)
-        if (vaultNeedsCreation) {
-            const createVaultIx = createAssociatedTokenAccountInstruction(
-                buyerPubkey, // payer
-                vaultTokenAccount, // ata
-                vaultAuthorityPDA, // owner
-                paymentTokenMintPubkey // mint
-            );
-            transaction.add(createVaultIx);
-            console.log(`   Added: Create vault ATA instruction`);
-        }
+        // 1. Create vault ATA (idempotent - no-op if exists, avoids RPC cache issues)
+        const createVaultIx = createAssociatedTokenAccountIdempotentInstruction(
+            buyerPubkey, // payer
+            vaultTokenAccount, // ata
+            vaultAuthorityPDA, // owner
+            paymentTokenMintPubkey // mint
+        );
+        transaction.add(createVaultIx);
+        console.log(`   Added: Create vault ATA instruction (idempotent)`);
 
-        // 2. Create treasury ATA if needed (buyer pays - first box purchase for this token)
-        if (treasuryNeedsCreation) {
-            const createTreasuryIx = createAssociatedTokenAccountInstruction(
-                buyerPubkey, // payer
-                treasuryTokenAccount, // ata
-                treasuryPDA, // owner
-                paymentTokenMintPubkey // mint
-            );
-            transaction.add(createTreasuryIx);
-            console.log(`   Added: Create treasury ATA instruction`);
-        }
+        // 2. Create treasury ATA (idempotent - no-op if exists, avoids RPC cache issues)
+        const createTreasuryIx = createAssociatedTokenAccountIdempotentInstruction(
+            buyerPubkey, // payer
+            treasuryTokenAccount, // ata
+            treasuryPDA, // owner
+            paymentTokenMintPubkey // mint
+        );
+        transaction.add(createTreasuryIx);
+        console.log(`   Added: Create treasury ATA instruction (idempotent)`);
+
 
         // 3. Create box (no randomness - will be committed when user opens)
         // Payment is split: creator portion to vault, commission to treasury
@@ -1313,12 +1268,6 @@ router.post('/build-create-boxes-batch-tx', async (req, res) => {
             commissionBps = platformConfigInfo.data.readUInt16LE(commissionOffset);
         }
 
-        // Check if ATAs exist (only need to create in first transaction)
-        const vaultAccountInfo = await connection.getAccountInfo(vaultTokenAccount);
-        const vaultNeedsCreation = !vaultAccountInfo;
-        const treasuryAccountInfo = await connection.getAccountInfo(treasuryTokenAccount);
-        const treasuryNeedsCreation = !treasuryAccountInfo;
-
         // Calculate fee info for logging
         const boxPriceRaw = BigInt(project.box_price);
         const commissionAmount = (boxPriceRaw * BigInt(commissionBps)) / BigInt(10000);
@@ -1347,29 +1296,26 @@ router.post('/build-create-boxes-batch-tx', async (req, res) => {
             const boxIdsInTx = [];
             const boxPDAsInTx = [];
 
-            // Only create ATAs in the first transaction
+            // Always add idempotent ATA creation in first transaction to avoid RPC cache issues
+            // The idempotent instruction is a no-op if the account already exists
             if (isFirstTx) {
-                if (vaultNeedsCreation) {
-                    const createVaultIx = createAssociatedTokenAccountInstruction(
-                        buyerPubkey,
-                        vaultTokenAccount,
-                        vaultAuthorityPDA,
-                        paymentTokenMintPubkey
-                    );
-                    transaction.add(createVaultIx);
-                    console.log(`   Added: Create vault ATA instruction`);
-                }
+                const createVaultIx = createAssociatedTokenAccountIdempotentInstruction(
+                    buyerPubkey,
+                    vaultTokenAccount,
+                    vaultAuthorityPDA,
+                    paymentTokenMintPubkey
+                );
+                transaction.add(createVaultIx);
+                console.log(`   Added: Create vault ATA instruction (idempotent)`);
 
-                if (treasuryNeedsCreation) {
-                    const createTreasuryIx = createAssociatedTokenAccountInstruction(
-                        buyerPubkey,
-                        treasuryTokenAccount,
-                        treasuryPDA,
-                        paymentTokenMintPubkey
-                    );
-                    transaction.add(createTreasuryIx);
-                    console.log(`   Added: Create treasury ATA instruction`);
-                }
+                const createTreasuryIx = createAssociatedTokenAccountIdempotentInstruction(
+                    buyerPubkey,
+                    treasuryTokenAccount,
+                    treasuryPDA,
+                    paymentTokenMintPubkey
+                );
+                transaction.add(createTreasuryIx);
+                console.log(`   Added: Create treasury ATA instruction (idempotent)`);
             }
 
             // Add create_box instructions for each box in this transaction

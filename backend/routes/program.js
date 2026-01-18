@@ -2299,11 +2299,14 @@ router.post('/build-reveal-box-tx', async (req, res) => {
     } catch (error) {
         console.error('❌ Error building reveal box transaction:', error);
 
+        const { projectId, boxId, ownerWallet } = req.body;
+
         // Classify the error for better frontend handling
         let errorCode = 'REVEAL_ERROR';
         let errorMessage = 'Failed to build reveal box transaction';
         let isRetryable = false;
         let retryAfterSeconds = null;
+        let isOracleFailure = false;
 
         // Check for Switchboard oracle/DNS failures
         if (error.message?.includes('ENOTFOUND') ||
@@ -2314,6 +2317,7 @@ router.post('/build-reveal-box-tx', async (req, res) => {
             errorMessage = 'Switchboard oracle service is temporarily unavailable. This is not your fault - the oracle network is experiencing issues.';
             isRetryable = true;
             retryAfterSeconds = 60; // Suggest retry after 1 minute
+            isOracleFailure = true;
         }
         // Check for oracle timeout/503 errors
         else if (error.message?.includes('503') ||
@@ -2324,6 +2328,7 @@ router.post('/build-reveal-box-tx', async (req, res) => {
             errorMessage = 'Switchboard oracle is not responding. Please try again in a few minutes.';
             isRetryable = true;
             retryAfterSeconds = 30;
+            isOracleFailure = true;
         }
         // Check for insufficient funds
         else if (error.message?.includes('insufficient') ||
@@ -2341,8 +2346,35 @@ router.post('/build-reveal-box-tx', async (req, res) => {
             isRetryable = false;
         }
 
-        // Note: We can't calculate time remaining here since 'box' is not in scope
-        // The frontend can re-fetch box data if needed for the countdown
+        // Mark box as refund-eligible if it's an oracle failure (not user's fault)
+        if (isOracleFailure && projectId && boxId !== undefined) {
+            try {
+                // Get project UUID first
+                const { data: project } = await supabase
+                    .from('projects')
+                    .select('id')
+                    .eq('project_numeric_id', projectId)
+                    .single();
+
+                if (project) {
+                    const { error: updateError } = await supabase
+                        .from('boxes')
+                        .update({ refund_eligible: true })
+                        .eq('project_id', project.id)
+                        .eq('box_number', boxId)
+                        .eq('owner_wallet', ownerWallet)
+                        .eq('box_result', 0); // Only if still pending
+
+                    if (updateError) {
+                        console.error('   Failed to mark box as refund-eligible:', updateError);
+                    } else {
+                        console.log(`   ⚠️ Marked box ${boxId} as refund-eligible due to oracle failure`);
+                    }
+                }
+            } catch (dbError) {
+                console.error('   Error marking box as refund-eligible:', dbError.message);
+            }
+        }
 
         return res.status(500).json({
             success: false,
@@ -2351,6 +2383,7 @@ router.post('/build-reveal-box-tx', async (req, res) => {
             details: error.message,
             isRetryable,
             retryAfterSeconds,
+            refundEligible: isOracleFailure,
         });
     }
 });

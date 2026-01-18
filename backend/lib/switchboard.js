@@ -121,10 +121,10 @@ export async function createCommitInstruction(randomness, network = 'devnet', au
  * @param {Object} randomness - Switchboard Randomness instance
  * @param {PublicKey} payer - The payer for the reveal transaction (buyer's wallet)
  * @param {string} network - Network name ('devnet' or 'mainnet')
- * @param {number} maxRetries - Maximum number of retry attempts (default: 3)
+ * @param {number} maxRetries - Maximum number of retry attempts (default: 2, fail fast)
  * @returns {Promise<TransactionInstruction>} Reveal instruction
  */
-export async function createRevealInstruction(randomness, payer, network = 'devnet', maxRetries = 3) {
+export async function createRevealInstruction(randomness, payer, network = 'devnet', maxRetries = 2) {
     console.log(`[Switchboard] Creating reveal instruction...`);
     console.log(`   Randomness pubkey: ${randomness.pubkey.toString()}`);
     console.log(`   Payer: ${payer ? payer.toString() : 'provider wallet (default)'}`);

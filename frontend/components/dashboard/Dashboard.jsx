@@ -1610,13 +1610,13 @@ function BoxCard({ box, project, onRefresh }) {
             </div>
             <p className="text-degen-black font-medium">Box #{box.box_number}</p>
 
-            {/* Status / Result */}
-            {isPending ? (
-                <DegenBadge variant="warning" size="sm" className="mt-2">
-                    Ready to Open
-                </DegenBadge>
-            ) : isRefundEligible ? (
-                <div className="mt-2">
+            {/* Status / Result - Fixed height container */}
+            <div className="mt-2 h-[42px] flex flex-col items-center justify-center">
+                {isPending ? (
+                    <DegenBadge variant="warning" size="sm">
+                        Ready to Open
+                    </DegenBadge>
+                ) : isRefundEligible ? (
                     <div className="flex items-center justify-center gap-1">
                         <DegenBadge variant="default" size="sm">
                             Refund Available
@@ -1629,20 +1629,18 @@ function BoxCard({ box, project, onRefresh }) {
                             )}
                         </QuestionMarkTooltip>
                     </div>
-                </div>
-            ) : isRefunded ? (
-                <div className="mt-2">
-                    <DegenBadge variant="default" size="sm">
-                        Refunded
-                    </DegenBadge>
-                    {box.payout_amount > 0 && (
-                        <p className="text-degen-text-muted text-xs mt-1 font-medium">
-                            {payoutFormatted} {project.payment_token_symbol}
-                        </p>
-                    )}
-                </div>
-            ) : isExpired ? (
-                <div className="mt-2">
+                ) : isRefunded ? (
+                    <>
+                        <DegenBadge variant="default" size="sm">
+                            Refunded
+                        </DegenBadge>
+                        {box.payout_amount > 0 && (
+                            <p className="text-degen-text-muted text-xs mt-1 font-medium">
+                                {payoutFormatted} {project.payment_token_symbol}
+                            </p>
+                        )}
+                    </>
+                ) : isExpired ? (
                     <div className="flex items-center justify-center gap-1">
                         <DegenBadge variant="danger" size="sm">
                             Expired - Dud
@@ -1652,134 +1650,128 @@ function BoxCard({ box, project, onRefresh }) {
                             This box was opened but not revealed within the 1-hour time limit. Boxes must be revealed promptly after opening to claim rewards.
                         </QuestionMarkTooltip>
                     </div>
-                </div>
-            ) : isCommitted ? (
-                <div className="mt-2">
+                ) : isCommitted ? (
                     <DegenBadge variant="warning" size="sm">
                         Awaiting Reveal
                     </DegenBadge>
-                </div>
-            ) : (
-                <div className="mt-2">
-                    <DegenBadge variant={getTierBadgeVariant()} size="sm">
-                        {getTierName(box.box_result)}
-                    </DegenBadge>
-                    {hasReward && !isRefunded && (
-                        <p className="text-degen-black text-xs mt-1 font-medium">
-                            {payoutFormatted} {project.payment_token_symbol}
+                ) : (
+                    <>
+                        <DegenBadge variant={getTierBadgeVariant()} size="sm">
+                            {getTierName(box.box_result)}
+                        </DegenBadge>
+                        {hasReward && !isRefunded && (
+                            <p className="text-degen-black text-xs mt-1 font-medium">
+                                {payoutFormatted} {project.payment_token_symbol}
+                            </p>
+                        )}
+                    </>
+                )}
+            </div>
+
+            {/* Error Display - Fixed height container (shows content or empty space) */}
+            <div className="h-[48px] mt-2 flex items-center justify-center">
+                {error ? (
+                    <div className="bg-red-50 border border-red-200 rounded px-2 py-1.5 w-full">
+                        <p className="text-red-700 text-xs font-medium">
+                            {error.includes('oracle') || error.includes('Oracle')
+                                ? 'Oracle Service Issue'
+                                : error.includes('Insufficient')
+                                    ? 'Insufficient Funds'
+                                    : 'Error'}
                         </p>
-                    )}
-                </div>
-            )}
+                        <p className="text-red-600 text-xs mt-0.5 break-words line-clamp-1">
+                            {error.length > 50 ? error.slice(0, 47) + '...' : error}
+                        </p>
+                    </div>
+                ) : null}
+            </div>
 
-            {/* Error Display */}
-            {error && (
-                <div className="bg-red-50 border border-red-200 rounded px-2 py-1.5 mt-2">
-                    <p className="text-red-700 text-xs font-medium">
-                        {error.includes('oracle') || error.includes('Oracle')
-                            ? 'Oracle Service Issue'
-                            : error.includes('Insufficient')
-                                ? 'Insufficient Funds'
-                                : 'Error'}
-                    </p>
-                    <p className="text-red-600 text-xs mt-0.5 break-words">
-                        {error.length > 150 ? error.slice(0, 147) + '...' : error}
-                    </p>
-                </div>
-            )}
-
-            {/* Action Button */}
-            <div className="mt-3">
+            {/* Action Button - Fixed height container */}
+            <div className="h-[36px] flex items-center justify-center">
                 {isPending ? (
                     // Step 1: Open Box (commit randomness) - with cooldown after purchase
-                    <div className="relative w-full">
-                        <button
-                            onClick={handleCommit}
-                            disabled={isProcessing || (commitCooldown !== null && commitCooldown > 0)}
-                            className={`
-                                relative w-full px-4 py-2 text-sm font-medium uppercase tracking-wider
-                                border border-degen-black overflow-hidden
-                                transition-all duration-100
-                                ${commitCooldown > 0 ? 'bg-degen-white cursor-not-allowed' : 'bg-degen-black text-degen-white hover:bg-degen-primary'}
-                            `}
-                        >
-                            {/* Progress bar that fills from left to right - black background */}
-                            {commitCooldown > 0 && (
-                                <div
-                                    className="absolute inset-y-0 left-0 bg-degen-black transition-all duration-1000 ease-linear"
-                                    style={{ width: `${((30 - commitCooldown) / 30) * 100}%` }}
-                                />
-                            )}
-                            {/* Text with mix-blend-difference - black on white, white on black */}
-                            <span className={`relative z-10 ${commitCooldown > 0 ? 'mix-blend-difference text-white' : ''}`}>
-                                {isProcessing && processingStep === 'commit'
-                                    ? 'Opening...'
-                                    : commitCooldown > 0
-                                        ? `Open in ${commitCooldown}s`
-                                        : 'Open Box'}
-                            </span>
-                        </button>
-                    </div>
+                    <button
+                        onClick={handleCommit}
+                        disabled={isProcessing || (commitCooldown !== null && commitCooldown > 0)}
+                        className={`
+                            relative w-full h-[36px] text-sm font-medium uppercase tracking-wider
+                            border border-degen-black overflow-hidden
+                            transition-all duration-100
+                            ${commitCooldown > 0 ? 'bg-degen-white cursor-not-allowed' : 'bg-degen-black text-degen-white hover:bg-degen-primary'}
+                        `}
+                    >
+                        {/* Progress bar that fills from left to right - black background */}
+                        {commitCooldown > 0 && (
+                            <div
+                                className="absolute inset-y-0 left-0 bg-degen-black transition-all duration-1000 ease-linear"
+                                style={{ width: `${((30 - commitCooldown) / 30) * 100}%` }}
+                            />
+                        )}
+                        {/* Text with mix-blend-difference - black on white, white on black */}
+                        <span className={`relative z-10 ${commitCooldown > 0 ? 'mix-blend-difference text-white' : ''}`}>
+                            {isProcessing && processingStep === 'commit'
+                                ? 'Opening...'
+                                : commitCooldown > 0
+                                    ? `Open in ${commitCooldown}s`
+                                    : 'Open Box'}
+                        </span>
+                    </button>
                 ) : isRefundEligible ? (
-                    // Refund available - show refund button (same style as dud/default)
+                    // Refund available - show refund button
                     <button
                         onClick={handleRefund}
                         disabled={isProcessing}
-                        className="w-full px-4 py-2 text-sm font-medium uppercase tracking-wider bg-degen-black text-degen-white border border-degen-black hover:bg-degen-primary transition-all duration-100"
+                        className="w-full h-[36px] text-sm font-medium uppercase tracking-wider bg-degen-black text-degen-white border border-degen-black hover:bg-degen-primary transition-all duration-100"
                     >
                         {isProcessing && processingStep === 'refund' ? 'Refunding...' : 'Claim Refund'}
                     </button>
                 ) : isRefunded ? (
-                    // Already refunded
+                    // Already refunded - text centered in fixed height
                     <span className="text-degen-text-muted text-xs font-medium">Refund claimed</span>
                 ) : isExpired ? (
-                    // Expired - show dud state
+                    // Expired - text centered in fixed height
                     <span className="text-degen-text-muted text-xs">Reveal window expired</span>
                 ) : isCommitted ? (
                     // Step 2: Reveal Box (after commit) - with progress bar
-                    <div className="relative w-full">
-                        <button
-                            onClick={handleReveal}
-                            disabled={isProcessing || revealCountdown > 0}
-                            className={`
-                                relative w-full px-4 py-2 text-sm font-medium uppercase tracking-wider
-                                border border-degen-black overflow-hidden
-                                transition-all duration-100
-                                ${revealCountdown > 0 ? 'bg-degen-container text-degen-text-muted cursor-not-allowed' : 'bg-degen-yellow text-degen-black hover:bg-degen-black hover:text-degen-white'}
-                            `}
-                        >
-                            {/* Progress bar that fills from left to right */}
-                            {revealCountdown > 0 && (
-                                <div
-                                    className="absolute inset-y-0 left-0 bg-degen-yellow/60 transition-all duration-1000 ease-linear"
-                                    style={{ width: `${revealProgress}%` }}
-                                />
-                            )}
-                            <span className="relative z-10">
-                                {isProcessing && processingStep === 'reveal'
-                                    ? 'Revealing...'
-                                    : revealCountdown > 0
-                                        ? `Reveal in ${revealCountdown}s`
-                                        : 'Reveal Box'}
-                            </span>
-                        </button>
-                    </div>
+                    <button
+                        onClick={handleReveal}
+                        disabled={isProcessing || revealCountdown > 0}
+                        className={`
+                            relative w-full h-[36px] text-sm font-medium uppercase tracking-wider
+                            border border-degen-black overflow-hidden
+                            transition-all duration-100
+                            ${revealCountdown > 0 ? 'bg-degen-container text-degen-text-muted cursor-not-allowed' : 'bg-degen-yellow text-degen-black hover:bg-degen-black hover:text-degen-white'}
+                        `}
+                    >
+                        {/* Progress bar that fills from left to right */}
+                        {revealCountdown > 0 && (
+                            <div
+                                className="absolute inset-y-0 left-0 bg-degen-yellow/60 transition-all duration-1000 ease-linear"
+                                style={{ width: `${revealProgress}%` }}
+                            />
+                        )}
+                        <span className="relative z-10">
+                            {isProcessing && processingStep === 'reveal'
+                                ? 'Revealing...'
+                                : revealCountdown > 0
+                                    ? `Reveal in ${revealCountdown}s`
+                                    : 'Reveal Box'}
+                        </span>
+                    </button>
                 ) : hasReward && !box.settled_at ? (
                     // Revealed with reward - claim button
-                    <DegenButton
+                    <button
                         onClick={handleClaim}
                         disabled={isProcessing}
-                        variant="success"
-                        size="sm"
-                        fullWidth
+                        className="w-full h-[36px] text-sm font-medium uppercase tracking-wider bg-degen-green text-degen-black border border-degen-black hover:bg-degen-black hover:text-degen-white transition-all duration-100"
                     >
                         {isProcessing && processingStep === 'claim' ? 'Claiming...' : 'Claim'}
-                    </DegenButton>
+                    </button>
                 ) : hasReward ? (
-                    // Already claimed
+                    // Already claimed - badge centered in fixed height
                     <DegenBadge variant="success" size="sm">Claimed</DegenBadge>
                 ) : (
-                    // Revealed but no reward (dud)
+                    // Revealed but no reward (dud) - text centered in fixed height
                     <span className="text-degen-text-muted text-xs">No reward</span>
                 )}
             </div>

@@ -115,107 +115,93 @@ export async function createCommitInstruction(randomness, network = 'devnet', au
  * This should be called after waiting 5-10 seconds for oracles to process
  * Uses SDK method which contacts the specific oracle that committed the randomness.
  *
- * NOTE: Devnet oracles can be unreliable (503 errors, timeouts). The function
- * includes retry logic with exponential backoff for transient failures.
+ * NOTE: This function FAILS FAST with no retries. Oracle issues result in
+ * immediate failure so the box can be marked for refund. Users should not
+ * wait indefinitely - better UX to fail fast and offer refund.
  *
  * @param {Object} randomness - Switchboard Randomness instance
  * @param {PublicKey} payer - The payer for the reveal transaction (buyer's wallet)
  * @param {string} network - Network name ('devnet' or 'mainnet')
- * @param {number} maxRetries - Maximum number of retry attempts (default: 2, fail fast)
+ * @param {number} timeoutMs - Timeout in milliseconds (default: 10000ms = 10s)
  * @returns {Promise<TransactionInstruction>} Reveal instruction
  */
-export async function createRevealInstruction(randomness, payer, network = 'devnet', maxRetries = 2) {
-    console.log(`[Switchboard] Creating reveal instruction...`);
+export async function createRevealInstruction(randomness, payer, network = 'devnet', timeoutMs = 10000) {
+    console.log(`[Switchboard] Creating reveal instruction (fail-fast, ${timeoutMs}ms timeout)...`);
     console.log(`   Randomness pubkey: ${randomness.pubkey.toString()}`);
     console.log(`   Payer: ${payer ? payer.toString() : 'provider wallet (default)'}`);
     console.log(`   Network: ${network}`);
 
-    let lastError;
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            // IMPORTANT: Only use SDK method (revealIx) - DO NOT use crossbar fallback!
-            // The crossbar fetches from a DIFFERENT oracle than the one that committed,
-            // which causes InvalidSecpSignature errors (0x1780).
-            // The SDK method uses the original oracle that committed the randomness.
-            let revealIx;
-            console.log(`   Attempt ${attempt}/${maxRetries}: Trying SDK revealIx...`);
+    // Wrap the SDK call in a timeout to prevent indefinite hangs
+    const revealWithTimeout = () => {
+        return new Promise(async (resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+                reject(new Error(`Oracle request timed out after ${timeoutMs}ms`));
+            }, timeoutMs);
 
             try {
-                revealIx = await randomness.revealIx(payer);
-                console.log(`   SDK revealIx succeeded!`);
-            } catch (sdkError) {
-                // Log the error but DON'T use crossbar - it will cause InvalidSecpSignature
-                console.log(`   SDK failed: ${sdkError.message}`);
+                // IMPORTANT: Only use SDK method (revealIx) - DO NOT use crossbar fallback!
+                // The crossbar fetches from a DIFFERENT oracle than the one that committed,
+                // which causes InvalidSecpSignature errors (0x1780).
+                const revealIx = await randomness.revealIx(payer);
+                clearTimeout(timeoutId);
+                resolve(revealIx);
+            } catch (error) {
+                clearTimeout(timeoutId);
+                reject(error);
+            }
+        });
+    };
 
-                // If it's a 503 or timeout, we should retry the SDK method with exponential backoff
-                const isRetryable = sdkError.message?.includes('503') ||
-                    sdkError.message?.includes('timeout') ||
-                    sdkError.message?.includes('ETIMEDOUT') ||
-                    sdkError.message?.includes('ECONNREFUSED') ||
-                    sdkError.message?.includes('Service Unavailable') ||
-                    sdkError.message?.includes('ENOTFOUND');
+    try {
+        console.log(`   Calling SDK revealIx (no retries, fail fast)...`);
+        const revealIx = await revealWithTimeout();
+        console.log(`   SDK revealIx succeeded!`);
 
-                if (isRetryable && attempt < maxRetries) {
-                    // Delays for devnet: 3s, 6s, 9s
-                    const delayMs = attempt * 3000;
-                    console.log(`   Oracle unavailable. Waiting ${delayMs/1000}s before retry ${attempt + 1}/${maxRetries}...`);
-                    await new Promise(resolve => setTimeout(resolve, delayMs));
-                    continue; // Go to next attempt
+        // Replace any signer that matches the backend wallet with the buyer's wallet
+        if (payer) {
+            revealIx.keys = revealIx.keys.map(key => {
+                if (key.isSigner && key.isWritable &&
+                    key.pubkey.toString() !== randomness.pubkey.toString()) {
+                    console.log(`   Replacing payer ${key.pubkey.toString()} with buyer ${payer.toString()}`);
+                    return {
+                        ...key,
+                        pubkey: payer,
+                    };
                 }
-
-                throw sdkError;
-            }
-
-            // Replace any signer that matches the backend wallet with the buyer's wallet
-            if (payer) {
-                revealIx.keys = revealIx.keys.map(key => {
-                    if (key.isSigner && key.isWritable &&
-                        key.pubkey.toString() !== randomness.pubkey.toString()) {
-                        console.log(`   Replacing payer ${key.pubkey.toString()} with buyer ${payer.toString()}`);
-                        return {
-                            ...key,
-                            pubkey: payer,
-                        };
-                    }
-                    return key;
-                });
-            }
-
-            console.log(`   Reveal instruction created successfully`);
-            console.log(`   Instruction program: ${revealIx.programId.toString()}`);
-            console.log(`   Instruction keys: ${revealIx.keys.length} accounts`);
-
-            const signers = revealIx.keys.filter(k => k.isSigner);
-            console.log(`   Required signers: ${signers.map(s => s.pubkey.toString()).join(', ')}`);
-
-            return revealIx;
-
-        } catch (error) {
-            lastError = error;
-            const isNetworkError = error.code === 'ECONNREFUSED' ||
-                error.code === 'ETIMEDOUT' ||
-                error.code === 'ENOTFOUND' ||
-                error.message?.includes('connect') ||
-                error.message?.includes('timeout') ||
-                error.message?.includes('503') ||
-                error.message?.includes('Service Unavailable');
-
-            if (isNetworkError && attempt < maxRetries) {
-                const delayMs = attempt * 3000;
-                console.log(`[Switchboard] Network error (attempt ${attempt}/${maxRetries}), retrying in ${delayMs/1000}s...`);
-                await new Promise(resolve => setTimeout(resolve, delayMs));
-            } else {
-                console.error(`[Switchboard] Error creating reveal instruction:`, error.message);
-                if (attempt >= maxRetries) {
-                    throw new Error(`Switchboard oracle unavailable after ${maxRetries} attempts. (${error.message})`);
-                }
-                throw error;
-            }
+                return key;
+            });
         }
-    }
 
-    throw lastError;
+        console.log(`   Reveal instruction created successfully`);
+        console.log(`   Instruction program: ${revealIx.programId.toString()}`);
+        console.log(`   Instruction keys: ${revealIx.keys.length} accounts`);
+
+        const signers = revealIx.keys.filter(k => k.isSigner);
+        console.log(`   Required signers: ${signers.map(s => s.pubkey.toString()).join(', ')}`);
+
+        return revealIx;
+
+    } catch (error) {
+        console.error(`[Switchboard] Error creating reveal instruction:`, error.message);
+
+        // Provide clear error message for common failures
+        const isOracleError = error.message?.includes('503') ||
+            error.message?.includes('timeout') ||
+            error.message?.includes('timed out') ||
+            error.message?.includes('ETIMEDOUT') ||
+            error.message?.includes('ECONNREFUSED') ||
+            error.message?.includes('Service Unavailable') ||
+            error.message?.includes('ENOTFOUND') ||
+            error.code === 'ECONNREFUSED' ||
+            error.code === 'ETIMEDOUT' ||
+            error.code === 'ENOTFOUND';
+
+        if (isOracleError) {
+            throw new Error(`Switchboard oracle unavailable. (${error.message})`);
+        }
+
+        throw error;
+    }
 }
 
 /**

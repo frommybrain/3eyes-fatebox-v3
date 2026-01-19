@@ -187,6 +187,23 @@ export default function ProjectPage({ subdomain }) {
                 transaction.recentBlockhash = blockhash;
                 transaction.lastValidBlockHeight = lastValidBlockHeight;
 
+                // Pre-simulate to catch errors before Phantom does
+                // This helps us debug the "transaction reverted" warning
+                console.log('🔍 Pre-simulating transaction...');
+                try {
+                    const simulation = await connection.simulateTransaction(transaction);
+                    if (simulation.value.err) {
+                        console.error('❌ Simulation failed:', simulation.value.err);
+                        console.error('Logs:', simulation.value.logs);
+                        // Don't throw - let Phantom show the warning, user can still proceed
+                        console.warn('⚠️ Simulation failed but proceeding anyway (Phantom will show warning)');
+                    } else {
+                        console.log('✅ Simulation successful');
+                    }
+                } catch (simErr) {
+                    console.warn('⚠️ Simulation error (non-fatal):', simErr.message);
+                }
+
                 console.log('🔑 Requesting wallet signature...');
 
                 // Send transaction using wallet adapter

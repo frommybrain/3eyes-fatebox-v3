@@ -115,22 +115,6 @@ export default function Header() {
               </Link>
             )}
 
-            {onSubdomain ? (
-              <a
-                href={getHref('/projects')}
-                className="px-4 py-2 text-degen-black/80 hover:text-degen-black hover:bg-degen-black/5 transition-colors font-medium text-sm uppercase tracking-wider"
-              >
-                Projects
-              </a>
-            ) : (
-              <Link
-                href="/projects"
-                className="px-4 py-2 text-degen-black/80 hover:text-degen-black hover:bg-degen-black/5 transition-colors font-medium text-sm uppercase tracking-wider"
-              >
-                Projects
-              </Link>
-            )}
-
             {isAdmin && (
               onSubdomain ? (
                 <a

@@ -25,6 +25,7 @@ import {
     useTransaction,
     WinModal,
     BadgeModal,
+    XLogo,
 } from '@/components/ui';
 import { getWinShareHandler, getMyProjectShareHandler } from '@/lib/shareManager';
 
@@ -1093,6 +1094,24 @@ function BoxCard({ box, project, onRefresh }) {
             if (!buildResult.success) {
                 // Handle specific error codes from backend
                 const errorCode = buildResult.errorCode;
+                console.log('Reveal failed:', { errorCode, refundEligible: buildResult.refundEligible, error: buildResult.error });
+
+                // PRIORITY: If backend marked as refund-eligible, update UI immediately
+                // This takes precedence over other error handling to ensure user can claim refund
+                if (buildResult.refundEligible === true) {
+                    console.log('Box marked as refund-eligible by backend - updating UI immediately');
+                    startBoxTransition(() => {
+                        setOptimisticBox({
+                            refund_eligible: true,
+                            randomness_committed: false  // Clear committed state so box shows refund UI
+                        });
+                    });
+                    // Don't show error message - the refund UI with info tooltip is sufficient
+                    setError(null);
+                    endTransaction(false, 'Refund available');
+                    if (onRefresh) onRefresh();
+                    return;
+                }
 
                 // Check if expired - box becomes a Dud
                 if (buildResult.expired || errorCode === 'REVEAL_EXPIRED') {
@@ -1109,20 +1128,9 @@ function BoxCard({ box, project, onRefresh }) {
                     return;
                 }
 
-                // Handle oracle unavailability with helpful messaging
+                // Handle oracle unavailability - show retry message
+                // Note: If refundEligible was true, it was already handled above
                 if (errorCode === 'ORACLE_UNAVAILABLE' || errorCode === 'ORACLE_TIMEOUT') {
-                    // Backend already marked box as refund-eligible, update UI immediately
-                    if (buildResult.refundEligible) {
-                        console.log('Box marked as refund-eligible by backend');
-                        startBoxTransition(() => {
-                            setOptimisticBox({ refund_eligible: true });
-                        });
-                        setError('Oracle unavailable. A refund is now available for this box.');
-                        endTransaction(false, 'Refund available');
-                        return;
-                    }
-
-                    // Fallback: show retry message if not yet refund-eligible
                     const timeRemaining = buildResult.timeRemainingSeconds;
                     let timeMsg = '';
                     if (timeRemaining && timeRemaining > 0) {
@@ -1324,11 +1332,15 @@ function BoxCard({ box, project, onRefresh }) {
                     const markResult = await markResponse.json();
                     if (markResult.success) {
                         console.log('Box marked as refund-eligible due to system error');
-                        // Update optimistic state to immediately show refund button
+                        // Update optimistic state to immediately show refund UI
                         startBoxTransition(() => {
-                            setOptimisticBox({ refund_eligible: true });
+                            setOptimisticBox({
+                                refund_eligible: true,
+                                randomness_committed: false  // Clear committed state so box shows refund UI
+                            });
                         });
-                        errorMessage = 'System error occurred. A refund is now available for this box.';
+                        // Don't show error - the refund UI with info tooltip is sufficient
+                        errorMessage = null;
                     }
                 } catch (markErr) {
                     console.error('Failed to mark box as refund-eligible:', markErr);
@@ -1928,7 +1940,7 @@ function ProjectCard({ project }) {
                     size="sm"
                     title="Share on X"
                 >
-                    X
+                    <XLogo size={14} />
                 </DegenButton>
             </div>
         </DegenCard>

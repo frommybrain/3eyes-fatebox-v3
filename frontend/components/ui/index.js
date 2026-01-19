@@ -10,3 +10,5 @@ export { DegenToastProvider, useToast } from './DegenToast';
 export { default as DegenMessage, DegenSuccessMessage, DegenErrorMessage, DegenWarningMessage, DegenInfoMessage } from './DegenMessage';
 export { TransactionProvider, useTransaction } from './TransactionOverlay';
 export { default as DegenModal, WinModal, BadgeModal, ProjectCreatedModal } from './DegenModal';
+export { default as DegenAccordion } from './DegenAccordion';
+export { default as XLogo } from './XLogo';

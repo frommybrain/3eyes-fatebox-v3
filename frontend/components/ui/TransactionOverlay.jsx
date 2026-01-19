@@ -34,7 +34,7 @@ export function TransactionProvider({ children }) {
             setIsVisible(false);
             setLogs([]);
             setStatus('idle');
-        }, success ? 2000 : 4000);
+        }, success ? 0 : 400);
     }, []);
 
     const hideOverlay = useCallback(() => {

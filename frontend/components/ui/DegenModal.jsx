@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useCallback } from 'react';
+import Image from 'next/image';
 import DegenButton from './DegenButton';
 
 const variants = {
@@ -148,13 +149,13 @@ export default function DegenModal({
                 )}
 
                 {/* Content */}
-                <div className="p-4">
+                <div className="p-2">
                     {children}
                 </div>
 
                 {/* Footer with share button */}
                 {(showShare || showClose) && (
-                    <div className="flex gap-2 p-4 pt-0">
+                    <div className="flex gap-2 p-2 pt-0">
                         {showShare && onShare && (
                             <DegenButton
                                 onClick={onShare}
@@ -199,7 +200,7 @@ export default function DegenModal({
 }
 
 /**
- * WinModal - Pre-configured modal for displaying win results
+ * WinModal - Pre-configured modal for displaying win results with card images
  */
 export function WinModal({
     isOpen,
@@ -210,10 +211,10 @@ export function WinModal({
     onShare,
 }) {
     const tierConfig = {
-        2: { name: 'Rebate', variant: 'default', emoji: '' },
-        3: { name: 'Break-even', variant: 'default', emoji: '' },
-        4: { name: 'Profit', variant: 'success', emoji: '' },
-        5: { name: 'Jackpot', variant: 'jackpot', emoji: '' },
+        2: { name: 'Rebate', variant: 'default', image: '/images/cards/db_card_rebate.png' },
+        3: { name: 'Break-even', variant: 'default', image: '/images/cards/db_card_break-even.png' },
+        4: { name: 'Profit', variant: 'success', image: '/images/cards/db_card_profit.png' },
+        5: { name: 'Jackpot', variant: 'jackpot', image: '/images/cards/db_card_jackpot.png' },
     };
 
     const config = tierConfig[tier] || tierConfig[2];
@@ -222,24 +223,47 @@ export function WinModal({
         <DegenModal
             isOpen={isOpen}
             onClose={onClose}
-            title={tier === 5 ? 'JACKPOT!' : 'Winner!'}
+            title=""
             variant={config.variant}
-            showShare={!!onShare}
-            onShare={onShare}
-            shareLabel="Share on X"
+            showShare={false}
             size="sm"
         >
-            <div className="text-center py-4">
-                <p className="text-degen-text-muted text-sm uppercase tracking-wider mb-2">
-                    You got
-                </p>
-                <p className="text-degen-black text-3xl font-medium uppercase tracking-wider mb-2">
-                    {config.name}
-                </p>
+            <div className="flex flex-col">
+                {/* Card Image */}
+                <div className="relative w-full aspect-square mb-2">
+                    <Image
+                        src={config.image}
+                        alt={config.name}
+                        fill
+                        className="object-contain"
+                    />
+                </div>
+
+                {/* Share Button */}
+                {onShare && (
+                    <DegenButton
+                        onClick={onShare}
+                        variant="primary"
+                        size="md"
+                        fullWidth
+                        className="mb-4"
+                    >
+                        Share on X
+                    </DegenButton>
+                )}
+
+                {/* Box Tier Row */}
+                <div className="flex justify-between items-center text-sm py-2 border-b border-degen-black">
+                    <span className="text-degen-text-muted uppercase tracking-wider">Box Tier</span>
+                    <span className="text-degen-black font-medium uppercase">{config.name}</span>
+                </div>
+
+                {/* Payout Row */}
                 {amount > 0 && (
-                    <p className="text-degen-black text-xl">
-                        {amount} {tokenSymbol}
-                    </p>
+                    <div className="flex justify-between items-center text-sm py-2">
+                        <span className="text-degen-text-muted uppercase tracking-wider">Payout</span>
+                        <span className="text-degen-black font-medium">{amount} ${tokenSymbol}</span>
+                    </div>
                 )}
             </div>
         </DegenModal>
@@ -270,11 +294,14 @@ export function BadgeModal({
         >
             <div className="text-center py-4">
                 {badge.icon && (
-                    <img
-                        src={badge.icon}
-                        alt={badge.name}
-                        className="w-24 h-24 mx-auto mb-4 border border-degen-black"
-                    />
+                    <div className="relative w-24 h-24 mx-auto mb-4 border border-degen-black">
+                        <Image
+                            src={badge.icon}
+                            alt={badge.name}
+                            fill
+                            className="object-contain"
+                        />
+                    </div>
                 )}
                 <p className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-2">
                     {badge.name}
@@ -313,7 +340,7 @@ export function ProjectCreatedModal({
                     {projectName}
                 </p>
                 <p className="text-degen-text-muted text-sm mb-4">
-                    Your lootbox project is now live!
+                    Your DegenBox project is now live!
                 </p>
                 {projectUrl && (
                     <a

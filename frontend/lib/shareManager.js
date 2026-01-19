@@ -8,44 +8,36 @@
 export const SHARE_TEMPLATES = {
     // Win outcomes (after box reveal)
     win_rebate: {
-        text: "Got a rebate on @DegenBoxFun!\n\nNot a total loss - the box gods showed mercy.\n\n{projectUrl}",
-        hashtags: ["DegenBox", "Solana", "Lootbox"]
+        text: "Got a rebate on DegenBox by @3eyes_iii\n\nNot a total loss - the box gods showed mercy.\n\n{projectUrl}"
     },
     win_breakeven: {
-        text: "Break-even on @DegenBoxFun!\n\nLived to degen another day.\n\n{projectUrl}",
-        hashtags: ["DegenBox", "Solana"]
+        text: "Break-even on DegenBox by @3eyes_iii\n\nLived to degen another day.\n\n{projectUrl}"
     },
     win_profit: {
-        text: "Just hit PROFIT on @DegenBoxFun!\n\n{amount} {token} secured.\n\n{projectUrl}",
-        hashtags: ["DegenBox", "Solana", "Winning"]
+        text: "Just hit PROFIT on DegenBox by @3eyes_iii\n\n{amount} {token} secured.\n\n{projectUrl}"
     },
     win_jackpot: {
-        text: "JACKPOT on @DegenBoxFun!\n\n{amount} {token} BAGGED! The degen gods are REAL.\n\n{projectUrl}",
-        hashtags: ["DegenBox", "Solana", "Jackpot", "Winning"]
+        text: "JACKPOT on DegenBox by @3eyes_iii\n\n{amount} {token} BAGGED! The degen gods are REAL.\n\n{projectUrl}"
     },
 
     // Project creation
     project_created: {
-        text: "Just launched my lootbox project on @DegenBoxFun!\n\n{projectName} is LIVE.\n\nCome test your luck: {projectUrl}",
-        hashtags: ["DegenBox", "Solana", "NewProject"]
+        text: "Just launched my lootbox project on DegenBox by @3eyes_iii\n\n{projectName} is LIVE.\n\nCome test your luck: {projectUrl}"
     },
 
     // Badge earned
     badge_earned: {
-        text: "Just earned the {badgeName} badge on @DegenBoxFun!\n\n{badgeDescription}\n\ndegenbox.fun/profile/{username}",
-        hashtags: ["DegenBox", "Achievement"]
+        text: "Just earned the {badgeName} badge on DegenBox by @3eyes_iii\n\n{badgeDescription}\n\ndegenbox.fun/profile/{username}"
     },
 
     // Profile share
     profile: {
-        text: "Check out my degen stats on @DegenBoxFun\n\n{totalBoxes} boxes opened\n{totalWins} wins\n{winRate}% win rate\n\ndegenbox.fun/profile/{username}",
-        hashtags: ["DegenBox", "Stats"]
+        text: "Check out my degen stats on DegenBox by @3eyes_iii\n\n{totalBoxes} boxes opened\n{totalWins} wins\n{winRate}% win rate\n\ndegenbox.fun/profile/{username}"
     },
 
     // My project share (from dashboard)
     my_project: {
-        text: "My lootbox project on @DegenBoxFun\n\n{projectName}\n{boxCount} boxes sold\n\n{projectUrl}",
-        hashtags: ["DegenBox", "Solana"]
+        text: "My lootbox project on DegenBox by @3eyes_iii\n\n{projectName}\n{boxCount} boxes sold\n\n{projectUrl}"
     }
 };
 
@@ -72,10 +64,6 @@ export function generateShareUrl(templateKey, variables = {}) {
     // Build URL
     const params = new URLSearchParams();
     params.set('text', text);
-
-    if (template.hashtags && template.hashtags.length > 0) {
-        params.set('hashtags', template.hashtags.join(','));
-    }
 
     return `https://x.com/intent/tweet?${params.toString()}`;
 }

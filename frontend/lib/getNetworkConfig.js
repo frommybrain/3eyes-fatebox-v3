@@ -57,6 +57,9 @@ export async function getNetworkConfig(forceRefresh = false) {
             network: data.network,
             isProduction: data.network === 'mainnet' || data.network === 'mainnet-beta',
 
+            // RPC URL - use from backend API to ensure consistency
+            rpcUrl: data.rpcUrl,
+
             // Program ID
             programId: safePublicKey(data.programId, 'programId'),
             lootboxProgramId: safePublicKey(data.programId, 'programId'), // Alias for compatibility
@@ -90,15 +93,15 @@ export async function getNetworkConfig(forceRefresh = false) {
             _needsDatabaseFallback: true,
         };
 
-        // Fetch additional fields from database (RPC URL, mints, etc. not in on-chain config)
+        // Fetch additional fields from database (mints, etc. not in on-chain config)
+        // Note: rpcUrl now comes from backend API to ensure frontend/backend use same RPC
         try {
             const { data: dbData } = await supabase
                 .from('super_admin_config')
-                .select('rpc_url, three_eyes_mint, platform_fee_account, admin_wallet, launch_fee_amount')
+                .select('three_eyes_mint, platform_fee_account, admin_wallet, launch_fee_amount')
                 .single();
 
             if (dbData) {
-                config.rpcUrl = dbData.rpc_url;
                 config.threeEyesMint = safePublicKey(dbData.three_eyes_mint, 'three_eyes_mint');
                 config.platformFeeAccount = safePublicKey(dbData.platform_fee_account, 'platform_fee_account');
                 // Only use database adminWallet if not already set from API

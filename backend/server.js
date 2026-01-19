@@ -164,6 +164,7 @@ app.get('/api/config', async (req, res) => {
                 // Network info
                 network: config.network,
                 programId: config.programId,
+                rpcUrl: config.rpcUrl, // Include RPC URL for frontend to use same RPC as backend
 
                 // Platform status
                 paused: config.paused,

@@ -15,8 +15,9 @@ import {
     DegenInput,
     DegenTextarea,
     DegenLoadingState,
+    DegenAccordion,
     useToast,
-    ProjectCreatedModal,
+    XLogo,
 } from '@/components/ui';
 import { formatTimeToMaxLuck, formatDuration, LUCK_INTERVAL_PRESETS } from '@/lib/luckHelpers';
 import { getProjectCreatedShareHandler } from '@/lib/shareManager';
@@ -32,8 +33,7 @@ export default function CreateProject() {
     const [mounted, setMounted] = useState(false);
     const [step, setStep] = useState(1); // 1: Details, 2: Review, 3: Creating, 4: Success
 
-    // Success modal state
-    const [showSuccessModal, setShowSuccessModal] = useState(false);
+    // Success state
     const [createdProjectData, setCreatedProjectData] = useState(null);
 
     // Form state
@@ -252,14 +252,13 @@ export default function CreateProject() {
                 console.warn('Warning: Failed to update database:', confirmResult.details);
             }
 
-            // Success! Show modal instead of toast
+            // Success!
             const projectUrl = getProjectUrl(fullSubdomain);
             setCreatedProjectData({
                 name: formData.name,
                 url: projectUrl,
                 subdomain: fullSubdomain,
             });
-            setShowSuccessModal(true);
             setStep(4); // Success step
 
         } catch (error) {
@@ -466,78 +465,83 @@ export default function CreateProject() {
                             />
                         </div>
 
-                        {/* Luck Settings */}
+                        {/* Advanced Settings Accordion */}
                         <div className="mb-6">
-                            <label className="block text-degen-black font-medium text-sm uppercase tracking-wider mb-2">
-                                Luck Accumulation Speed
-                            </label>
-                            <p className="text-degen-text-muted text-sm mb-3">
-                                How fast should luck accumulate? This determines how long users need to hold boxes to reach maximum luck.
-                            </p>
+                            <DegenAccordion title="Advanced">
+                                {/* Luck Accumulation Speed */}
+                                <div>
+                                    <label className="block text-degen-black font-medium text-sm uppercase tracking-wider mb-2">
+                                        Luck Accumulation Speed
+                                    </label>
+                                    <p className="text-degen-text-muted text-sm mb-3">
+                                        How fast should luck accumulate? This determines how long users need to hold boxes to reach maximum luck.
+                                    </p>
 
-                            {/* Platform Default Info */}
-                            <div className="bg-blue-50 border border-blue-200 p-3 mb-3">
-                                <p className="text-blue-800 text-sm">
-                                    <strong>Platform Default:</strong> {config?.luckIntervalSeconds ? formatDuration(config.luckIntervalSeconds) : '...'} per +1 luck
-                                    {config?.luckIntervalSeconds && (
-                                        <span className="text-blue-600"> ({formatTimeToMaxLuck(config.luckIntervalSeconds, onChainConfig?.baseLuck, onChainConfig?.maxLuck)} to max luck)</span>
-                                    )}
-                                </p>
-                            </div>
+                                    {/* Platform Default Info */}
+                                    <div className="bg-blue-50 border border-blue-200 p-3 mb-3">
+                                        <p className="text-blue-800 text-sm">
+                                            <strong>Platform Default:</strong> {config?.luckIntervalSeconds ? formatDuration(config.luckIntervalSeconds) : '...'} per +1 luck
+                                            {config?.luckIntervalSeconds && (
+                                                <span className="text-blue-600"> ({formatTimeToMaxLuck(config.luckIntervalSeconds, onChainConfig?.baseLuck, onChainConfig?.maxLuck)} to max luck)</span>
+                                            )}
+                                        </p>
+                                    </div>
 
-                            {/* Custom Interval Input */}
-                            <DegenInput
-                                type="number"
-                                value={formData.luckIntervalSeconds || ''}
-                                onChange={(e) => setFormData({
-                                    ...formData,
-                                    luckIntervalSeconds: parseInt(e.target.value) || 0
-                                })}
-                                placeholder="Leave empty to use platform default"
-                                min="0"
-                                hint="Seconds per +1 luck"
-                            />
+                                    {/* Custom Interval Input */}
+                                    <DegenInput
+                                        type="number"
+                                        value={formData.luckIntervalSeconds || ''}
+                                        onChange={(e) => setFormData({
+                                            ...formData,
+                                            luckIntervalSeconds: parseInt(e.target.value) || 0
+                                        })}
+                                        placeholder="Leave empty to use platform default"
+                                        min="0"
+                                        hint="Seconds per +1 luck"
+                                    />
 
-                            {/* Quick Presets */}
-                            <div className="flex flex-wrap gap-2 mt-3">
-                                {/* Platform Default button */}
-                                <button
-                                    type="button"
-                                    onClick={() => setFormData({ ...formData, luckIntervalSeconds: 0 })}
-                                    className={`px-3 py-1 text-xs border transition-colors ${
-                                        formData.luckIntervalSeconds === 0
-                                            ? 'bg-degen-black text-degen-white border-degen-black'
-                                            : 'bg-degen-white text-degen-black border-degen-text-light hover:border-degen-black'
-                                    }`}
-                                >
-                                    Platform Default ({config?.luckIntervalSeconds ? formatDuration(config.luckIntervalSeconds) : '...'})
-                                </button>
-                                {/* Other presets */}
-                                {LUCK_INTERVAL_PRESETS.slice(0, 5).map((preset) => (
-                                    <button
-                                        key={preset.value}
-                                        type="button"
-                                        onClick={() => setFormData({ ...formData, luckIntervalSeconds: preset.value })}
-                                        className={`px-3 py-1 text-xs border transition-colors ${
-                                            formData.luckIntervalSeconds === preset.value
-                                                ? 'bg-degen-black text-degen-white border-degen-black'
-                                                : 'bg-degen-white text-degen-black border-degen-text-light hover:border-degen-black'
-                                        }`}
-                                    >
-                                        {preset.label}
-                                    </button>
-                                ))}
-                            </div>
+                                    {/* Quick Presets */}
+                                    <div className="flex flex-wrap gap-2 mt-3">
+                                        {/* Platform Default button */}
+                                        <button
+                                            type="button"
+                                            onClick={() => setFormData({ ...formData, luckIntervalSeconds: 0 })}
+                                            className={`px-3 py-1 text-xs border transition-colors ${
+                                                formData.luckIntervalSeconds === 0
+                                                    ? 'bg-degen-black text-degen-white border-degen-black'
+                                                    : 'bg-degen-white text-degen-black border-degen-text-light hover:border-degen-black'
+                                            }`}
+                                        >
+                                            Platform Default ({config?.luckIntervalSeconds ? formatDuration(config.luckIntervalSeconds) : '...'})
+                                        </button>
+                                        {/* Other presets */}
+                                        {LUCK_INTERVAL_PRESETS.slice(0, 5).map((preset) => (
+                                            <button
+                                                key={preset.value}
+                                                type="button"
+                                                onClick={() => setFormData({ ...formData, luckIntervalSeconds: preset.value })}
+                                                className={`px-3 py-1 text-xs border transition-colors ${
+                                                    formData.luckIntervalSeconds === preset.value
+                                                        ? 'bg-degen-black text-degen-white border-degen-black'
+                                                        : 'bg-degen-white text-degen-black border-degen-text-light hover:border-degen-black'
+                                                }`}
+                                            >
+                                                {preset.label}
+                                            </button>
+                                        ))}
+                                    </div>
 
-                            {/* Time to Max Luck Projection */}
-                            <div className="mt-4 p-3 bg-degen-container border border-degen-text-light">
-                                <div className="flex justify-between items-center">
-                                    <span className="text-degen-text-muted text-sm">Time to max luck ({onChainConfig?.maxLuck ?? 60}):</span>
-                                    <span className="text-degen-black font-medium">
-                                        {formatTimeToMaxLuck(formData.luckIntervalSeconds || config?.luckIntervalSeconds || 10800, onChainConfig?.baseLuck, onChainConfig?.maxLuck)}
-                                    </span>
+                                    {/* Time to Max Luck Projection */}
+                                    <div className="mt-4 p-3 bg-degen-container border border-degen-text-light">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-degen-text-muted text-sm">Time to max luck ({onChainConfig?.maxLuck ?? 60}):</span>
+                                            <span className="text-degen-black font-medium">
+                                                {formatTimeToMaxLuck(formData.luckIntervalSeconds || config?.luckIntervalSeconds || 10800, onChainConfig?.baseLuck, onChainConfig?.maxLuck)}
+                                            </span>
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
+                            </DegenAccordion>
                         </div>
 
                         {/* Continue Button */}
@@ -631,7 +635,7 @@ export default function CreateProject() {
                     </DegenCard>
                 )}
 
-                {/* Step 4: Success - just the modal */}
+                {/* Step 4: Success */}
                 {step === 4 && (
                     <DegenCard variant="white" padding="lg" className="text-center">
                         <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-4">
@@ -640,7 +644,7 @@ export default function CreateProject() {
                         <p className="text-degen-text-muted mb-6">
                             Your project is now live. Share it with the world!
                         </p>
-                        <div className="flex gap-4 justify-center">
+                        <div className="flex gap-4 justify-center flex-wrap">
                             <DegenButton
                                 onClick={() => router.push('/dashboard?tab=projects')}
                                 variant="secondary"
@@ -655,18 +659,17 @@ export default function CreateProject() {
                             >
                                 Visit Project
                             </DegenButton>
+                            <DegenButton
+                                onClick={getProjectCreatedShareHandler(createdProjectData?.name, createdProjectData?.url)}
+                                variant="secondary"
+                                size="lg"
+                            >
+                                <XLogo size={16} className="mr-2" />
+                                Share on X
+                            </DegenButton>
                         </div>
                     </DegenCard>
                 )}
-
-                {/* Success Modal */}
-                <ProjectCreatedModal
-                    isOpen={showSuccessModal}
-                    onClose={() => setShowSuccessModal(false)}
-                    projectName={createdProjectData?.name}
-                    projectUrl={createdProjectData?.url}
-                    onShare={createdProjectData ? getProjectCreatedShareHandler(createdProjectData.name, createdProjectData.url) : null}
-                />
             </div>
         </div>
     );

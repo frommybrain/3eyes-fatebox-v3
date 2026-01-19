@@ -523,7 +523,7 @@ function MyBoxesTab({ walletAddress }) {
     return (
         <div className={`space-y-8 transition-opacity duration-150 ${isPending ? 'opacity-70' : 'opacity-100'}`}>
             {/* Summary */}
-            <DegenCard variant="default" padding="md">
+            <DegenCard variant="default" padding="sm">
                 <div className="flex items-center justify-between">
                     <div>
                         <h2 className="text-degen-black text-xl font-medium uppercase tracking-wider">Your Collection</h2>
@@ -567,7 +567,7 @@ function ProjectBoxesGroup({ projectGroup, onRefresh }) {
     return (
         <DegenCard variant="default" padding="none" className="overflow-hidden">
             {/* Project Header */}
-            <div className="p-6 border-b border-degen-black flex items-center justify-between">
+            <div className="p-3 border-b border-degen-black flex items-center justify-between">
                 <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-degen-black flex items-center justify-center text-xl text-degen-white">
 
@@ -593,8 +593,8 @@ function ProjectBoxesGroup({ projectGroup, onRefresh }) {
             </div>
 
             {/* Boxes Grid */}
-            <div className="p-6">
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            <div className="p-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                     {sortedBoxes.map((box) => (
                         <BoxCard
                             key={box.id}
@@ -1309,7 +1309,7 @@ function BoxCard({ box, project, onRefresh }) {
             // Check if this is a user-caused error (they let the box expire)
             // Only user-caused expiry should NOT be refund-eligible
             const isUserCausedExpiry = err.message?.includes('expired') ||
-                                       err.message?.includes('Expired');
+                err.message?.includes('Expired');
 
             // Any reveal failure that isn't user-caused expiry should be refund-eligible
             // This includes: oracle errors, network issues, backend failures, etc.
@@ -1623,7 +1623,7 @@ function BoxCard({ box, project, onRefresh }) {
                         </DegenBadge>
                         <QuestionMarkTooltip variant="info">
                             <strong>System Error</strong><br />
-                            This box failed to reveal due to an oracle or network issue - not your fault. You can claim a full refund of the box price.
+                            This box failed to reveal due to an oracle or network issue. You can claim a full refund of the box price.
                             {box.reveal_failure_reason && (
                                 <><br /><br /><em>Reason: {box.reveal_failure_reason}</em></>
                             )}

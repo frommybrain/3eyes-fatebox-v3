@@ -3283,6 +3283,44 @@ router.post('/build-refund-box-tx', async (req, res) => {
         const [vaultAuthorityPDA] = deriveVaultAuthorityPDA(programId, projectId, paymentTokenMintPubkey);
         const vaultTokenAccount = await deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMintPubkey);
 
+        // Verify on-chain box state before building transaction
+        // This catches database/on-chain state mismatches early
+        try {
+            const boxInstancePDA = new PublicKey(box.box_pda);
+            const onChainBox = await program.account.boxInstance.fetch(boxInstancePDA);
+
+            console.log(`   On-chain state: randomness_committed=${onChainBox.randomnessCommitted}, revealed=${onChainBox.revealed}, settled=${onChainBox.settled}`);
+
+            if (!onChainBox.randomnessCommitted) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Box has not been committed on-chain. Database and on-chain state are out of sync.',
+                    details: 'The box appears committed in database but not on-chain. This may require manual investigation.',
+                });
+            }
+
+            if (onChainBox.revealed) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Box has already been revealed on-chain',
+                });
+            }
+
+            if (onChainBox.settled) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Box has already been settled on-chain',
+                });
+            }
+        } catch (fetchError) {
+            console.error('Failed to verify on-chain box state:', fetchError);
+            return res.status(400).json({
+                success: false,
+                error: 'Could not verify on-chain box state',
+                details: fetchError.message,
+            });
+        }
+
         // Get owner's token account
         const ownerTokenAccount = await getAssociatedTokenAddress(
             paymentTokenMintPubkey,

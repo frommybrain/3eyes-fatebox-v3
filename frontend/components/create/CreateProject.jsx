@@ -16,8 +16,11 @@ import {
     DegenTextarea,
     DegenLoadingState,
     useToast,
+    ProjectCreatedModal,
 } from '@/components/ui';
 import { formatTimeToMaxLuck, formatDuration, LUCK_INTERVAL_PRESETS } from '@/lib/luckHelpers';
+import { getProjectCreatedShareHandler } from '@/lib/shareManager';
+import { getProjectUrl } from '@/lib/getNetworkConfig';
 
 export default function CreateProject() {
     const router = useRouter();
@@ -27,7 +30,11 @@ export default function CreateProject() {
     const { config, configLoading } = useNetworkStore();
 
     const [mounted, setMounted] = useState(false);
-    const [step, setStep] = useState(1); // 1: Details, 2: Review, 3: Creating
+    const [step, setStep] = useState(1); // 1: Details, 2: Review, 3: Creating, 4: Success
+
+    // Success modal state
+    const [showSuccessModal, setShowSuccessModal] = useState(false);
+    const [createdProjectData, setCreatedProjectData] = useState(null);
 
     // Form state
     const [formData, setFormData] = useState({
@@ -245,12 +252,15 @@ export default function CreateProject() {
                 console.warn('Warning: Failed to update database:', confirmResult.details);
             }
 
-            // Success!
-            toast.success(`Project "${formData.name}" created successfully!`, {
-                title: 'Project Created',
-                duration: 6000,
+            // Success! Show modal instead of toast
+            const projectUrl = getProjectUrl(fullSubdomain);
+            setCreatedProjectData({
+                name: formData.name,
+                url: projectUrl,
+                subdomain: fullSubdomain,
             });
-            router.push('/dashboard?tab=projects');
+            setShowSuccessModal(true);
+            setStep(4); // Success step
 
         } catch (error) {
             console.error('Error creating project:', error);
@@ -620,6 +630,43 @@ export default function CreateProject() {
                         <p className="text-degen-text-muted mt-2">Please wait and approve the transaction in your wallet</p>
                     </DegenCard>
                 )}
+
+                {/* Step 4: Success - just the modal */}
+                {step === 4 && (
+                    <DegenCard variant="white" padding="lg" className="text-center">
+                        <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-4">
+                            Project Created!
+                        </h2>
+                        <p className="text-degen-text-muted mb-6">
+                            Your project is now live. Share it with the world!
+                        </p>
+                        <div className="flex gap-4 justify-center">
+                            <DegenButton
+                                onClick={() => router.push('/dashboard?tab=projects')}
+                                variant="secondary"
+                                size="lg"
+                            >
+                                Go to Dashboard
+                            </DegenButton>
+                            <DegenButton
+                                onClick={() => window.open(createdProjectData?.url, '_blank')}
+                                variant="primary"
+                                size="lg"
+                            >
+                                Visit Project
+                            </DegenButton>
+                        </div>
+                    </DegenCard>
+                )}
+
+                {/* Success Modal */}
+                <ProjectCreatedModal
+                    isOpen={showSuccessModal}
+                    onClose={() => setShowSuccessModal(false)}
+                    projectName={createdProjectData?.name}
+                    projectUrl={createdProjectData?.url}
+                    onShare={createdProjectData ? getProjectCreatedShareHandler(createdProjectData.name, createdProjectData.url) : null}
+                />
             </div>
         </div>
     );

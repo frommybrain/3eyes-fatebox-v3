@@ -65,7 +65,7 @@ app.use(cors({
         return callback(null, true);
     },
     credentials: true,
-    methods: ['GET', 'POST', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Wallet-Address', 'X-Request-ID'],
 }));
 
@@ -209,12 +209,14 @@ import vaultRoutes from './routes/vault.js';
 import programRoutes from './routes/program.js';
 import adminRoutes from './routes/admin.js';
 import logsRoutes from './routes/logs.js';
+import usersRoutes from './routes/users.js';
 
 app.use('/api/projects', projectRoutes);
 app.use('/api/vault', vaultRoutes);
 app.use('/api/program', transactionLimiter, programRoutes);
 app.use('/api/admin', adminLimiter, adminRoutes);
 app.use('/api/logs', adminLimiter, logsRoutes);
+app.use('/api/users', usersRoutes);
 
 // =============================================================================
 // ERROR HANDLERS

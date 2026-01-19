@@ -9,3 +9,4 @@ export { default as DegenEmptyState } from './DegenEmptyState';
 export { DegenToastProvider, useToast } from './DegenToast';
 export { default as DegenMessage, DegenSuccessMessage, DegenErrorMessage, DegenWarningMessage, DegenInfoMessage } from './DegenMessage';
 export { TransactionProvider, useTransaction } from './TransactionOverlay';
+export { default as DegenModal, WinModal, BadgeModal, ProjectCreatedModal } from './DegenModal';

@@ -1,6 +1,6 @@
 # 3Eyes FateBox v3 - Master Project Specification
 
-**Last Updated:** January 18, 2026 (Updated: VRF Rent Reclaim)
+**Last Updated:** January 18, 2026 (Updated: Game Presets System)
 **Version:** 3.0 (Development)
 **Network:** Devnet (Solana)
 
@@ -18,18 +18,19 @@
 8. [Complete User Flows](#complete-user-flows)
 9. [PDA Architecture](#pda-architecture)
 10. [Game Mechanics](#game-mechanics)
-11. [Configuration Architecture (On-Chain Source of Truth)](#configuration-architecture-on-chain-source-of-truth)
-12. [Enterprise Activity Logging System](#enterprise-activity-logging-system)
-13. [Switchboard VRF Integration](#switchboard-vrf-integration)
-14. [Current Implementation Status](#current-implementation-status)
-15. [Platform Treasury & Commission System](#platform-treasury--commission-system)
-16. [Creator Withdrawals](#creator-withdrawals)
-17. [Security Considerations](#security-considerations)
-18. [Common Debugging Scenarios](#common-debugging-scenarios)
-19. [Environment Configuration](#environment-configuration)
-20. [Deployment Information](#deployment-information)
-21. [Open Design Decisions](#open-design-decisions)
-22. [3EYES Project Updates](#3eyes-project-updates)
+11. [Game Presets System](#game-presets-system)
+12. [Configuration Architecture (On-Chain Source of Truth)](#configuration-architecture-on-chain-source-of-truth)
+13. [Enterprise Activity Logging System](#enterprise-activity-logging-system)
+14. [Switchboard VRF Integration](#switchboard-vrf-integration)
+15. [Current Implementation Status](#current-implementation-status)
+16. [Platform Treasury & Commission System](#platform-treasury--commission-system)
+17. [Creator Withdrawals](#creator-withdrawals)
+18. [Security Considerations](#security-considerations)
+19. [Common Debugging Scenarios](#common-debugging-scenarios)
+20. [Environment Configuration](#environment-configuration)
+21. [Deployment Information](#deployment-information)
+22. [Open Design Decisions](#open-design-decisions)
+23. [3EYES Project Updates](#3eyes-project-updates)
 
 ---
 
@@ -161,7 +162,7 @@ The Anchor IDL auto-generates TypeScript types and is used by the backend for in
 
 ### Account Structures
 
-#### PlatformConfig (~100 bytes) - Global Singleton
+#### PlatformConfig (261 bytes) - Global Singleton
 ```rust
 pub struct PlatformConfig {
     pub admin: Pubkey,              // 32 bytes - Only this wallet can update
@@ -173,14 +174,14 @@ pub struct PlatformConfig {
     pub max_luck: u8,               // 1 byte (default: 60)
     pub luck_time_interval: i64,    // 8 bytes (seconds per +1 luck)
 
-    // Payout multipliers (basis points: 10000 = 1.0x)
+    // Default payout multipliers (basis points: 10000 = 1.0x)
     pub payout_dud: u32,            // 0 = 0x (only for expired boxes)
     pub payout_rebate: u32,         // 5000 = 0.5x
     pub payout_breakeven: u32,      // 10000 = 1.0x
     pub payout_profit: u32,         // 15000 = 1.5x
     pub payout_jackpot: u32,        // 40000 = 4x
 
-    // Tier probabilities (basis points, must sum to 10000)
+    // Default tier probabilities (basis points, must sum to 10000)
     // No-dud model: duds only occur for expired boxes
     pub tier1_max_luck: u8,         // Luck 0-5
     pub tier1_dud: u16,             // 0 = 0% (no duds in normal gameplay)
@@ -202,15 +203,43 @@ pub struct PlatformConfig {
     pub tier3_profit: u16,          // 2000 = 20%
     // tier3_jackpot = 200 = 2%
 
-    // Platform commission (NEW)
+    // Platform commission
     pub platform_commission_bps: u16, // 500 = 5% (configurable, max 50%)
     pub treasury_bump: u8,          // Bump for treasury PDA
 
     pub updated_at: i64,
+
+    // ===============================================
+    // GAME PRESETS (Added January 18, 2026)
+    // Projects can choose preset 0-3 for different RTP profiles
+    // See "Game Presets System" section for details
+    // ===============================================
+
+    // Preset 1: "Conservative" (~88% RTP)
+    pub preset1_payout_rebate: u32,
+    pub preset1_payout_breakeven: u32,
+    pub preset1_payout_profit: u32,
+    pub preset1_payout_jackpot: u32,
+    pub preset1_tier1_dud: u16, pub preset1_tier1_rebate: u16,
+    pub preset1_tier1_breakeven: u16, pub preset1_tier1_profit: u16,
+    pub preset1_tier2_dud: u16, pub preset1_tier2_rebate: u16,
+    pub preset1_tier2_breakeven: u16, pub preset1_tier2_profit: u16,
+    pub preset1_tier3_dud: u16, pub preset1_tier3_rebate: u16,
+    pub preset1_tier3_breakeven: u16, pub preset1_tier3_profit: u16,
+
+    // Preset 2: "Degen" (~75% RTP, 8x jackpot)
+    // (same structure as preset1)
+
+    // Preset 3: "Whale" (~95% RTP)
+    // (same structure as preset1)
+
+    pub reserved: [u8; 32],         // Reserved for future presets
 }
 ```
 
-#### ProjectConfig (131 bytes)
+**Note:** PlatformConfig size increased from ~100 bytes to 261 bytes on January 18, 2026 to add game preset support. See [Game Presets System](#game-presets-system) for details.
+
+#### ProjectConfig (139 bytes)
 ```rust
 pub struct ProjectConfig {
     pub project_id: u64,
@@ -226,10 +255,17 @@ pub struct ProjectConfig {
     pub launch_fee_paid: bool,
     pub created_at: i64,
     pub luck_time_interval: i64,      // Per-project luck interval (0 = use platform default)
+    pub game_preset: u8,              // Game config preset (0 = default, 1-3 = presets)
+    pub reserved: [u8; 7],            // Reserved for future expansion
 }
 ```
 
-**Note:** Projects created before January 16, 2026 have the old 123-byte struct without `luck_time_interval`. These projects will fail to deserialize if you try to update them. New projects created after the program update work correctly.
+**Note:** ProjectConfig size history:
+- 123 bytes: Original (before Jan 16, 2026)
+- 131 bytes: Added `luck_time_interval` (Jan 16, 2026)
+- 139 bytes: Added `game_preset` + `reserved` (Jan 18, 2026)
+
+Projects created before January 16, 2026 have the old 123-byte struct and will fail to deserialize if you try to update them.
 
 #### BoxInstance (118 bytes)
 ```rust
@@ -933,6 +969,181 @@ let effective_interval = if project_config.luck_time_interval > 0 {
 **Database:**
 - `projects.luck_interval_seconds` - NULL/0 = use platform default, >0 = custom interval
 - Migration: `database/migrations/013_add_project_luck_interval.sql`
+
+---
+
+## Game Presets System
+
+**Added:** January 18, 2026
+**Status:** On-chain implementation complete, UI pending
+
+The game presets system allows project creators to choose from pre-defined game configurations with different RTP (Return to Player) profiles. This gives creators flexibility while maintaining platform control over game balance.
+
+### How It Works
+
+1. **Platform Admin** defines 3 presets in `PlatformConfig` (on-chain)
+2. **Project Creator** chooses a preset (0-3) when creating their project
+3. **Preset 0** = Platform default (uses the original tier probabilities)
+4. **Presets 1-3** = Custom RTP profiles defined by admin
+
+### Preset Definitions (Current Defaults)
+
+| Preset | Name | Tier 3 RTP | Jackpot | Description |
+|--------|------|------------|---------|-------------|
+| 0 | Default | 94% | 4x | Current platform settings (highest RTP) |
+| 1 | Conservative | ~88% | 4x | Steady returns, lower variance |
+| 2 | Degen | ~75% | 8x | High variance, biggest jackpots |
+| 3 | Whale | ~95% | 3x | Best odds, smaller jackpots |
+
+### On-Chain Implementation
+
+#### ProjectConfig Changes
+```rust
+pub struct ProjectConfig {
+    // ... existing fields ...
+    pub game_preset: u8,              // 0 = default, 1-3 = presets
+    pub reserved: [u8; 7],            // Reserved for future expansion
+}
+```
+
+#### PlatformConfig Preset Fields
+Each preset stores:
+- 4 payout multipliers (rebate, breakeven, profit, jackpot) - 16 bytes
+- 12 tier probabilities (4 per tier × 3 tiers) - 24 bytes
+- Total: 36 bytes per preset × 3 presets = 108 bytes
+- Plus 32 bytes reserved = 140 bytes added to PlatformConfig
+
+#### Reward Calculation Logic
+```rust
+// In reveal_box instruction
+let (payout_rebate, payout_breakeven, payout_profit, payout_jackpot) = match project_config.game_preset {
+    1 => (config.preset1_payout_rebate, config.preset1_payout_breakeven, ...),
+    2 => (config.preset2_payout_rebate, config.preset2_payout_breakeven, ...),
+    3 => (config.preset3_payout_rebate, config.preset3_payout_breakeven, ...),
+    _ => (config.payout_rebate, config.payout_breakeven, ...),  // Default
+};
+
+// Similarly for tier probabilities...
+```
+
+### Default Preset Values (Initialized on Deploy)
+
+**Preset 1 - Conservative (~88% Tier 3 RTP)**
+```
+Payouts: 0.5x rebate, 1.0x breakeven, 1.5x profit, 4x jackpot
+Tier 1: 80% rebate, 12% breakeven, 6% profit, 2% jackpot
+Tier 2: 65% rebate, 22% breakeven, 11% profit, 2% jackpot
+Tier 3: 52% rebate, 30% breakeven, 16% profit, 2% jackpot
+```
+
+**Preset 2 - Degen (~75% Tier 3 RTP, High Variance)**
+```
+Payouts: 0.5x rebate, 1.0x breakeven, 2.0x profit, 8x jackpot
+Tier 1: 85% rebate, 8% breakeven, 4% profit, 3% jackpot
+Tier 2: 75% rebate, 14% breakeven, 8% profit, 3% jackpot
+Tier 3: 62% rebate, 20% breakeven, 15% profit, 3% jackpot
+```
+
+**Preset 3 - Whale (~95% Tier 3 RTP)**
+```
+Payouts: 0.6x rebate, 1.0x breakeven, 1.3x profit, 3x jackpot
+Tier 1: 65% rebate, 22% breakeven, 12% profit, 1% jackpot
+Tier 2: 50% rebate, 32% breakeven, 17% profit, 1% jackpot
+Tier 3: 38% rebate, 40% breakeven, 21% profit, 1% jackpot
+```
+
+### UI Implementation Guide (TODO)
+
+When implementing the UI for game presets:
+
+#### 1. Create Project Page
+Add preset selection to project creation form:
+```jsx
+// In CreateProject.jsx
+<GamePresetSelector
+    selectedPreset={formData.gamePreset}
+    onSelect={(preset) => setFormData({...formData, gamePreset: preset})}
+    presets={[
+        { id: 0, name: 'Default', rtp: '94%', description: 'Platform default settings' },
+        { id: 1, name: 'Conservative', rtp: '88%', description: 'Steady returns' },
+        { id: 2, name: 'Degen', rtp: '75%', description: 'High variance, 8x jackpot' },
+        { id: 3, name: 'Whale', rtp: '95%', description: 'Best odds' },
+    ]}
+/>
+```
+
+#### 2. Backend Endpoint Updates
+Update `POST /api/program/build-initialize-project-tx`:
+```javascript
+// Accept gamePreset in request body
+const { projectId, boxPrice, luckIntervalSeconds, gamePreset = 0 } = req.body;
+
+// Pass to on-chain instruction
+await program.methods.initializeProject(
+    new BN(projectId),
+    new BN(boxPrice),
+    new BN(launchFeeAmount),
+    new BN(luckIntervalSeconds),
+    gamePreset  // NEW: 0-3
+).accounts({...}).instruction();
+```
+
+#### 3. Admin Dashboard
+Add preset configuration to AdminDashboard.jsx:
+- Display all 3 presets with their values
+- Allow editing preset payouts and probabilities
+- Call `update_platform_config` to update on-chain
+
+#### 4. Project Page Display
+Show the project's preset to users:
+```jsx
+// In ProjectPage.jsx
+<div className="text-sm text-degen-text-muted">
+    Game Profile: {getPresetName(project.game_preset)}
+    <InfoTooltip content={`This project uses the ${getPresetName(project.game_preset)} profile with ${getPresetRTP(project.game_preset)} RTP`} />
+</div>
+```
+
+### Database Changes (TODO)
+
+Add `game_preset` column to projects table:
+```sql
+-- Migration: 015_add_project_game_preset.sql
+ALTER TABLE projects ADD COLUMN game_preset SMALLINT DEFAULT 0;
+COMMENT ON COLUMN projects.game_preset IS 'Game preset (0=default, 1-3=presets)';
+```
+
+### Key Files
+
+| File | Changes |
+|------|---------|
+| `backend/program/programs/lootbox_platform/src/lib.rs` | Added preset fields to PlatformConfig, game_preset to ProjectConfig, updated calculate_reward_from_config |
+| `backend/lib/luckHelpers.js` | Helper functions for preset display (TODO) |
+| `frontend/components/create/CreateProject.jsx` | Preset selector (TODO) |
+| `frontend/components/admin/AdminDashboard.jsx` | Preset configuration (TODO) |
+
+### Backward Compatibility
+
+- **Existing projects:** `game_preset` defaults to 0 in on-chain struct
+- **New projects:** Can specify preset 0-3 during initialization
+- **Preset 0 behavior:** Identical to pre-preset platform (94% RTP Tier 3)
+- **No migration needed:** Preset 0 = default behavior
+
+### Verification
+
+After deployment, verify presets are configured:
+```javascript
+// Read on-chain config
+const config = await program.account.platformConfig.fetch(platformConfigPDA);
+
+console.log('Preset 1 Jackpot:', config.preset1PayoutJackpot);  // 40000 (4x)
+console.log('Preset 2 Jackpot:', config.preset2PayoutJackpot);  // 80000 (8x)
+console.log('Preset 3 Jackpot:', config.preset3PayoutJackpot);  // 30000 (3x)
+```
+
+### Future Expansion
+
+The `reserved: [u8; 32]` field in PlatformConfig allows adding more presets or per-preset parameters in the future without changing the account structure.
 
 ---
 

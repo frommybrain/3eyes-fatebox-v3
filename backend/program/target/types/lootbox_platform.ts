@@ -1962,6 +1962,207 @@ export type LootboxPlatform = {
           {
             "name": "updatedAt",
             "type": "i64"
+          },
+          {
+            "name": "preset1PayoutRebate",
+            "type": "u32"
+          },
+          {
+            "name": "preset1PayoutBreakeven",
+            "type": "u32"
+          },
+          {
+            "name": "preset1PayoutProfit",
+            "type": "u32"
+          },
+          {
+            "name": "preset1PayoutJackpot",
+            "type": "u32"
+          },
+          {
+            "name": "preset1Tier1Dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset1Tier1Rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset1Tier1Breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset1Tier1Profit",
+            "type": "u16"
+          },
+          {
+            "name": "preset1Tier2Dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset1Tier2Rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset1Tier2Breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset1Tier2Profit",
+            "type": "u16"
+          },
+          {
+            "name": "preset1Tier3Dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset1Tier3Rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset1Tier3Breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset1Tier3Profit",
+            "type": "u16"
+          },
+          {
+            "name": "preset2PayoutRebate",
+            "type": "u32"
+          },
+          {
+            "name": "preset2PayoutBreakeven",
+            "type": "u32"
+          },
+          {
+            "name": "preset2PayoutProfit",
+            "type": "u32"
+          },
+          {
+            "name": "preset2PayoutJackpot",
+            "type": "u32"
+          },
+          {
+            "name": "preset2Tier1Dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset2Tier1Rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset2Tier1Breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset2Tier1Profit",
+            "type": "u16"
+          },
+          {
+            "name": "preset2Tier2Dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset2Tier2Rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset2Tier2Breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset2Tier2Profit",
+            "type": "u16"
+          },
+          {
+            "name": "preset2Tier3Dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset2Tier3Rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset2Tier3Breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset2Tier3Profit",
+            "type": "u16"
+          },
+          {
+            "name": "preset3PayoutRebate",
+            "type": "u32"
+          },
+          {
+            "name": "preset3PayoutBreakeven",
+            "type": "u32"
+          },
+          {
+            "name": "preset3PayoutProfit",
+            "type": "u32"
+          },
+          {
+            "name": "preset3PayoutJackpot",
+            "type": "u32"
+          },
+          {
+            "name": "preset3Tier1Dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset3Tier1Rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset3Tier1Breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset3Tier1Profit",
+            "type": "u16"
+          },
+          {
+            "name": "preset3Tier2Dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset3Tier2Rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset3Tier2Breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset3Tier2Profit",
+            "type": "u16"
+          },
+          {
+            "name": "preset3Tier3Dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset3Tier3Rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset3Tier3Breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset3Tier3Profit",
+            "type": "u16"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           }
         ]
       }
@@ -2022,6 +2223,19 @@ export type LootboxPlatform = {
           {
             "name": "luckTimeInterval",
             "type": "i64"
+          },
+          {
+            "name": "gamePreset",
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                7
+              ]
+            }
           }
         ]
       }

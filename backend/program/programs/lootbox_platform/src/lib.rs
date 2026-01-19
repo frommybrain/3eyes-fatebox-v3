@@ -71,9 +71,79 @@ pub mod lootbox_platform {
 
         config.updated_at = clock.unix_timestamp;
 
+        // ============================================================================
+        // PRESET 1: "Conservative" - Steady returns, lower variance (~88% RTP all tiers)
+        // ============================================================================
+        config.preset1_payout_rebate = 6000;     // 0.6x
+        config.preset1_payout_breakeven = 10000; // 1.0x
+        config.preset1_payout_profit = 13000;    // 1.3x
+        config.preset1_payout_jackpot = 30000;   // 3x
+        // All tiers have same probabilities (~88% RTP)
+        config.preset1_tier1_dud = 0;
+        config.preset1_tier1_rebate = 5000;      // 50%
+        config.preset1_tier1_breakeven = 3000;   // 30%
+        config.preset1_tier1_profit = 1800;      // 18%
+        config.preset1_tier2_dud = 0;
+        config.preset1_tier2_rebate = 5000;
+        config.preset1_tier2_breakeven = 3000;
+        config.preset1_tier2_profit = 1800;
+        config.preset1_tier3_dud = 0;
+        config.preset1_tier3_rebate = 5000;
+        config.preset1_tier3_breakeven = 3000;
+        config.preset1_tier3_profit = 1800;
+        // Jackpot = 10000 - 0 - 5000 - 3000 - 1800 = 200 (2%)
+
+        // ============================================================================
+        // PRESET 2: "Degen" - Higher variance, bigger jackpots (~75% RTP)
+        // ============================================================================
+        config.preset2_payout_rebate = 4000;     // 0.4x
+        config.preset2_payout_breakeven = 10000; // 1.0x
+        config.preset2_payout_profit = 20000;    // 2.0x
+        config.preset2_payout_jackpot = 80000;   // 8x
+        // Higher jackpot chance, more rebates
+        config.preset2_tier1_dud = 0;
+        config.preset2_tier1_rebate = 7500;      // 75%
+        config.preset2_tier1_breakeven = 1200;   // 12%
+        config.preset2_tier1_profit = 800;       // 8%
+        config.preset2_tier2_dud = 0;
+        config.preset2_tier2_rebate = 6500;      // 65%
+        config.preset2_tier2_breakeven = 2000;   // 20%
+        config.preset2_tier2_profit = 1000;      // 10%
+        config.preset2_tier3_dud = 0;
+        config.preset2_tier3_rebate = 5500;      // 55%
+        config.preset2_tier3_breakeven = 2500;   // 25%
+        config.preset2_tier3_profit = 1500;      // 15%
+        // Jackpot = 10000 - others = 500 (5%)
+
+        // ============================================================================
+        // PRESET 3: "Whale" - Highest RTP for big spenders (~95% RTP)
+        // ============================================================================
+        config.preset3_payout_rebate = 7000;     // 0.7x
+        config.preset3_payout_breakeven = 10000; // 1.0x
+        config.preset3_payout_profit = 14000;    // 1.4x
+        config.preset3_payout_jackpot = 35000;   // 3.5x
+        // Best odds across all tiers
+        config.preset3_tier1_dud = 0;
+        config.preset3_tier1_rebate = 4000;      // 40%
+        config.preset3_tier1_breakeven = 3500;   // 35%
+        config.preset3_tier1_profit = 2200;      // 22%
+        config.preset3_tier2_dud = 0;
+        config.preset3_tier2_rebate = 3500;      // 35%
+        config.preset3_tier2_breakeven = 3800;   // 38%
+        config.preset3_tier2_profit = 2400;      // 24%
+        config.preset3_tier3_dud = 0;
+        config.preset3_tier3_rebate = 3000;      // 30%
+        config.preset3_tier3_breakeven = 4000;   // 40%
+        config.preset3_tier3_profit = 2700;      // 27%
+        // Jackpot = 10000 - others = 300 (3%)
+
+        // Reserved bytes initialized to 0
+        config.reserved = [0u8; 32];
+
         msg!("Platform config initialized!");
         msg!("Admin: {}", config.admin);
         msg!("Luck time interval: {} seconds", luck_time_interval);
+        msg!("3 game presets configured (Conservative, Degen, Whale)");
 
         Ok(())
     }
@@ -254,6 +324,8 @@ pub mod lootbox_platform {
         project_config.launch_fee_paid = true;
         project_config.created_at = clock.unix_timestamp;
         project_config.luck_time_interval = luck_time_interval;
+        project_config.game_preset = 0;  // Default to platform preset (0)
+        project_config.reserved = [0u8; 7];
 
         msg!("Project initialized!");
         msg!("Project ID: {}", project_id);
@@ -262,6 +334,7 @@ pub mod lootbox_platform {
         msg!("Box price: {}", box_price);
         msg!("Vault authority: {}", ctx.accounts.vault_authority.key());
         msg!("Luck time interval: {}", luck_time_interval);
+        msg!("Game preset: 0 (platform default)");
 
         Ok(())
     }
@@ -518,11 +591,13 @@ pub mod lootbox_platform {
         msg!("Switchboard randomness: u64={}, percentage={:.4}", random_u64, random_percentage);
 
         // Calculate reward based on luck and randomness using config values
+        // Use project's game_preset (0 = default, 1-3 = presets)
         let (reward_amount, is_jackpot, reward_tier) = calculate_reward_from_config(
             current_luck,
             random_percentage,
             project_config.box_price,
             platform_config,
+            project_config.game_preset,
         )?;
 
         // Update box state
@@ -915,22 +990,88 @@ pub mod lootbox_platform {
 
 /// Calculate reward tier and amount using platform config values
 /// Uses 3 fixed tiers based on luck score
+/// game_preset: 0 = default, 1-3 = presets defined in PlatformConfig
 fn calculate_reward_from_config(
     luck: u8,
     random_percentage: f64,
     box_price: u64,
     config: &PlatformConfig,
+    game_preset: u8,
 ) -> Result<(u64, bool, u8)> {
-    // Determine which tier to use based on luck
-    let (dud_bp, rebate_bp, breakeven_bp, profit_bp) = if luck <= config.tier1_max_luck {
-        // Tier 1: Lowest luck
-        (config.tier1_dud, config.tier1_rebate, config.tier1_breakeven, config.tier1_profit)
-    } else if luck <= config.tier2_max_luck {
-        // Tier 2: Medium luck
-        (config.tier2_dud, config.tier2_rebate, config.tier2_breakeven, config.tier2_profit)
-    } else {
-        // Tier 3: Highest luck
-        (config.tier3_dud, config.tier3_rebate, config.tier3_breakeven, config.tier3_profit)
+    // Get payout multipliers based on preset
+    let (payout_dud, payout_rebate, payout_breakeven, payout_profit, payout_jackpot) = match game_preset {
+        1 => (
+            config.payout_dud, // Dud payout is always 0
+            config.preset1_payout_rebate,
+            config.preset1_payout_breakeven,
+            config.preset1_payout_profit,
+            config.preset1_payout_jackpot,
+        ),
+        2 => (
+            config.payout_dud,
+            config.preset2_payout_rebate,
+            config.preset2_payout_breakeven,
+            config.preset2_payout_profit,
+            config.preset2_payout_jackpot,
+        ),
+        3 => (
+            config.payout_dud,
+            config.preset3_payout_rebate,
+            config.preset3_payout_breakeven,
+            config.preset3_payout_profit,
+            config.preset3_payout_jackpot,
+        ),
+        _ => (
+            config.payout_dud,
+            config.payout_rebate,
+            config.payout_breakeven,
+            config.payout_profit,
+            config.payout_jackpot,
+        ),
+    };
+
+    // Get tier probabilities based on preset and luck
+    let (dud_bp, rebate_bp, breakeven_bp, profit_bp) = match game_preset {
+        1 => {
+            // Preset 1
+            if luck <= config.tier1_max_luck {
+                (config.preset1_tier1_dud, config.preset1_tier1_rebate, config.preset1_tier1_breakeven, config.preset1_tier1_profit)
+            } else if luck <= config.tier2_max_luck {
+                (config.preset1_tier2_dud, config.preset1_tier2_rebate, config.preset1_tier2_breakeven, config.preset1_tier2_profit)
+            } else {
+                (config.preset1_tier3_dud, config.preset1_tier3_rebate, config.preset1_tier3_breakeven, config.preset1_tier3_profit)
+            }
+        },
+        2 => {
+            // Preset 2
+            if luck <= config.tier1_max_luck {
+                (config.preset2_tier1_dud, config.preset2_tier1_rebate, config.preset2_tier1_breakeven, config.preset2_tier1_profit)
+            } else if luck <= config.tier2_max_luck {
+                (config.preset2_tier2_dud, config.preset2_tier2_rebate, config.preset2_tier2_breakeven, config.preset2_tier2_profit)
+            } else {
+                (config.preset2_tier3_dud, config.preset2_tier3_rebate, config.preset2_tier3_breakeven, config.preset2_tier3_profit)
+            }
+        },
+        3 => {
+            // Preset 3
+            if luck <= config.tier1_max_luck {
+                (config.preset3_tier1_dud, config.preset3_tier1_rebate, config.preset3_tier1_breakeven, config.preset3_tier1_profit)
+            } else if luck <= config.tier2_max_luck {
+                (config.preset3_tier2_dud, config.preset3_tier2_rebate, config.preset3_tier2_breakeven, config.preset3_tier2_profit)
+            } else {
+                (config.preset3_tier3_dud, config.preset3_tier3_rebate, config.preset3_tier3_breakeven, config.preset3_tier3_profit)
+            }
+        },
+        _ => {
+            // Default (preset 0)
+            if luck <= config.tier1_max_luck {
+                (config.tier1_dud, config.tier1_rebate, config.tier1_breakeven, config.tier1_profit)
+            } else if luck <= config.tier2_max_luck {
+                (config.tier2_dud, config.tier2_rebate, config.tier2_breakeven, config.tier2_profit)
+            } else {
+                (config.tier3_dud, config.tier3_rebate, config.tier3_breakeven, config.tier3_profit)
+            }
+        }
     };
 
     // Convert random_percentage from 0.0-1.0 to 0-10000 basis points
@@ -943,7 +1084,7 @@ fn calculate_reward_from_config(
     cumulative = cumulative.saturating_add(dud_bp);
     if roll <= cumulative {
         let reward = (box_price as u128)
-            .checked_mul(config.payout_dud as u128)
+            .checked_mul(payout_dud as u128)
             .ok_or(LootboxError::ArithmeticOverflow)?
             .checked_div(10000)
             .ok_or(LootboxError::ArithmeticOverflow)? as u64;
@@ -954,7 +1095,7 @@ fn calculate_reward_from_config(
     cumulative = cumulative.saturating_add(rebate_bp);
     if roll <= cumulative {
         let reward = (box_price as u128)
-            .checked_mul(config.payout_rebate as u128)
+            .checked_mul(payout_rebate as u128)
             .ok_or(LootboxError::ArithmeticOverflow)?
             .checked_div(10000)
             .ok_or(LootboxError::ArithmeticOverflow)? as u64;
@@ -965,7 +1106,7 @@ fn calculate_reward_from_config(
     cumulative = cumulative.saturating_add(breakeven_bp);
     if roll <= cumulative {
         let reward = (box_price as u128)
-            .checked_mul(config.payout_breakeven as u128)
+            .checked_mul(payout_breakeven as u128)
             .ok_or(LootboxError::ArithmeticOverflow)?
             .checked_div(10000)
             .ok_or(LootboxError::ArithmeticOverflow)? as u64;
@@ -976,7 +1117,7 @@ fn calculate_reward_from_config(
     cumulative = cumulative.saturating_add(profit_bp);
     if roll <= cumulative {
         let reward = (box_price as u128)
-            .checked_mul(config.payout_profit as u128)
+            .checked_mul(payout_profit as u128)
             .ok_or(LootboxError::ArithmeticOverflow)?
             .checked_div(10000)
             .ok_or(LootboxError::ArithmeticOverflow)? as u64;
@@ -985,7 +1126,7 @@ fn calculate_reward_from_config(
 
     // Tier 4: Jackpot (remainder)
     let reward = (box_price as u128)
-        .checked_mul(config.payout_jackpot as u128)
+        .checked_mul(payout_jackpot as u128)
         .ok_or(LootboxError::ArithmeticOverflow)?
         .checked_div(10000)
         .ok_or(LootboxError::ArithmeticOverflow)? as u64;
@@ -1502,43 +1643,110 @@ pub struct PlatformConfig {
     pub max_luck: u8,               // 1 byte (default: 60)
     pub luck_time_interval: i64,    // 8 bytes (seconds per +1 luck)
 
-    // Payout multipliers (basis points: 10000 = 1.0x)
+    // Payout multipliers (basis points: 10000 = 1.0x) - DEFAULT/PRESET 0
     pub payout_dud: u32,            // 4 bytes (0 = 0x)
-    pub payout_rebate: u32,         // 4 bytes (8000 = 0.8x)
+    pub payout_rebate: u32,         // 4 bytes (5000 = 0.5x)
     pub payout_breakeven: u32,      // 4 bytes (10000 = 1.0x)
-    pub payout_profit: u32,         // 4 bytes (25000 = 2.5x)
-    pub payout_jackpot: u32,        // 4 bytes (100000 = 10x)
+    pub payout_profit: u32,         // 4 bytes (15000 = 1.5x)
+    pub payout_jackpot: u32,        // 4 bytes (40000 = 4x)
 
-    // Tier 1: Luck 0 to tier1_max_luck (worst odds)
+    // Tier 1: Luck 0 to tier1_max_luck (worst odds) - DEFAULT/PRESET 0
     pub tier1_max_luck: u8,         // 1 byte
     pub tier1_dud: u16,             // 2 bytes (basis points)
     pub tier1_rebate: u16,          // 2 bytes
     pub tier1_breakeven: u16,       // 2 bytes
     pub tier1_profit: u16,          // 2 bytes
 
-    // Tier 2: Luck tier1_max_luck+1 to tier2_max_luck
+    // Tier 2: Luck tier1_max_luck+1 to tier2_max_luck - DEFAULT/PRESET 0
     pub tier2_max_luck: u8,         // 1 byte
     pub tier2_dud: u16,             // 2 bytes
     pub tier2_rebate: u16,          // 2 bytes
     pub tier2_breakeven: u16,       // 2 bytes
     pub tier2_profit: u16,          // 2 bytes
 
-    // Tier 3: Luck tier2_max_luck+1 to max_luck (best odds)
+    // Tier 3: Luck tier2_max_luck+1 to max_luck (best odds) - DEFAULT/PRESET 0
     pub tier3_dud: u16,             // 2 bytes
     pub tier3_rebate: u16,          // 2 bytes
     pub tier3_breakeven: u16,       // 2 bytes
     pub tier3_profit: u16,          // 2 bytes
 
-    // Platform commission (NEW)
-    pub platform_commission_bps: u16, // 2 bytes - Commission on box purchases (500 = 5%)
+    // Platform commission
+    pub platform_commission_bps: u16, // 2 bytes - Commission on box purchases (100 = 1%)
     pub treasury_bump: u8,          // 1 byte - Bump for treasury PDA
 
     pub updated_at: i64,            // 8 bytes
+
+    // ============================================================================
+    // PRESET 1: "Conservative" - Lower variance, steadier returns (~85% RTP all tiers)
+    // ============================================================================
+    pub preset1_payout_rebate: u32,     // 4 bytes
+    pub preset1_payout_breakeven: u32,  // 4 bytes
+    pub preset1_payout_profit: u32,     // 4 bytes
+    pub preset1_payout_jackpot: u32,    // 4 bytes
+    pub preset1_tier1_dud: u16,         // 2 bytes
+    pub preset1_tier1_rebate: u16,      // 2 bytes
+    pub preset1_tier1_breakeven: u16,   // 2 bytes
+    pub preset1_tier1_profit: u16,      // 2 bytes
+    pub preset1_tier2_dud: u16,         // 2 bytes
+    pub preset1_tier2_rebate: u16,      // 2 bytes
+    pub preset1_tier2_breakeven: u16,   // 2 bytes
+    pub preset1_tier2_profit: u16,      // 2 bytes
+    pub preset1_tier3_dud: u16,         // 2 bytes
+    pub preset1_tier3_rebate: u16,      // 2 bytes
+    pub preset1_tier3_breakeven: u16,   // 2 bytes
+    pub preset1_tier3_profit: u16,      // 2 bytes = 36 bytes total
+
+    // ============================================================================
+    // PRESET 2: "Degen" - Higher variance, bigger jackpots, more risk (~80% RTP)
+    // ============================================================================
+    pub preset2_payout_rebate: u32,     // 4 bytes
+    pub preset2_payout_breakeven: u32,  // 4 bytes
+    pub preset2_payout_profit: u32,     // 4 bytes
+    pub preset2_payout_jackpot: u32,    // 4 bytes
+    pub preset2_tier1_dud: u16,         // 2 bytes
+    pub preset2_tier1_rebate: u16,      // 2 bytes
+    pub preset2_tier1_breakeven: u16,   // 2 bytes
+    pub preset2_tier1_profit: u16,      // 2 bytes
+    pub preset2_tier2_dud: u16,         // 2 bytes
+    pub preset2_tier2_rebate: u16,      // 2 bytes
+    pub preset2_tier2_breakeven: u16,   // 2 bytes
+    pub preset2_tier2_profit: u16,      // 2 bytes
+    pub preset2_tier3_dud: u16,         // 2 bytes
+    pub preset2_tier3_rebate: u16,      // 2 bytes
+    pub preset2_tier3_breakeven: u16,   // 2 bytes
+    pub preset2_tier3_profit: u16,      // 2 bytes = 36 bytes total
+
+    // ============================================================================
+    // PRESET 3: "Whale" - Highest RTP for big spenders (~95% RTP)
+    // ============================================================================
+    pub preset3_payout_rebate: u32,     // 4 bytes
+    pub preset3_payout_breakeven: u32,  // 4 bytes
+    pub preset3_payout_profit: u32,     // 4 bytes
+    pub preset3_payout_jackpot: u32,    // 4 bytes
+    pub preset3_tier1_dud: u16,         // 2 bytes
+    pub preset3_tier1_rebate: u16,      // 2 bytes
+    pub preset3_tier1_breakeven: u16,   // 2 bytes
+    pub preset3_tier1_profit: u16,      // 2 bytes
+    pub preset3_tier2_dud: u16,         // 2 bytes
+    pub preset3_tier2_rebate: u16,      // 2 bytes
+    pub preset3_tier2_breakeven: u16,   // 2 bytes
+    pub preset3_tier2_profit: u16,      // 2 bytes
+    pub preset3_tier3_dud: u16,         // 2 bytes
+    pub preset3_tier3_rebate: u16,      // 2 bytes
+    pub preset3_tier3_breakeven: u16,   // 2 bytes
+    pub preset3_tier3_profit: u16,      // 2 bytes = 36 bytes total
+
+    // Reserved for future expansion
+    pub reserved: [u8; 32],             // 32 bytes
 }
 
 impl PlatformConfig {
-    // Original: 98 bytes + 2 (commission_bps) + 1 (treasury_bump) = 101 bytes
-    pub const LEN: usize = 32 + 1 + 1 + 1 + 1 + 8 + 4 + 4 + 4 + 4 + 4 + 1 + 2 + 2 + 2 + 2 + 1 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 1 + 8;
+    // Original: 101 bytes + 3 presets (36 each) + 32 reserved = 101 + 108 + 32 = 241 bytes
+    pub const LEN: usize = 32 + 1 + 1 + 1 + 1 + 8 + 4 + 4 + 4 + 4 + 4 + 1 + 2 + 2 + 2 + 2 + 1 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 1 + 8
+        + (4 + 4 + 4 + 4 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2) // Preset 1: 36 bytes
+        + (4 + 4 + 4 + 4 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2) // Preset 2: 36 bytes
+        + (4 + 4 + 4 + 4 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2) // Preset 3: 36 bytes
+        + 32; // Reserved
 }
 
 #[account]
@@ -1556,11 +1764,13 @@ pub struct ProjectConfig {
     pub launch_fee_paid: bool,        // 1 byte
     pub created_at: i64,              // 8 bytes
     pub luck_time_interval: i64,      // 8 bytes - Per-project luck interval (0 = use platform default)
+    pub game_preset: u8,              // 1 byte - Game config preset (0 = platform default, 1-3 = presets)
+    pub reserved: [u8; 7],            // 7 bytes - Reserved for future expansion
 }
 
 impl ProjectConfig {
-    // 8 + 32 + 32 + 8 + 1 + 8 + 8 + 8 + 8 + 1 + 1 + 8 + 8 = 131 bytes
-    pub const LEN: usize = 8 + 32 + 32 + 8 + 1 + 8 + 8 + 8 + 8 + 1 + 1 + 8 + 8;
+    // 8 + 32 + 32 + 8 + 1 + 8 + 8 + 8 + 8 + 1 + 1 + 8 + 8 + 1 + 7 = 139 bytes
+    pub const LEN: usize = 8 + 32 + 32 + 8 + 1 + 8 + 8 + 8 + 8 + 1 + 1 + 8 + 8 + 1 + 7;
 }
 
 #[account]

@@ -1956,6 +1956,207 @@
           {
             "name": "updated_at",
             "type": "i64"
+          },
+          {
+            "name": "preset1_payout_rebate",
+            "type": "u32"
+          },
+          {
+            "name": "preset1_payout_breakeven",
+            "type": "u32"
+          },
+          {
+            "name": "preset1_payout_profit",
+            "type": "u32"
+          },
+          {
+            "name": "preset1_payout_jackpot",
+            "type": "u32"
+          },
+          {
+            "name": "preset1_tier1_dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset1_tier1_rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset1_tier1_breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset1_tier1_profit",
+            "type": "u16"
+          },
+          {
+            "name": "preset1_tier2_dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset1_tier2_rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset1_tier2_breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset1_tier2_profit",
+            "type": "u16"
+          },
+          {
+            "name": "preset1_tier3_dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset1_tier3_rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset1_tier3_breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset1_tier3_profit",
+            "type": "u16"
+          },
+          {
+            "name": "preset2_payout_rebate",
+            "type": "u32"
+          },
+          {
+            "name": "preset2_payout_breakeven",
+            "type": "u32"
+          },
+          {
+            "name": "preset2_payout_profit",
+            "type": "u32"
+          },
+          {
+            "name": "preset2_payout_jackpot",
+            "type": "u32"
+          },
+          {
+            "name": "preset2_tier1_dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset2_tier1_rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset2_tier1_breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset2_tier1_profit",
+            "type": "u16"
+          },
+          {
+            "name": "preset2_tier2_dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset2_tier2_rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset2_tier2_breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset2_tier2_profit",
+            "type": "u16"
+          },
+          {
+            "name": "preset2_tier3_dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset2_tier3_rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset2_tier3_breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset2_tier3_profit",
+            "type": "u16"
+          },
+          {
+            "name": "preset3_payout_rebate",
+            "type": "u32"
+          },
+          {
+            "name": "preset3_payout_breakeven",
+            "type": "u32"
+          },
+          {
+            "name": "preset3_payout_profit",
+            "type": "u32"
+          },
+          {
+            "name": "preset3_payout_jackpot",
+            "type": "u32"
+          },
+          {
+            "name": "preset3_tier1_dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset3_tier1_rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset3_tier1_breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset3_tier1_profit",
+            "type": "u16"
+          },
+          {
+            "name": "preset3_tier2_dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset3_tier2_rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset3_tier2_breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset3_tier2_profit",
+            "type": "u16"
+          },
+          {
+            "name": "preset3_tier3_dud",
+            "type": "u16"
+          },
+          {
+            "name": "preset3_tier3_rebate",
+            "type": "u16"
+          },
+          {
+            "name": "preset3_tier3_breakeven",
+            "type": "u16"
+          },
+          {
+            "name": "preset3_tier3_profit",
+            "type": "u16"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           }
         ]
       }
@@ -2016,6 +2217,19 @@
           {
             "name": "luck_time_interval",
             "type": "i64"
+          },
+          {
+            "name": "game_preset",
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                7
+              ]
+            }
           }
         ]
       }

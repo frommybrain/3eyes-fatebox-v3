@@ -4,14 +4,55 @@ Command: npx gltfjsx@6.5.3 public/models/vendingMachine.glb
 */
 
 import React from 'react'
-import { useGLTF } from '@react-three/drei'
+import { useGLTF, useTexture } from '@react-three/drei'
 
 export function VendingMachine(props) {
   const { nodes, materials } = useGLTF('/models/vendingMachine.glb')
+  
+  const bevMap = useTexture(
+    '/images/beverages_Bake1_CyclesBake_COMBINED.png',
+    (texture) => {
+      texture.flipY = false
+    }
+  )
+  
+  const bodyMap = useTexture(
+    '/images/vm_body_Bake1_CyclesBake_COMBINED.png',
+    (texture) => {
+      texture.flipY = false
+    }
+  )
+  
+  const adsMap = useTexture(
+    '/images/vm_ads_Bake1_CyclesBake_COMBINED.png',
+    (texture) => {
+      texture.flipY = false
+    }
+  )
+  
+  const partsMap = useTexture(
+    '/images/vm_parts_Bake1_CyclesBake_COMBINED.png',
+    (texture) => {
+      texture.flipY = false
+    }
+  )
+  
+  
+  
   return (
     <group {...props} dispose={null}>
-      <mesh geometry={nodes.vm_body_Baked.geometry} material={materials['vm_body_Baked.002']} castShadow receiveShadow/>
-      <mesh geometry={nodes.vm_parts_Baked.geometry} material={materials['vm_parts_Baked.002']} castShadow receiveShadow/>
+      <mesh geometry={nodes.beverages_Baked.geometry} material={materials.beverages_Baked} castShadow receiveShadow>
+        <meshStandardMaterial map={bevMap} />
+        </mesh>
+      <mesh geometry={nodes.vm_ads_Baked.geometry} material={materials.vm_ads_Baked} castShadow receiveShadow>
+        <meshStandardMaterial map={adsMap} />
+      </mesh>
+      <mesh geometry={nodes.vm_body_Baked.geometry} material={materials.vm_body_Baked} castShadow receiveShadow>
+        <meshStandardMaterial map={bodyMap} />
+      </mesh>
+      <mesh geometry={nodes.vm_parts_Baked.geometry} material={materials.vm_parts_Baked} castShadow receiveShadow>
+        <meshStandardMaterial map={partsMap} />
+      </mesh>
     </group>
   )
 }

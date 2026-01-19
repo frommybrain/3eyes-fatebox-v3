@@ -19,10 +19,14 @@ import {
     DegenBadge,
     DegenLoadingState,
     DegenEmptyState,
+    DegenInput,
     CardDropdown,
     useToast,
     useTransaction,
+    WinModal,
+    BadgeModal,
 } from '@/components/ui';
+import { getWinShareHandler, getMyProjectShareHandler } from '@/lib/shareManager';
 
 // ===== TESTING CONFIG =====
 // Set to 30 for quick testing, 3600 for production (1 hour)
@@ -34,6 +38,11 @@ export default function Dashboard() {
     const searchParams = useSearchParams();
     const initialTab = searchParams.get('tab') || 'boxes';
     const [activeTab, setActiveTab] = useState(initialTab);
+
+    // Badge notification state
+    const [newBadges, setNewBadges] = useState([]);
+    const [showBadgeModal, setShowBadgeModal] = useState(false);
+    const [currentBadgeIndex, setCurrentBadgeIndex] = useState(0);
 
     const {
         projects,
@@ -51,6 +60,42 @@ export default function Dashboard() {
             loadProjectsByOwner(publicKey.toString());
         }
     }, [publicKey, connected, config, loadProjectsByOwner]);
+
+    // Check for new badges on dashboard load
+    useEffect(() => {
+        async function checkBadges() {
+            if (!publicKey || !connected) return;
+
+            try {
+                const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+                const response = await fetch(`${backendUrl}/api/users/${publicKey.toString()}/badges?check=true`);
+                const data = await response.json();
+
+                if (data.success && data.newBadges && data.newBadges.length > 0) {
+                    setNewBadges(data.newBadges);
+                    setCurrentBadgeIndex(0);
+                    setShowBadgeModal(true);
+                }
+            } catch (error) {
+                console.error('Error checking badges:', error);
+            }
+        }
+
+        checkBadges();
+    }, [publicKey, connected]);
+
+    // Handle badge modal close - show next badge or close
+    const handleBadgeModalClose = () => {
+        if (currentBadgeIndex < newBadges.length - 1) {
+            setCurrentBadgeIndex(prev => prev + 1);
+        } else {
+            setShowBadgeModal(false);
+            setNewBadges([]);
+            setCurrentBadgeIndex(0);
+        }
+    };
+
+    const currentBadge = newBadges[currentBadgeIndex];
 
     if (configLoading) {
         return (
@@ -115,6 +160,9 @@ export default function Dashboard() {
                         <DegenTabsTrigger value="projects">
                             My Projects
                         </DegenTabsTrigger>
+                        <DegenTabsTrigger value="profile">
+                            Profile
+                        </DegenTabsTrigger>
                     </DegenTabsList>
 
                     <DegenTabsContent value="projects">
@@ -128,7 +176,18 @@ export default function Dashboard() {
                     <DegenTabsContent value="boxes">
                         <MyBoxesTab walletAddress={publicKey?.toString()} />
                     </DegenTabsContent>
+
+                    <DegenTabsContent value="profile">
+                        <MyProfileTab walletAddress={publicKey?.toString()} />
+                    </DegenTabsContent>
                 </DegenTabs>
+
+                {/* Badge Notification Modal */}
+                <BadgeModal
+                    isOpen={showBadgeModal}
+                    onClose={handleBadgeModalClose}
+                    badge={currentBadge}
+                />
             </div>
         </div>
     );
@@ -164,6 +223,234 @@ function MyProjectsTab({ projects, projectsLoading, projectsError }) {
                 </div>
             )}
         </>
+    );
+}
+
+function MyProfileTab({ walletAddress }) {
+    const { toast } = useToast();
+    const [profile, setProfile] = useState(null);
+    const [stats, setStats] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [username, setUsername] = useState('');
+    const [xHandle, setXHandle] = useState('');
+    const [usernameAvailable, setUsernameAvailable] = useState(null);
+    const [usernameChecking, setUsernameChecking] = useState(false);
+
+    // Fetch profile data
+    useEffect(() => {
+        async function fetchProfile() {
+            if (!walletAddress) return;
+
+            try {
+                const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+                const response = await fetch(`${backendUrl}/api/users/${walletAddress}`);
+                const data = await response.json();
+
+                if (data.success) {
+                    setProfile(data.profile);
+                    setStats(data.stats);
+                    if (data.profile) {
+                        setUsername(data.profile.username || '');
+                        setXHandle(data.profile.xHandle || '');
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching profile:', error);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        fetchProfile();
+    }, [walletAddress]);
+
+    // Check username availability
+    const checkUsername = async (value) => {
+        if (!value || value.length < 3) {
+            setUsernameAvailable(null);
+            return;
+        }
+
+        // Skip check if it's the current username
+        if (profile?.username === value) {
+            setUsernameAvailable(true);
+            return;
+        }
+
+        setUsernameChecking(true);
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+            const response = await fetch(`${backendUrl}/api/users/check-username/${value}`);
+            const data = await response.json();
+            setUsernameAvailable(data.available);
+        } catch (error) {
+            console.error('Error checking username:', error);
+        } finally {
+            setUsernameChecking(false);
+        }
+    };
+
+    // Save profile
+    const handleSave = async () => {
+        if (!walletAddress) return;
+
+        // Validate username format
+        if (username && !/^[a-z0-9_]{3,20}$/.test(username)) {
+            toast.error('Username must be 3-20 lowercase letters, numbers, or underscores');
+            return;
+        }
+
+        // Validate x handle format
+        if (xHandle && !/^[a-zA-Z0-9_]{1,15}$/.test(xHandle)) {
+            toast.error('X handle must be 1-15 characters');
+            return;
+        }
+
+        setSaving(true);
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+            const response = await fetch(`${backendUrl}/api/users/${walletAddress}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username || null, xHandle: xHandle || null }),
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                setProfile(data.profile);
+                toast.success('Profile saved!');
+            } else {
+                toast.error(data.error || 'Failed to save profile');
+            }
+        } catch (error) {
+            console.error('Error saving profile:', error);
+            toast.error('Failed to save profile');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    if (loading) {
+        return <DegenLoadingState text="Loading profile..." />;
+    }
+
+    const truncatedWallet = walletAddress
+        ? `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`
+        : '';
+
+    return (
+        <div className="max-w-2xl">
+            <DegenCard variant="white" padding="lg" className="mb-6">
+                <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-6">
+                    Profile Settings
+                </h2>
+
+                {/* Wallet Address */}
+                <div className="mb-6">
+                    <label className="block text-degen-black font-medium text-sm uppercase tracking-wider mb-2">
+                        Wallet Address
+                    </label>
+                    <p className="text-degen-text-muted font-mono text-sm bg-degen-container p-3 border border-degen-black">
+                        {walletAddress}
+                    </p>
+                </div>
+
+                {/* Username */}
+                <div className="mb-6">
+                    <label className="block text-degen-black font-medium text-sm uppercase tracking-wider mb-2">
+                        Username
+                    </label>
+                    <div className="relative">
+                        <input
+                            type="text"
+                            value={username}
+                            onChange={(e) => {
+                                const value = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '');
+                                setUsername(value);
+                                setUsernameAvailable(null);
+                            }}
+                            onBlur={() => checkUsername(username)}
+                            placeholder="your_username"
+                            className="w-full px-3 py-2 bg-degen-white text-degen-black placeholder:text-degen-text-muted border border-degen-black outline-none transition-colors duration-100 focus:bg-degen-container"
+                            maxLength={20}
+                        />
+                        {usernameChecking && (
+                            <div className="absolute right-3 top-2 text-degen-text-muted">...</div>
+                        )}
+                        {usernameAvailable === true && !usernameChecking && (
+                            <div className="absolute right-3 top-2 text-degen-green">OK</div>
+                        )}
+                        {usernameAvailable === false && !usernameChecking && (
+                            <div className="absolute right-3 top-2 text-degen-feature">Taken</div>
+                        )}
+                    </div>
+                    <p className="text-degen-text-muted text-xs mt-1">
+                        3-20 characters, lowercase letters, numbers, and underscores only
+                    </p>
+                    {profile?.username && (
+                        <p className="text-degen-blue text-sm mt-2">
+                            Your profile: degenbox.fun/profile/{profile.username}
+                        </p>
+                    )}
+                </div>
+
+                {/* X Handle */}
+                <div className="mb-6">
+                    <label className="block text-degen-black font-medium text-sm uppercase tracking-wider mb-2">
+                        X (Twitter) Handle
+                    </label>
+                    <div className="flex items-center gap-2">
+                        <span className="text-degen-text-muted">@</span>
+                        <input
+                            type="text"
+                            value={xHandle}
+                            onChange={(e) => setXHandle(e.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
+                            placeholder="your_handle"
+                            className="flex-1 px-3 py-2 bg-degen-white text-degen-black placeholder:text-degen-text-muted border border-degen-black outline-none transition-colors duration-100 focus:bg-degen-container"
+                            maxLength={15}
+                        />
+                    </div>
+                </div>
+
+                {/* Save Button */}
+                <DegenButton
+                    onClick={handleSave}
+                    disabled={saving || usernameAvailable === false}
+                    variant="primary"
+                    size="lg"
+                >
+                    {saving ? 'Saving...' : 'Save Profile'}
+                </DegenButton>
+            </DegenCard>
+
+            {/* Quick Stats */}
+            {stats && (
+                <DegenCard variant="default" padding="md">
+                    <h3 className="text-degen-black text-lg font-medium uppercase tracking-wider mb-4">
+                        Your Stats
+                    </h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        <div className="text-center p-3 bg-degen-white border border-degen-black">
+                            <p className="text-degen-text-muted text-xs uppercase">Boxes</p>
+                            <p className="text-degen-black text-xl font-medium">{stats.totalBoxes || 0}</p>
+                        </div>
+                        <div className="text-center p-3 bg-degen-white border border-degen-black">
+                            <p className="text-degen-text-muted text-xs uppercase">Wins</p>
+                            <p className="text-degen-black text-xl font-medium">{stats.winsCount || 0}</p>
+                        </div>
+                        <div className="text-center p-3 bg-degen-white border border-degen-black">
+                            <p className="text-degen-text-muted text-xs uppercase">Win Rate</p>
+                            <p className="text-degen-black text-xl font-medium">{stats.winRate || 0}%</p>
+                        </div>
+                        <div className="text-center p-3 bg-degen-white border border-degen-black">
+                            <p className="text-degen-text-muted text-xs uppercase">Jackpots</p>
+                            <p className="text-degen-black text-xl font-medium">{stats.jackpotCount || 0}</p>
+                        </div>
+                    </div>
+                </DegenCard>
+            )}
+        </div>
     );
 }
 
@@ -473,6 +760,10 @@ function BoxCard({ box, project, onRefresh }) {
     const [commitCooldown, setCommitCooldown] = useState(null); // seconds until "Open Box" enabled after purchase
     const [, startBoxTransition] = useTransition();
 
+    // Win popup state
+    const [showWinModal, setShowWinModal] = useState(false);
+    const [winData, setWinData] = useState(null);
+
     // Optimistic box state for instant UI feedback
     const [optimisticBox, setOptimisticBox] = useOptimistic(
         box,
@@ -725,6 +1016,14 @@ function BoxCard({ box, project, onRefresh }) {
             addLog('Waiting for confirmation...');
             await connection.confirmTransaction(signature, 'confirmed');
 
+            // Optimistic UI update - show committed state immediately
+            startBoxTransition(() => {
+                setOptimisticBox({
+                    randomness_committed: true,
+                    randomness_account: buildResult.randomnessAccount
+                });
+            });
+
             // Step 7: Confirm with backend
             addLog('Confirming with backend...');
             await fetch(`${backendUrl}/api/program/confirm-commit`, {
@@ -925,6 +1224,17 @@ function BoxCard({ box, project, onRefresh }) {
                     ? (confirmResult.reward.payoutAmount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
                     : '0';
                 endTransaction(true, `Result: ${tierName}! Payout: ${payout} ${project.payment_token_symbol}`);
+
+                // Show win popup for winning results (tier > 1, not dud)
+                if (confirmResult.reward?.tier > 1) {
+                    setWinData({
+                        tier: confirmResult.reward.tier,
+                        amount: payout,
+                        tokenSymbol: project.payment_token_symbol,
+                        projectUrl: getProjectUrl(project.subdomain),
+                    });
+                    setShowWinModal(true);
+                }
             } else {
                 endTransaction(true, 'Revealed!');
             }
@@ -1044,11 +1354,6 @@ function BoxCard({ box, project, onRefresh }) {
 
         startTransaction(`Claiming reward from Box #${box.box_number}...`);
 
-        // Optimistic update: immediately show as "claimed" state (wrapped in transition)
-        startBoxTransition(() => {
-            setOptimisticBox({ settled_at: new Date().toISOString() });
-        });
-
         try {
             const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
 
@@ -1087,6 +1392,11 @@ function BoxCard({ box, project, onRefresh }) {
             // Step 4: Wait for confirmation
             addLog('Waiting for confirmation...');
             await connection.confirmTransaction(signature, 'confirmed');
+
+            // Optimistic UI update - show settled state immediately
+            startBoxTransition(() => {
+                setOptimisticBox({ settled_at: new Date().toISOString() });
+            });
 
             // Step 5: Confirm with backend
             addLog('Confirming with backend...');
@@ -1173,9 +1483,10 @@ function BoxCard({ box, project, onRefresh }) {
             addLog('Waiting for confirmation...');
             await connection.confirmTransaction(signature, 'confirmed');
 
-            // Step 5: Confirm with backend
-            addLog('Confirming refund...');
-            await fetch(`${backendUrl}/api/program/confirm-refund`, {
+            // Step 5: Verify on-chain state with backend (BEFORE optimistic update)
+            // This ensures the refund actually happened before showing success
+            addLog('Verifying refund on-chain...');
+            const confirmResponse = await fetch(`${backendUrl}/api/program/confirm-refund`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1186,12 +1497,21 @@ function BoxCard({ box, project, onRefresh }) {
                 }),
             });
 
-            // Optimistic update
+            const confirmResult = await confirmResponse.json();
+
+            if (!confirmResult.success) {
+                // On-chain verification failed - refund didn't actually happen
+                console.error('Refund verification failed:', confirmResult.error);
+                throw new Error(confirmResult.error || 'Refund verification failed - the transaction may not have executed correctly');
+            }
+
+            // NOW apply optimistic update after on-chain verification succeeds
             startBoxTransition(() => {
                 setOptimisticBox({
                     box_result: 6,
                     refund_eligible: false,
-                    payout_amount: buildResult.refundAmount
+                    payout_amount: buildResult.refundAmount,
+                    refund_tx_signature: signature
                 });
             });
 
@@ -1456,6 +1776,20 @@ function BoxCard({ box, project, onRefresh }) {
             <p className="text-degen-text-light text-xs mt-2">
                 {new Date(box.created_at).toLocaleDateString()}
             </p>
+
+            {/* Win Modal */}
+            <WinModal
+                isOpen={showWinModal}
+                onClose={() => setShowWinModal(false)}
+                tier={winData?.tier}
+                amount={winData?.amount}
+                tokenSymbol={winData?.tokenSymbol}
+                onShare={winData ? getWinShareHandler(winData.tier, {
+                    amount: winData.amount,
+                    token: winData.tokenSymbol,
+                    projectUrl: winData.projectUrl,
+                }) : null}
+            />
         </div>
     );
 }
@@ -1587,6 +1921,14 @@ function ProjectCard({ project }) {
                     className="flex-1"
                 >
                     Manage
+                </DegenButton>
+                <DegenButton
+                    onClick={getMyProjectShareHandler(project, projectUrl)}
+                    variant="secondary"
+                    size="sm"
+                    title="Share on X"
+                >
+                    X
                 </DegenButton>
             </div>
         </DegenCard>

@@ -10,8 +10,10 @@ export function Model(props) {
   const { nodes, materials } = useGLTF('/vendingMachine.glb')
   return (
     <group {...props} dispose={null}>
-      <mesh geometry={nodes.vm_body_Baked.geometry} material={materials['vm_body_Baked.002']} />
-      <mesh geometry={nodes.vm_parts_Baked.geometry} material={materials['vm_parts_Baked.002']} />
+      <mesh geometry={nodes.beverages_Baked.geometry} material={materials.beverages_Baked} />
+      <mesh geometry={nodes.vm_ads_Baked.geometry} material={materials.vm_ads_Baked} />
+      <mesh geometry={nodes.vm_body_Baked.geometry} material={materials.vm_body_Baked} />
+      <mesh geometry={nodes.vm_parts_Baked.geometry} material={materials.vm_parts_Baked} />
     </group>
   )
 }

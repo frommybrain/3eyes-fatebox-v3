@@ -1,66 +1,70 @@
 'use client';
 
-import { useRef, useEffect } from 'react';
+const THREE_EYES_URL = 'https://pump.fun/coin/G63pAYWkZd71Jdy83bbdvs6HMQxaYVWy5jsS1hK3pump';
 
 const ITEMS = [
-  'Gambling brings the people together',
-  '$3EYES ↑ 256.4K',
-  'fate is such a tease',
+  { text: 'Gambling brings the people together', link: null },
+  { text: '$3EYES', link: THREE_EYES_URL },
+  { text: 'fate is such a tease', link: null },
 ];
 
+function MarqueeItem({ item }) {
+  return (
+    <span className="inline-flex items-center shrink-0">
+      {item.link ? (
+        <a
+          href={item.link}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="px-6 text-sm font-medium uppercase tracking-wider text-degen-black hover:text-degen-blue transition-colors"
+        >
+          {item.text}
+        </a>
+      ) : (
+        <span className="px-6 text-sm font-medium uppercase tracking-wider text-degen-black">
+          {item.text}
+        </span>
+      )}
+      <span className="w-1.5 h-1.5 bg-degen-black rounded-full shrink-0" />
+    </span>
+  );
+}
+
 export default function DegenMarquee({ speed = 50, className = '' }) {
-  const containerRef = useRef(null);
-  const contentRef = useRef(null);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    const content = contentRef.current;
-    if (!container || !content) return;
-
-    // Clone content for seamless loop
-    const clone = content.cloneNode(true);
-    container.appendChild(clone);
-
-    let position = 0;
-    let animationId;
-
-    const animate = () => {
-      position -= speed / 60; // Normalize speed per frame
-
-      // Reset position when first set scrolls out
-      if (Math.abs(position) >= content.offsetWidth) {
-        position = 0;
-      }
-
-      container.style.transform = `translateX(${position}px)`;
-      animationId = requestAnimationFrame(animate);
-    };
-
-    animationId = requestAnimationFrame(animate);
-
-    return () => {
-      cancelAnimationFrame(animationId);
-      // Clean up clone
-      if (clone.parentNode) {
-        clone.parentNode.removeChild(clone);
-      }
-    };
-  }, [speed]);
+  // Calculate animation duration based on speed (higher speed = faster = shorter duration)
+  const duration = Math.max(10, 100 / (speed / 50));
 
   return (
     <div className={`overflow-hidden whitespace-nowrap ${className}`}>
-      <div ref={containerRef} className="inline-flex">
-        <div ref={contentRef} className="inline-flex items-center">
-          {ITEMS.map((item, index) => (
-            <span key={index} className="inline-flex items-center">
-              <span className="px-6 text-sm font-medium uppercase tracking-wider text-degen-black">
-                {item}
-              </span>
-              <span className="w-1.5 h-1.5 bg-degen-black rounded-full" />
-            </span>
-          ))}
-        </div>
+      <div
+        className="inline-flex animate-marquee"
+        style={{
+          animationDuration: `${duration}s`,
+        }}
+      >
+        {/* Render items multiple times to ensure seamless loop */}
+        {[...Array(4)].map((_, setIndex) => (
+          <div key={setIndex} className="inline-flex items-center shrink-0">
+            {ITEMS.map((item, index) => (
+              <MarqueeItem key={`${setIndex}-${index}`} item={item} />
+            ))}
+          </div>
+        ))}
       </div>
+
+      <style jsx>{`
+        @keyframes marquee {
+          0% {
+            transform: translateX(0);
+          }
+          100% {
+            transform: translateX(-50%);
+          }
+        }
+        .animate-marquee {
+          animation: marquee linear infinite;
+        }
+      `}</style>
     </div>
   );
 }

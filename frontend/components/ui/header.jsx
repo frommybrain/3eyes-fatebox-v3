@@ -155,18 +155,7 @@ export default function Header() {
           </>
         )}
 
-        {/* Test Camera Button */}
-        <button
-          onClick={handleTestCamera}
-          disabled={testActive}
-          className={`px-3 py-1.5 text-xs uppercase tracking-wider font-medium rounded transition-colors ${
-            testActive
-              ? 'bg-degen-warning text-white cursor-not-allowed'
-              : 'bg-degen-black/10 text-degen-black hover:bg-degen-black hover:text-white'
-          }`}
-        >
-          {testActive ? 'Testing...' : 'Test Camera'}
-        </button>
+        
 
         <div className="ml-2 border-l border-degen-black/20 pl-4">
           <WalletButton />

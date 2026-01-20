@@ -12,8 +12,9 @@ const REVEAL_WINDOW_SECONDS: i64 = 3600; // 1 hour to reveal after commit
 const DEFAULT_REFUND_GRACE_PERIOD_SECONDS: i64 = 120; // 2 minutes default grace period
 // Note: No minimum box price constant - just prevent zero. Different tokens have different values.
 
-// Switchboard On-Demand program ID (mainnet and devnet)
-const SWITCHBOARD_ON_DEMAND_PROGRAM_ID: &str = "SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv";
+// Switchboard On-Demand program IDs
+const SWITCHBOARD_MAINNET_PROGRAM_ID: &str = "SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv";
+const SWITCHBOARD_DEVNET_PROGRAM_ID: &str = "Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2";
 
 #[program]
 pub mod lootbox_platform {
@@ -1454,9 +1455,12 @@ pub struct RevealBox<'info> {
     pub vault_token_account: Account<'info, TokenAccount>,
 
     /// CHECK: Switchboard VRF randomness account - verified against box_instance.randomness_account
-    /// Also verified that the account is owned by Switchboard On-Demand program
+    /// Also verified that the account is owned by Switchboard On-Demand program (mainnet or devnet)
     #[account(
-        constraint = randomness_account.owner.to_string() == SWITCHBOARD_ON_DEMAND_PROGRAM_ID @ LootboxError::InvalidSwitchboardOwner
+        constraint = (
+            randomness_account.owner.to_string() == SWITCHBOARD_MAINNET_PROGRAM_ID ||
+            randomness_account.owner.to_string() == SWITCHBOARD_DEVNET_PROGRAM_ID
+        ) @ LootboxError::InvalidSwitchboardOwner
     )]
     pub randomness_account: AccountInfo<'info>,
 }

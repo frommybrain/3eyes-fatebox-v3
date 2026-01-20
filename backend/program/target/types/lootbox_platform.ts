@@ -943,7 +943,7 @@ export type LootboxPlatform = {
         {
           "name": "randomnessAccount",
           "docs": [
-            "Also verified that the account is owned by Switchboard On-Demand program"
+            "Also verified that the account is owned by Switchboard On-Demand program (mainnet or devnet)"
           ]
         }
       ],

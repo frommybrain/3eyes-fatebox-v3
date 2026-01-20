@@ -112,7 +112,7 @@ export async function createCommitInstruction(randomness, network = 'devnet', au
 
 /**
  * Create a reveal instruction for revealing randomness
- * This should be called after waiting 5-10 seconds for oracles to process
+ * This should be called after waiting 10-16 seconds for oracles to process
  * Uses SDK method which contacts the specific oracle that committed the randomness.
  *
  * NOTE: This function FAILS FAST with no retries. Oracle issues result in
@@ -122,10 +122,10 @@ export async function createCommitInstruction(randomness, network = 'devnet', au
  * @param {Object} randomness - Switchboard Randomness instance
  * @param {PublicKey} payer - The payer for the reveal transaction (buyer's wallet)
  * @param {string} network - Network name ('devnet' or 'mainnet')
- * @param {number} timeoutMs - Timeout in milliseconds (default: 10000ms = 10s)
+ * @param {number} timeoutMs - Timeout in milliseconds (default: 16000ms = 16s)
  * @returns {Promise<TransactionInstruction>} Reveal instruction
  */
-export async function createRevealInstruction(randomness, payer, network = 'devnet', timeoutMs = 10000) {
+export async function createRevealInstruction(randomness, payer, network = 'devnet', timeoutMs = 16000) {
     console.log(`[Switchboard] Creating reveal instruction (fail-fast, ${timeoutMs}ms timeout)...`);
     console.log(`   Randomness pubkey: ${randomness.pubkey.toString()}`);
     console.log(`   Payer: ${payer ? payer.toString() : 'provider wallet (default)'}`);

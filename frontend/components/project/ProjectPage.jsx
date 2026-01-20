@@ -4,18 +4,21 @@
 import { useEffect, useState, useTransition, useOptimistic, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
-import { Transaction, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { getAssociatedTokenAddress } from '@solana/spl-token';
 import { PublicKey } from '@solana/web3.js';
 import useProjectStore from '@/store/useProjectStore';
 import useNetworkStore from '@/store/useNetworkStore';
+import useBetaAccessStore, { BETA_MODE_ENABLED } from '@/store/useBetaAccessStore';
 import {
     DegenButton,
     DegenCard,
     DegenBadge,
-    DegenLoadingState,
     useToast,
 } from '@/components/ui';
+import { SkeletonText, SkeletonButton, SkeletonBox } from '@/components/ui/DegenSkeleton';
+import WalletButton from '@/components/wallet/WalletButton';
+import LoadingOverlay from '@/components/ui/LoadingOverlay';
 import ProjectMainCanvas from '@/components/three/projectMainCanvas';
 import usePurchasingStore from '@/store/usePurchasingStore';
 
@@ -26,17 +29,24 @@ export default function ProjectPage({ subdomain }) {
     const [localPurchasing, setLocalPurchasing] = useState(false);
     const [isPending, startTransition] = useTransition();
 
+    // Loading state - tracks when project data is ready
+    const [canvasReady, setCanvasReady] = useState(false);
+    const [projectLoadAttempted, setProjectLoadAttempted] = useState(false);
+
     // Batch purchase state
     const [quantity, setQuantity] = useState(1);
-    const [purchaseProgress, setPurchaseProgress] = useState(null); // { current: 1, total: 4, boxesPurchased: 3 }
+    const [purchaseProgress, setPurchaseProgress] = useState(null);
 
     // Wallet balances
     const [solBalance, setSolBalance] = useState(null);
     const [tokenBalance, setTokenBalance] = useState(null);
 
     // Wallet hooks
-    const { publicKey, connected, sendTransaction } = useWallet();
+    const { publicKey, connected, connecting, sendTransaction } = useWallet();
     const { connection } = useConnection();
+
+    // Beta access store
+    const { hasAccess, checkAccess, grantAccess } = useBetaAccessStore();
 
     // Zustand stores
     const {
@@ -101,6 +111,8 @@ export default function ProjectPage({ subdomain }) {
                 await loadProjectBySubdomain(subdomain);
             } catch (error) {
                 console.error('Failed to initialize project page:', error);
+            } finally {
+                setProjectLoadAttempted(true);
             }
         }
 
@@ -115,6 +127,29 @@ export default function ProjectPage({ subdomain }) {
             unsubscribe();
         };
     }, [subdomain]);
+
+    // Check beta access when wallet connects
+    useEffect(() => {
+        // If beta mode is disabled, grant access immediately
+        if (!BETA_MODE_ENABLED) {
+            grantAccess('public');
+            return;
+        }
+
+        // If already has access, nothing to do
+        if (hasAccess) return;
+
+        // Wait for wallet connection state to stabilize
+        if (connecting) return;
+
+        // If wallet is connected, check allowlist
+        if (connected && publicKey) {
+            const walletAddress = publicKey.toString();
+            if (checkAccess(walletAddress)) {
+                grantAccess(walletAddress);
+            }
+        }
+    }, [connected, connecting, publicKey, hasAccess, checkAccess, grantAccess]);
 
     // Fetch balances when wallet connects or project loads
     useEffect(() => {
@@ -312,69 +347,53 @@ export default function ProjectPage({ subdomain }) {
     const incrementQuantity = () => setQuantity(q => Math.min(q + 1, 10));
     const decrementQuantity = () => setQuantity(q => Math.max(q - 1, 1));
 
-    // Show loading state
-    if (!mounted || configLoading || projectLoading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-degen-bg">
-                <DegenLoadingState text={`Loading ${subdomain}...`} />
-            </div>
-        );
-    }
+    // Canvas ready callback
+    const handleCanvasReady = useCallback(() => {
+        setCanvasReady(true);
+    }, []);
 
-    // Show error state
-    if (projectError || !currentProject) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-degen-bg">
-                <DegenCard variant="white" padding="lg" className="max-w-md mx-auto text-center">
-                    <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-2">
-                        Project Not Found
-                    </h1>
-                    <p className="text-degen-text-muted mb-6">
-                        {projectError || `The project "${subdomain}" does not exist.`}
-                    </p>
-                    <DegenButton
-                        onClick={() => router.push('/')}
-                        variant="primary"
-                    >
-                        Go to Homepage
-                    </DegenButton>
-                </DegenCard>
-            </div>
-        );
-    }
+    // =========================================================================
+    // Determine card state - what content to show in the unified card
+    // =========================================================================
 
-    // Check if project is active
-    if (!displayProject.is_active || displayProject.is_paused) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-degen-bg">
-                <DegenCard variant="white" padding="lg" className="max-w-md mx-auto text-center">
-                    <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-2">
-                        Project Paused
-                    </h1>
-                    <p className="text-degen-text-muted mb-6">
-                        {displayProject.project_name} is currently paused by the creator.
-                        Check back later!
-                    </p>
-                    <DegenButton
-                        onClick={() => router.push('/')}
-                        variant="primary"
-                    >
-                        Browse Other Projects
-                    </DegenButton>
-                </DegenCard>
-            </div>
-        );
-    }
+    // Still loading initial data (config, project)
+    const isInitialLoading = !mounted || configLoading || projectLoading || !projectLoadAttempted;
+
+    // Project not found (after load attempted)
+    const isProjectNotFound = projectLoadAttempted && !projectLoading && (projectError || !currentProject);
+
+    // Project is paused/inactive
+    const isProjectPaused = displayProject && (!displayProject.is_active || displayProject.is_paused);
+
+    // Beta access check (only relevant if beta mode is enabled)
+    const isBetaCheckPending = BETA_MODE_ENABLED && !hasAccess && connecting;
+    const isBetaDenied = BETA_MODE_ENABLED && !hasAccess && connected && !connecting;
+    const needsWalletForBeta = BETA_MODE_ENABLED && !hasAccess && !connected && !connecting;
+
+    // User needs to connect wallet (not connected and no beta requirement, or beta but needs wallet)
+    const needsWalletConnection = !connected && !connecting;
+
+    // Ready to show purchase UI - all conditions met
+    const isReadyForPurchase = !isInitialLoading && !isProjectNotFound && !isProjectPaused &&
+        (!BETA_MODE_ENABLED || hasAccess) && displayProject;
+
+    // Show loading overlay when:
+    // 1. Wallet is connected (or connecting) AND
+    // 2. We're still loading data OR canvas isn't ready
+    // Don't show overlay if user hasn't connected wallet yet
+    const isWalletActive = connected || connecting;
+    const isStillLoading = isInitialLoading || isBetaCheckPending || (isReadyForPurchase && !canvasReady);
+    const showLoadingOverlay = isWalletActive && isStillLoading && !isProjectNotFound && !isProjectPaused && !isBetaDenied;
 
     // Network badge (show if devnet)
     const showNetworkBadge = config?.network === 'devnet';
 
-    // Format price for display
-    const unitPrice = displayProject.box_price / Math.pow(10, displayProject.payment_token_decimals || 9);
+    // Format price for display (use safe defaults while loading)
+    const unitPrice = displayProject ? displayProject.box_price / Math.pow(10, displayProject.payment_token_decimals || 9) : 0;
     const formattedPrice = unitPrice.toLocaleString();
     const totalPrice = unitPrice * quantity;
     const formattedTotalPrice = totalPrice.toLocaleString();
-    const tokenSymbol = displayProject.payment_token_symbol || 'TOKEN';
+    const tokenSymbol = displayProject?.payment_token_symbol || 'TOKEN';
 
     // Calculate number of transactions needed (3 boxes per transaction)
     const transactionsNeeded = Math.ceil(quantity / 3);
@@ -382,8 +401,273 @@ export default function ProjectPage({ subdomain }) {
     // Check if user has enough tokens for the total purchase
     const hasEnoughTokens = tokenBalance !== null && tokenBalance >= totalPrice;
 
+    // =========================================================================
+    // Render card content based on state
+    // =========================================================================
+
+    const renderCardContent = () => {
+        // If wallet not connected AND beta mode requires wallet, show beta prompt first
+        // (before we even try to load project data display)
+        if (needsWalletForBeta) {
+            return (
+                <div className="text-center">
+                    <div className="inline-block px-3 py-1 bg-degen-yellow text-degen-black text-xs font-bold uppercase tracking-wider mb-6">
+                        Beta Access Required
+                    </div>
+                    <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-4">
+                        DegenBox Beta
+                    </h1>
+                    <p className="text-degen-text-muted mb-6">
+                        Connect your wallet to verify beta access.
+                    </p>
+                    <div className="mb-4">
+                        <WalletButton />
+                    </div>
+                    <p className="text-xs text-degen-text-muted">
+                        Connect your wallet to check if you have beta access
+                    </p>
+                </div>
+            );
+        }
+
+        // If wallet not connected and no beta mode, show connect wallet prompt
+        if (needsWalletConnection && !BETA_MODE_ENABLED) {
+            return (
+                <div className="text-center">
+                    <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-4">
+                        {displayProject?.project_name || 'DegenBox'}
+                    </h1>
+                    <p className="text-degen-text-muted mb-6">
+                        Connect your wallet to purchase boxes.
+                    </p>
+                    <div className="mb-4">
+                        <WalletButton />
+                    </div>
+                </div>
+            );
+        }
+
+        // Loading skeleton - only show when wallet is connected and loading
+        if (isInitialLoading || isBetaCheckPending) {
+            return (
+                <>
+                    <SkeletonText width="180px" height="1.75rem" className="mx-auto mb-6" />
+                    <div className="border-t border-b border-degen-black py-4 mb-4 -mx-6 px-6">
+                        <SkeletonText width="60px" height="0.75rem" className="mx-auto mb-2" />
+                        <SkeletonText width="120px" height="1.75rem" className="mx-auto" />
+                    </div>
+                    <div className="border-t border-b border-degen-black py-4 mb-4 -mx-6 px-6">
+                        <SkeletonText width="60px" height="0.75rem" className="mx-auto mb-3" />
+                        <div className="flex items-center justify-center gap-4">
+                            <SkeletonBox className="w-10 h-10 rounded-full" />
+                            <SkeletonText width="48px" height="2rem" />
+                            <SkeletonBox className="w-10 h-10 rounded-full" />
+                        </div>
+                    </div>
+                    <SkeletonButton fullWidth size="xl" />
+                </>
+            );
+        }
+
+        // Project not found
+        if (isProjectNotFound) {
+            return (
+                <div className="text-center">
+                    <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-2">
+                        Project Not Found
+                    </h1>
+                    <p className="text-degen-text-muted mb-6">
+                        {projectError || `The project "${subdomain}" does not exist.`}
+                    </p>
+                    <DegenButton onClick={() => router.push('/')} variant="primary">
+                        Go to Homepage
+                    </DegenButton>
+                </div>
+            );
+        }
+
+        // Project paused
+        if (isProjectPaused) {
+            return (
+                <div className="text-center">
+                    <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-2">
+                        Project Paused
+                    </h1>
+                    <p className="text-degen-text-muted mb-6">
+                        {displayProject.project_name} is currently paused by the creator.
+                        Check back later!
+                    </p>
+                    <DegenButton onClick={() => router.push('/')} variant="primary">
+                        Browse Other Projects
+                    </DegenButton>
+                </div>
+            );
+        }
+
+        // Beta access denied
+        if (isBetaDenied) {
+            return (
+                <div className="text-center">
+                    <div className="inline-block px-3 py-1 bg-degen-yellow text-degen-black text-xs font-bold uppercase tracking-wider mb-6">
+                        Beta Access Required
+                    </div>
+                    <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-4">
+                        {displayProject?.project_name || 'DegenBox Beta'}
+                    </h1>
+                    <div className="bg-red-50 border border-red-200 p-4 mb-4">
+                        <p className="text-red-600 text-sm font-medium">Access Denied</p>
+                        <p className="text-red-500 text-xs mt-1">
+                            Your wallet is not on the beta access list.
+                        </p>
+                    </div>
+                    <p className="text-xs text-degen-text-muted mb-4">
+                        Connected: {publicKey?.toString().slice(0, 4)}...{publicKey?.toString().slice(-4)}
+                    </p>
+                    <p className="text-xs text-degen-text-muted">
+                        Contact the team on{' '}
+                        <a
+                            href="https://twitter.com/3eyesworld"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-degen-blue hover:underline"
+                        >
+                            Twitter
+                        </a>
+                        {' '}to request beta access.
+                    </p>
+                </div>
+            );
+        }
+
+        // Ready for purchase - show full purchase UI
+        return (
+            <>
+                {/* Project Name */}
+                <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider text-center mb-6">
+                    {displayProject?.project_name || 'Loading...'}
+                </h1>
+
+                {/* Wallet Info (if connected) */}
+                {connected && (
+                    <div className="border-t border-b border-degen-black py-3 mb-6 -mx-6 px-6">
+                        <div className="flex justify-between items-center text-sm">
+                            <span className="text-degen-text-muted uppercase tracking-wider">Your Balance</span>
+                            <div className="text-right">
+                                <div className="text-degen-black font-medium">
+                                    {tokenBalance !== null ? tokenBalance.toLocaleString() : '...'} {tokenSymbol}
+                                </div>
+                                <div className="text-degen-text-light text-xs">
+                                    {solBalance !== null ? solBalance.toFixed(4) : '...'} SOL
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Box Price */}
+                <div className="text-center mb-4">
+                    <p className="text-degen-text-muted text-xs uppercase tracking-wider mb-2">Box Price</p>
+                    <div className="flex items-center justify-center gap-2">
+                        <span className="text-degen-black text-2xl font-medium">{formattedPrice}</span>
+                        <span className="text-degen-text-muted text-lg">{tokenSymbol}</span>
+                    </div>
+                </div>
+
+                {/* Quantity Selector */}
+                <div className="border-t border-b border-degen-black py-4 mb-4 -mx-6 px-6">
+                    <p className="text-degen-text-muted text-xs uppercase tracking-wider mb-3 text-center">Quantity</p>
+                    <div className="flex items-center justify-center gap-4">
+                        <button
+                            onClick={decrementQuantity}
+                            disabled={quantity <= 1 || localPurchasing}
+                            className="w-10 h-10 rounded-full border-2 border-degen-black text-degen-black font-bold text-xl
+                                     hover:bg-degen-black hover:text-white transition-colors
+                                     disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-degen-black"
+                        >
+                            -
+                        </button>
+                        <span className="text-degen-black text-3xl font-bold w-12 text-center">{quantity}</span>
+                        <button
+                            onClick={incrementQuantity}
+                            disabled={quantity >= 10 || localPurchasing}
+                            className="w-10 h-10 rounded-full border-2 border-degen-black text-degen-black font-bold text-xl
+                                     hover:bg-degen-black hover:text-white transition-colors
+                                     disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-degen-black"
+                        >
+                            +
+                        </button>
+                    </div>
+                    {/* Total Price */}
+                    <div className="mt-3 text-center">
+                        <span className="text-degen-text-muted text-xs uppercase tracking-wider">Total: </span>
+                        <span className="text-degen-black font-bold text-lg">{formattedTotalPrice} {tokenSymbol}</span>
+                    </div>
+                    {/* Transaction hint */}
+                    {quantity > 1 && (
+                        <p className="text-degen-text-light text-xs text-center mt-2">
+                            {transactionsNeeded} transaction{transactionsNeeded > 1 ? 's' : ''} required
+                        </p>
+                    )}
+                </div>
+
+                {/* Purchase Progress */}
+                {purchaseProgress && (
+                    <div className="mb-4 p-3 bg-degen-bg rounded-lg">
+                        <div className="flex justify-between items-center mb-2">
+                            <span className="text-degen-text-muted text-xs uppercase">Progress</span>
+                            <span className="text-degen-black text-sm font-medium">
+                                {purchaseProgress.current}/{purchaseProgress.total}
+                            </span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div
+                                className="bg-degen-warning h-2 rounded-full transition-all duration-300"
+                                style={{ width: `${(purchaseProgress.current / purchaseProgress.total) * 100}%` }}
+                            />
+                        </div>
+                        <p className="text-degen-text-light text-xs text-center mt-2">
+                            {purchaseProgress.boxesPurchased} box{purchaseProgress.boxesPurchased !== 1 ? 'es' : ''} purchased
+                        </p>
+                    </div>
+                )}
+
+                {/* Buy Box Button */}
+                <DegenButton
+                    onClick={handleBuyBoxes}
+                    disabled={!connected || localPurchasing || (connected && !hasEnoughTokens)}
+                    variant="warning"
+                    size="xl"
+                    fullWidth
+                >
+                    {localPurchasing
+                        ? (purchaseProgress
+                            ? `Purchasing (${purchaseProgress.current}/${purchaseProgress.total})...`
+                            : 'Preparing...')
+                        : !connected
+                            ? 'Connect Wallet'
+                            : !hasEnoughTokens
+                                ? `Insufficient ${tokenSymbol}`
+                                : quantity === 1
+                                    ? 'Buy Box'
+                                    : `Buy ${quantity} Boxes`
+                    }
+                </DegenButton>
+
+                {/* Insufficient balance hint */}
+                {connected && !hasEnoughTokens && tokenBalance !== null && (
+                    <p className="text-degen-text-muted text-xs text-center mt-3">
+                        You need {formattedTotalPrice} {tokenSymbol} to buy {quantity} box{quantity > 1 ? 'es' : ''}
+                    </p>
+                )}
+            </>
+        );
+    };
+
     return (
         <>
+            {/* Loading Overlay - only shows when loading canvas for valid project */}
+            <LoadingOverlay isLoading={showLoadingOverlay} minDuration={800} />
+
             {/* Network Badge (devnet only) */}
             {showNetworkBadge && (
                 <div className="fixed top-16 right-4 z-50">
@@ -391,143 +675,21 @@ export default function ProjectPage({ subdomain }) {
                 </div>
             )}
 
-            {/* Project UI Overlay */}
+            {/* Project UI Panel */}
             <div className={`fixed top-0 left-0 w-full lg:w-1/3 h-screen z-10 pointer-events-none transition-opacity duration-100 border-r border-degen-black ${isPending ? 'opacity-80' : 'opacity-100'}`}>
                 <div className="flex flex-col items-center justify-center h-full pointer-events-auto px-4">
-
-                    {/* Main Container */}
                     <DegenCard variant="white" padding="lg" className="w-full">
-                        {/* Project Name */}
-                        <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider text-center mb-6">
-                            {displayProject.project_name}
-                        </h1>
-
-                        {/* Wallet Info (if connected) */}
-                        {connected && (
-                            <div className="border-t border-b border-degen-black py-3 mb-6 -mx-6 px-6">
-                                <div className="flex justify-between items-center text-sm">
-                                    <span className="text-degen-text-muted uppercase tracking-wider">Your Balance</span>
-                                    <div className="text-right">
-                                        <div className="text-degen-black font-medium">
-                                            {tokenBalance !== null ? tokenBalance.toLocaleString() : '...'} {tokenSymbol}
-                                        </div>
-                                        <div className="text-degen-text-light text-xs">
-                                            {solBalance !== null ? solBalance.toFixed(4) : '...'} SOL
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Box Price */}
-                        <div className="text-center mb-4">
-                            <p className="text-degen-text-muted text-xs uppercase tracking-wider mb-2">Box Price</p>
-                            <div className="flex items-center justify-center gap-2">
-                                <span className="text-degen-black text-2xl font-medium">
-                                    {formattedPrice}
-                                </span>
-                                <span className="text-degen-text-muted text-lg">
-                                    {tokenSymbol}
-                                </span>
-                            </div>
-                        </div>
-
-                        {/* Quantity Selector */}
-                        <div className="border-t border-b border-degen-black py-4 mb-4 -mx-6 px-6">
-                            <p className="text-degen-text-muted text-xs uppercase tracking-wider mb-3 text-center">Quantity</p>
-                            <div className="flex items-center justify-center gap-4">
-                                <button
-                                    onClick={decrementQuantity}
-                                    disabled={quantity <= 1 || localPurchasing}
-                                    className="w-10 h-10 rounded-full border-2 border-degen-black text-degen-black font-bold text-xl
-                                             hover:bg-degen-black hover:text-white transition-colors
-                                             disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-degen-black"
-                                >
-                                    -
-                                </button>
-                                <span className="text-degen-black text-3xl font-bold w-12 text-center">
-                                    {quantity}
-                                </span>
-                                <button
-                                    onClick={incrementQuantity}
-                                    disabled={quantity >= 10 || localPurchasing}
-                                    className="w-10 h-10 rounded-full border-2 border-degen-black text-degen-black font-bold text-xl
-                                             hover:bg-degen-black hover:text-white transition-colors
-                                             disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-degen-black"
-                                >
-                                    +
-                                </button>
-                            </div>
-                            {/* Total Price */}
-                            <div className="mt-3 text-center">
-                                <span className="text-degen-text-muted text-xs uppercase tracking-wider">Total: </span>
-                                <span className="text-degen-black font-bold text-lg">{formattedTotalPrice} {tokenSymbol}</span>
-                            </div>
-                            {/* Transaction hint */}
-                            {quantity > 1 && (
-                                <p className="text-degen-text-light text-xs text-center mt-2">
-                                    {transactionsNeeded} transaction{transactionsNeeded > 1 ? 's' : ''} required
-                                </p>
-                            )}
-                        </div>
-
-                        {/* Purchase Progress */}
-                        {purchaseProgress && (
-                            <div className="mb-4 p-3 bg-degen-bg rounded-lg">
-                                <div className="flex justify-between items-center mb-2">
-                                    <span className="text-degen-text-muted text-xs uppercase">Progress</span>
-                                    <span className="text-degen-black text-sm font-medium">
-                                        {purchaseProgress.current}/{purchaseProgress.total}
-                                    </span>
-                                </div>
-                                <div className="w-full bg-gray-200 rounded-full h-2">
-                                    <div
-                                        className="bg-degen-warning h-2 rounded-full transition-all duration-300"
-                                        style={{ width: `${(purchaseProgress.current / purchaseProgress.total) * 100}%` }}
-                                    />
-                                </div>
-                                <p className="text-degen-text-light text-xs text-center mt-2">
-                                    {purchaseProgress.boxesPurchased} box{purchaseProgress.boxesPurchased !== 1 ? 'es' : ''} purchased
-                                </p>
-                            </div>
-                        )}
-
-                        {/* Buy Box Button */}
-                        <DegenButton
-                            onClick={handleBuyBoxes}
-                            disabled={!connected || localPurchasing || (connected && !hasEnoughTokens)}
-                            variant="warning"
-                            size="xl"
-                            fullWidth
-                        >
-                            {localPurchasing
-                                ? (purchaseProgress
-                                    ? `Purchasing (${purchaseProgress.current}/${purchaseProgress.total})...`
-                                    : 'Preparing...')
-                                : !connected
-                                    ? 'Connect Wallet'
-                                    : !hasEnoughTokens
-                                        ? `Insufficient ${tokenSymbol}`
-                                        : quantity === 1
-                                            ? 'Buy Box'
-                                            : `Buy ${quantity} Boxes`
-                            }
-                        </DegenButton>
-
-                        {/* Insufficient balance hint */}
-                        {connected && !hasEnoughTokens && tokenBalance !== null && (
-                            <p className="text-degen-text-muted text-xs text-center mt-3">
-                                You need {formattedTotalPrice} {tokenSymbol} to buy {quantity} box{quantity > 1 ? 'es' : ''}
-                            </p>
-                        )}
+                        {renderCardContent()}
                     </DegenCard>
                 </div>
             </div>
 
-
-            <div className="hidden lg:block" >
-                <ProjectMainCanvas />
-            </div>
+            {/* Canvas - only render when we have a valid project ready */}
+            {isReadyForPurchase && (
+                <div className="hidden lg:block">
+                    <ProjectMainCanvas onReady={handleCanvasReady} />
+                </div>
+            )}
         </>
     );
 }

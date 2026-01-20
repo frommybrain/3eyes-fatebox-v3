@@ -96,7 +96,7 @@ function CameraController({ cameraControlsRef, isReady }) {
 }
 
 // Memoized to prevent re-renders when parent (ProjectPage) re-renders
-const ProjectMainCanvas = memo(function ProjectMainCanvas() {
+const ProjectMainCanvas = memo(function ProjectMainCanvas({ onReady }) {
     const cameraControlsRef = useRef(null)
     const [controlsReady, setControlsReady] = useState(false)
 
@@ -105,6 +105,8 @@ const ProjectMainCanvas = memo(function ProjectMainCanvas() {
         cameraControlsRef.current = controls
         if (controls) {
             setControlsReady(true)
+            // Notify parent that canvas is ready
+            if (onReady) onReady()
         }
     }
 
@@ -132,7 +134,6 @@ const ProjectMainCanvas = memo(function ProjectMainCanvas() {
                 />
                 <CameraController cameraControlsRef={cameraControlsRef} isReady={controlsReady} />
                 
-                <Stats />
             </Canvas>
         </div>
     )

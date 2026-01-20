@@ -130,9 +130,9 @@ export default function Dashboard() {
         return (
             <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-6">
                 <div className="max-w-7xl mx-auto">
-                    <div className="mb-8">
+                    <div className="mb-4">
                         <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">Dashboard</h1>
-                        <p className="text-degen-text-muted text-lg">
+                        <p className="text-degen-text-muted text-sm">
                             Manage your projects and view your purchased boxes
                         </p>
                     </div>
@@ -165,9 +165,9 @@ export default function Dashboard() {
                 )}
 
                 {/* Header */}
-                <div className="mb-8">
+                <div className="mb-4">
                     <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">Dashboard</h1>
-                    <p className="text-degen-text-muted text-lg">
+                    <p className="text-degen-text-muted text-sm">
                         Manage your projects and view your purchased boxes
                     </p>
                 </div>
@@ -677,12 +677,12 @@ function MyBoxesTab({ walletAddress }) {
     }
 
     return (
-        <div className={`space-y-8 transition-opacity duration-150 ${isPending ? 'opacity-70' : 'opacity-100'}`}>
+        <div className={`space-y-3 transition-opacity duration-150 ${isPending ? 'opacity-70' : 'opacity-100'}`}>
             {/* Summary */}
             <DegenCard variant="default" padding="sm">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h2 className="text-degen-black text-xl font-medium uppercase tracking-wider">Your Collection</h2>
+                        <h2 className="text-degen-black text-lg font-medium uppercase tracking-wider">Your Collection</h2>
                         <p className="text-degen-text-muted text-sm">
                             {boxesData.totalBoxes} box{boxesData.totalBoxes !== 1 ? 'es' : ''} across {boxesData.projectCount} project{boxesData.projectCount !== 1 ? 's' : ''}
                         </p>
@@ -729,14 +729,23 @@ function ProjectBoxesGroup({ projectGroup, onRefresh }) {
 
                     </div>
                     <div>
-                        <h3 className="text-degen-black text-lg font-medium uppercase tracking-wider">{project.project_name}</h3>
+                        <h3 className="text-degen-black text-lg font-extrabold uppercase tracking-wider">{project.project_name}</h3>
                         <a
                             href={projectUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-degen-blue hover:underline text-sm"
+                            className="text-degen-blue hover:underline text-sm hidden lg:block"
                         >
                             {project.subdomain}.degenbox.fun
+                        </a>
+
+                        <a
+                            href={projectUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-degen-blue hover:underline text-sm block lg:hidden"
+                        >
+                            Go to project
                         </a>
                     </div>
                 </div>
@@ -904,7 +913,7 @@ function BoxCard({ box, project, onRefresh }) {
     const { connection } = useConnection();
     const { config } = useNetworkStore();
     const { toast } = useToast();
-    const { startTransaction, addLog, endTransaction } = useTransaction();
+    const { startTransaction, addLog, endTransaction, startCountdown } = useTransaction();
 
     const walletAddress = publicKey?.toString();
     const network = config?.network || 'devnet';
@@ -1258,7 +1267,9 @@ function BoxCard({ box, project, onRefresh }) {
             const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
 
             // Step 1: Build reveal transaction
-            addLog('Building reveal transaction...');
+            // Start 16-second countdown - this is the oracle timeout duration
+            addLog('Waiting for oracle randomness...');
+            startCountdown(16);
             const buildResponse = await fetch(`${backendUrl}/api/program/build-reveal-box-tx`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },

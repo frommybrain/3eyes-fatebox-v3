@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useCallback } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 
 // Context for transaction status
 const TransactionContext = createContext(null);
@@ -13,18 +13,50 @@ export function TransactionProvider({ children }) {
     const [isVisible, setIsVisible] = useState(false);
     const [logs, setLogs] = useState([]);
     const [status, setStatus] = useState('idle'); // 'idle' | 'pending' | 'success' | 'error'
+    const [countdown, setCountdown] = useState(null); // Countdown in seconds (null = no countdown)
+    const countdownIntervalRef = useRef(null);
+
+    // Clear countdown interval on unmount or when countdown ends
+    const clearCountdown = useCallback(() => {
+        if (countdownIntervalRef.current) {
+            clearInterval(countdownIntervalRef.current);
+            countdownIntervalRef.current = null;
+        }
+        setCountdown(null);
+    }, []);
 
     const startTransaction = useCallback((initialMessage = 'Starting transaction...') => {
         setLogs([{ text: initialMessage, timestamp: Date.now(), type: 'info' }]);
         setStatus('pending');
         setIsVisible(true);
-    }, []);
+        clearCountdown();
+    }, [clearCountdown]);
+
+    /**
+     * Start a countdown timer (e.g., for oracle reveal timeout)
+     * @param {number} seconds - Starting countdown in seconds
+     */
+    const startCountdown = useCallback((seconds) => {
+        clearCountdown();
+        setCountdown(seconds);
+        countdownIntervalRef.current = setInterval(() => {
+            setCountdown(prev => {
+                if (prev <= 1) {
+                    clearInterval(countdownIntervalRef.current);
+                    countdownIntervalRef.current = null;
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+    }, [clearCountdown]);
 
     const addLog = useCallback((text, type = 'info') => {
         setLogs(prev => [...prev, { text, timestamp: Date.now(), type }]);
     }, []);
 
     const endTransaction = useCallback((success = true, finalMessage = null) => {
+        clearCountdown();
         const message = finalMessage || (success ? 'Transaction complete!' : 'Transaction failed');
         setLogs(prev => [...prev, { text: message, timestamp: Date.now(), type: success ? 'success' : 'error' }]);
         setStatus(success ? 'success' : 'error');
@@ -35,18 +67,19 @@ export function TransactionProvider({ children }) {
             setLogs([]);
             setStatus('idle');
         }, success ? 0 : 400);
-    }, []);
+    }, [clearCountdown]);
 
     const hideOverlay = useCallback(() => {
+        clearCountdown();
         setIsVisible(false);
         setLogs([]);
         setStatus('idle');
-    }, []);
+    }, [clearCountdown]);
 
     return (
-        <TransactionContext.Provider value={{ startTransaction, addLog, endTransaction, hideOverlay, isVisible, status }}>
+        <TransactionContext.Provider value={{ startTransaction, addLog, endTransaction, hideOverlay, startCountdown, isVisible, status }}>
             {children}
-            {isVisible && <TransactionOverlay logs={logs} status={status} onClose={hideOverlay} />}
+            {isVisible && <TransactionOverlay logs={logs} status={status} countdown={countdown} onClose={hideOverlay} />}
         </TransactionContext.Provider>
     );
 }
@@ -65,7 +98,7 @@ export function useTransaction() {
 /**
  * Transaction overlay component - terminal-style status display
  */
-function TransactionOverlay({ logs, status, onClose }) {
+function TransactionOverlay({ logs, status, countdown, onClose }) {
     return (
         <div
             className="fixed inset-0 bg-white/90 z-50 pointer-events-auto"
@@ -112,6 +145,11 @@ function TransactionOverlay({ logs, status, onClose }) {
                                 })}
                             </span>
                             Processing...
+                            {countdown !== null && countdown > 0 && (
+                                <span className="ml-2 text-degen-yellow font-bold">
+                                    (timeout: {countdown}s)
+                                </span>
+                            )}
                         </div>
                     )}
                 </div>

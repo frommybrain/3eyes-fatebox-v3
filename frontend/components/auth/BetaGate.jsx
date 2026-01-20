@@ -3,10 +3,11 @@
 // components/auth/BetaGate.jsx
 // Protects routes during beta - requires wallet connection and allowlist verification
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import useBetaAccessStore, { BETA_MODE_ENABLED } from '@/store/useBetaAccessStore';
 import WalletButton from '@/components/wallet/WalletButton';
+import LoadingOverlay from '@/components/ui/LoadingOverlay';
 
 /**
  * BetaGate - Wrap protected pages with this component
@@ -18,30 +19,52 @@ import WalletButton from '@/components/wallet/WalletButton';
  * Once verified, access persists for the session even if wallet disconnects
  */
 export default function BetaGate({ children }) {
-    const { publicKey, connected } = useWallet();
+    const { publicKey, connected, connecting } = useWallet();
     const { hasAccess, checkAccess, grantAccess } = useBetaAccessStore();
+    const [isChecking, setIsChecking] = useState(true);
 
     useEffect(() => {
         // If beta mode is disabled at build time, grant access immediately
         if (!BETA_MODE_ENABLED) {
             grantAccess('public');
+            setIsChecking(false);
             return;
         }
 
-        // If wallet is connected and not already granted, check allowlist
-        if (connected && publicKey && !hasAccess) {
+        // If already has access, we're done checking
+        if (hasAccess) {
+            setIsChecking(false);
+            return;
+        }
+
+        // Wait for wallet connection state to stabilize
+        if (connecting) {
+            return;
+        }
+
+        // If wallet is connected, check allowlist
+        if (connected && publicKey) {
             const walletAddress = publicKey.toString();
             const isAllowed = checkAccess(walletAddress);
 
             if (isAllowed) {
                 grantAccess(walletAddress);
             }
+            setIsChecking(false);
+        } else {
+            // Not connected - done checking, will show gate UI
+            setIsChecking(false);
         }
-    }, [connected, publicKey, hasAccess, checkAccess, grantAccess]);
+    }, [connected, connecting, publicKey, hasAccess, checkAccess, grantAccess]);
 
     // If beta mode disabled, always show content
     if (!BETA_MODE_ENABLED) {
         return children;
+    }
+
+    // Still checking - show loading overlay to prevent flash
+    if (isChecking) {
+        return <LoadingOverlay isLoading={true} />;
     }
 
     // Has access - render children

@@ -12,3 +12,19 @@ export { TransactionProvider, useTransaction } from './TransactionOverlay';
 export { default as DegenModal, WinModal, BadgeModal, ProjectCreatedModal } from './DegenModal';
 export { default as DegenAccordion } from './DegenAccordion';
 export { default as XLogo } from './XLogo';
+export {
+    default as DegenSkeleton,
+    SkeletonBox,
+    SkeletonText,
+    SkeletonCircle,
+    SkeletonButton,
+    SkeletonBadge,
+    SkeletonCard,
+    MyBoxesTabSkeleton,
+    MyProjectsTabSkeleton,
+    MyProfileTabSkeleton,
+    BoxCardSkeleton,
+    ProjectCardSkeleton,
+    ProjectBoxesGroupSkeleton,
+    DashboardSkeleton,
+} from './DegenSkeleton';

@@ -26,6 +26,10 @@ import {
     WinModal,
     BadgeModal,
     XLogo,
+    MyBoxesTabSkeleton,
+    MyProjectsTabSkeleton,
+    MyProfileTabSkeleton,
+    DashboardSkeleton,
 } from '@/components/ui';
 import { getWinShareHandler, getMyProjectShareHandler } from '@/lib/shareManager';
 import TrophyCabinet from '@/components/profile/TrophyCabinet';
@@ -37,6 +41,22 @@ import DegenAccordion from '@/components/ui/DegenAccordion';
 // Set to 30 for quick testing, 3600 for production (1 hour)
 const REVEAL_WINDOW_SECONDS = 3600;
 // ===========================
+
+/**
+ * Parse a database timestamp as UTC
+ * Supabase returns timestamps without timezone suffix (e.g., '2026-01-20T17:18:47.959')
+ * which JavaScript parses as local time. This causes timezone-dependent bugs.
+ * This helper ensures timestamps are always parsed as UTC.
+ */
+function parseAsUTC(timestamp) {
+    if (!timestamp) return null;
+    // If timestamp already ends with Z or has timezone info, parse directly
+    if (timestamp.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(timestamp)) {
+        return new Date(timestamp).getTime();
+    }
+    // Otherwise, append Z to treat as UTC
+    return new Date(timestamp + 'Z').getTime();
+}
 
 export default function Dashboard() {
     const { publicKey, connected } = useWallet();
@@ -103,11 +123,7 @@ export default function Dashboard() {
     const currentBadge = newBadges[currentBadgeIndex];
 
     if (configLoading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-degen-bg">
-                <DegenLoadingState text="Loading..." />
-            </div>
-        );
+        return <DashboardSkeleton />;
     }
 
     if (!connected) {
@@ -208,7 +224,7 @@ function MyProjectsTab({ projects, projectsLoading, projectsError }) {
 
             {/* Projects List */}
             {projectsLoading ? (
-                <DegenLoadingState text="Loading your projects..." />
+                <MyProjectsTabSkeleton />
             ) : projectsError ? (
                 <DegenCard variant="feature" padding="md">
                     <p className="text-white text-center">Error loading projects: {projectsError}</p>
@@ -340,7 +356,7 @@ function MyProfileTab({ walletAddress }) {
     };
 
     if (loading) {
-        return <DegenLoadingState text="Loading profile..." />;
+        return <MyProfileTabSkeleton />;
     }
 
     const truncatedWallet = walletAddress
@@ -639,7 +655,7 @@ function MyBoxesTab({ walletAddress }) {
     }, [fetchUserBoxes]);
 
     if (loading) {
-        return <DegenLoadingState text="Loading your boxes..." />;
+        return <MyBoxesTabSkeleton />;
     }
 
     if (error) {
@@ -926,14 +942,19 @@ function BoxCard({ box, project, onRefresh }) {
     const isRefundEligible = (box.refund_eligible === true || displayBox.refund_eligible === true) && !isRefunded;
 
     // Check if commit has expired (uses REVEAL_WINDOW_SECONDS config)
-    const isExpired = isCommitted && box.committed_at &&
-        (Date.now() - new Date(box.committed_at).getTime() > REVEAL_WINDOW_SECONDS * 1000);
+    // Use parseAsUTC to handle timezone-agnostic timestamps from database
+    const committedAtUTC = parseAsUTC(box.committed_at);
+    const isExpired = isCommitted && committedAtUTC &&
+        (Date.now() - committedAtUTC > REVEAL_WINDOW_SECONDS * 1000);
 
     // Cooldown timer for pending boxes (must wait 30s after purchase before opening)
     useEffect(() => {
         if (!isPending || !box.created_at) return;
 
-        const createdTime = new Date(box.created_at).getTime();
+        // Use parseAsUTC to handle timezone-agnostic timestamps from database
+        const createdTime = parseAsUTC(box.created_at);
+        if (!createdTime) return;
+
         const COMMIT_COOLDOWN = 30 * 1000; // 30 seconds after purchase before commit/open is allowed
 
         const updateCooldown = () => {
@@ -956,7 +977,10 @@ function BoxCard({ box, project, onRefresh }) {
     useEffect(() => {
         if (!isCommitted || !box.committed_at) return;
 
-        const committedTime = new Date(box.committed_at).getTime();
+        // Use parseAsUTC to handle timezone-agnostic timestamps from database
+        const committedTime = parseAsUTC(box.committed_at);
+        if (!committedTime) return;
+
         const REVEAL_DELAY = 10 * 1000; // 10 seconds before reveal enabled (oracles need time to process)
         const EXPIRY_TIME = REVEAL_WINDOW_SECONDS * 1000;
 

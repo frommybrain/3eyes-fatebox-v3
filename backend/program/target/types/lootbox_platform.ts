@@ -654,15 +654,12 @@ export type LootboxPlatform = {
         "- Box must be committed (randomness_committed = true)",
         "- Box must NOT be revealed (revealed = false)",
         "- Box must NOT be settled (settled = false)",
+        "- At least refund_grace_period seconds must have passed since commit",
+        "(prevents gaming by immediately requesting refund after bad oracle result)",
         "",
         "Note: The backend tracks which boxes are eligible for refund (system errors)",
         "vs which expired due to user inaction (duds). Refund eligibility is checked",
-        "off-chain in the database before this instruction is called.",
-        "",
-        "We do NOT enforce the 1-hour reveal window here because:",
-        "- System failures (oracle errors, network issues) can happen at any time",
-        "- Users should be able to claim refunds immediately when a fault is detected",
-        "- The backend only allows refund for boxes marked refund_eligible in DB"
+        "off-chain in the database before this instruction is called."
       ],
       "discriminator": [
         48,
@@ -678,6 +675,33 @@ export type LootboxPlatform = {
         {
           "name": "owner",
           "signer": true
+        },
+        {
+          "name": "platformConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "projectConfig",
@@ -917,7 +941,10 @@ export type LootboxPlatform = {
           ]
         },
         {
-          "name": "randomnessAccount"
+          "name": "randomnessAccount",
+          "docs": [
+            "Also verified that the account is owned by Switchboard On-Demand program"
+          ]
         }
       ],
       "args": [
@@ -1311,6 +1338,18 @@ export type LootboxPlatform = {
           "type": {
             "option": "u16"
           }
+        },
+        {
+          "name": "minBoxPrice",
+          "type": {
+            "option": "u64"
+          }
+        },
+        {
+          "name": "refundGracePeriod",
+          "type": {
+            "option": "i64"
+          }
         }
       ]
     },
@@ -1388,7 +1427,12 @@ export type LootboxPlatform = {
       "name": "withdrawEarnings",
       "docs": [
         "Project owner withdraws earnings from vault",
-        "Available balance is calculated off-chain (vault balance minus reserved for unopened boxes)"
+        "Includes reserve protection: vault must retain enough to cover pending box payouts",
+        "",
+        "@param project_id - The project ID",
+        "@param amount - Amount to withdraw",
+        "@param pending_reserve - Minimum reserve that must remain in vault (calculated off-chain)",
+        "This should be the max potential payout for all unsettled boxes"
       ],
       "discriminator": [
         6,
@@ -1485,6 +1529,10 @@ export type LootboxPlatform = {
         },
         {
           "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "pendingReserve",
           "type": "u64"
         }
       ]
@@ -1779,6 +1827,26 @@ export type LootboxPlatform = {
       "code": 6028,
       "name": "revealWindowNotExpired",
       "msg": "Reveal window has not expired yet (must wait 1 hour after commit)"
+    },
+    {
+      "code": 6029,
+      "name": "refundGracePeriodNotElapsed",
+      "msg": "Refund grace period has not elapsed (must wait 60 seconds after commit)"
+    },
+    {
+      "code": 6030,
+      "name": "invalidSwitchboardOwner",
+      "msg": "Invalid Switchboard randomness account owner"
+    },
+    {
+      "code": 6031,
+      "name": "boxPriceBelowMinimum",
+      "msg": "Box price below minimum (must be >= 0.001 tokens)"
+    },
+    {
+      "code": 6032,
+      "name": "withdrawalExceedsAvailable",
+      "msg": "Withdrawal exceeds available balance (reserves needed for pending boxes)"
     }
   ],
   "types": [
@@ -2156,11 +2224,19 @@ export type LootboxPlatform = {
             "type": "u16"
           },
           {
+            "name": "minBoxPrice",
+            "type": "u64"
+          },
+          {
+            "name": "refundGracePeriod",
+            "type": "i64"
+          },
+          {
             "name": "reserved",
             "type": {
               "array": [
                 "u8",
-                32
+                16
               ]
             }
           }

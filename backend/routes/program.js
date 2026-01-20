@@ -39,6 +39,7 @@ import {
 } from '../lib/evCalculator.js';
 import logger, { EventTypes, Severity, ActorTypes } from '../lib/logger.js';
 import { getRandomBadgeId } from '../config/badges.js';
+import { verifyTransaction, transactionInvokedProgram } from '../lib/utils.js';
 
 const router = express.Router();
 
@@ -354,6 +355,30 @@ router.post('/confirm-project-init', async (req, res) => {
             console.log(`   Vault funded with: ${vaultFunding.formatted} tokens`);
         }
 
+        // Verify transaction on-chain before updating database
+        const { connection, programId } = await getAnchorProgram();
+        const verification = await verifyTransaction(connection, signature);
+
+        if (!verification.verified) {
+            console.error(`❌ Transaction verification failed: ${verification.error}`);
+            return res.status(400).json({
+                success: false,
+                error: 'Transaction verification failed',
+                details: verification.error,
+            });
+        }
+
+        // Verify the transaction invoked our program
+        if (!transactionInvokedProgram(verification.transaction, programId.toString())) {
+            console.error('❌ Transaction did not invoke the lootbox program');
+            return res.status(400).json({
+                success: false,
+                error: 'Transaction did not invoke the lootbox program',
+            });
+        }
+
+        console.log('   ✓ Transaction verified on-chain');
+
         // Update database with PDA addresses and vault funding status
         const updateData = {
             vault_pda: pdas.projectConfig,
@@ -612,6 +637,21 @@ router.post('/confirm-vault-funding', async (req, res) => {
         console.log(`\n✅ Confirming vault funding for project ${projectId}...`);
         console.log(`   Transaction: ${signature}`);
         console.log(`   Amount: ${amount}`);
+
+        // Verify transaction on-chain before updating database
+        const { connection } = await getAnchorProgram();
+        const verification = await verifyTransaction(connection, signature);
+
+        if (!verification.verified) {
+            console.error(`❌ Transaction verification failed: ${verification.error}`);
+            return res.status(400).json({
+                success: false,
+                error: 'Transaction verification failed',
+                details: verification.error,
+            });
+        }
+
+        console.log('   ✓ Transaction verified on-chain');
 
         // Update database to mark vault as funded
         const { error: updateError } = await supabase
@@ -1065,6 +1105,30 @@ router.post('/confirm-box-creation', async (req, res) => {
             console.log(`   Randomness account: ${randomnessAccount}`);
         }
 
+        // Verify transaction on-chain before updating database
+        const { connection, programId } = await getAnchorProgram();
+        const verification = await verifyTransaction(connection, signature);
+
+        if (!verification.verified) {
+            console.error(`❌ Transaction verification failed: ${verification.error}`);
+            return res.status(400).json({
+                success: false,
+                error: 'Transaction verification failed',
+                details: verification.error,
+            });
+        }
+
+        // Verify the transaction invoked our program
+        if (!transactionInvokedProgram(verification.transaction, programId.toString())) {
+            console.error('❌ Transaction did not invoke the lootbox program');
+            return res.status(400).json({
+                success: false,
+                error: 'Transaction did not invoke the lootbox program',
+            });
+        }
+
+        console.log('   ✓ Transaction verified on-chain');
+
         // Fetch project from database to get UUID
         const { data: project, error: projectError } = await supabase
             .from('projects')
@@ -1420,6 +1484,30 @@ router.post('/confirm-boxes-batch', async (req, res) => {
         console.log(`   Box IDs: ${boxIds.join(', ')}`);
         console.log(`   Transaction: ${signature}`);
 
+        // Verify transaction on-chain before updating database
+        const { connection, programId } = await getAnchorProgram();
+        const verification = await verifyTransaction(connection, signature);
+
+        if (!verification.verified) {
+            console.error(`❌ Transaction verification failed: ${verification.error}`);
+            return res.status(400).json({
+                success: false,
+                error: 'Transaction verification failed',
+                details: verification.error,
+            });
+        }
+
+        // Verify the transaction invoked our program
+        if (!transactionInvokedProgram(verification.transaction, programId.toString())) {
+            console.error('❌ Transaction did not invoke the lootbox program');
+            return res.status(400).json({
+                success: false,
+                error: 'Transaction did not invoke the lootbox program',
+            });
+        }
+
+        console.log('   ✓ Transaction verified on-chain');
+
         // Fetch project from database to get UUID
         const { data: project, error: projectError } = await supabase
             .from('projects')
@@ -1710,6 +1798,30 @@ router.post('/confirm-commit', async (req, res) => {
         console.log(`   Transaction: ${signature}`);
         console.log(`   Randomness account: ${randomnessAccount}`);
 
+        // Verify transaction on-chain before updating database
+        const { connection, programId } = await getAnchorProgram();
+        const verification = await verifyTransaction(connection, signature);
+
+        if (!verification.verified) {
+            console.error(`❌ Transaction verification failed: ${verification.error}`);
+            return res.status(400).json({
+                success: false,
+                error: 'Transaction verification failed',
+                details: verification.error,
+            });
+        }
+
+        // Verify the transaction invoked our program
+        if (!transactionInvokedProgram(verification.transaction, programId.toString())) {
+            console.error('❌ Transaction did not invoke the lootbox program');
+            return res.status(400).json({
+                success: false,
+                error: 'Transaction did not invoke the lootbox program',
+            });
+        }
+
+        console.log('   ✓ Transaction verified on-chain');
+
         // Fetch box from database
         const { data: box, error: boxError } = await supabase
             .from('boxes')
@@ -1728,7 +1840,7 @@ router.post('/confirm-commit', async (req, res) => {
         // Read the on-chain created_at timestamp for accurate luck calculation
         // The on-chain timestamp is set when the transaction was processed, not when DB recorded it
         const config = await getNetworkConfig();
-        const { connection, programId } = await getAnchorProgram();
+        // connection and programId already obtained above for transaction verification
 
         const [boxInstancePDA] = deriveBoxInstancePDA(programId, parseInt(projectId), parseInt(boxId));
         const boxAccountInfo = await connection.getAccountInfo(boxInstancePDA);
@@ -2427,6 +2539,29 @@ router.post('/confirm-reveal', async (req, res) => {
         // Get connection to read on-chain state
         const { connection, programId } = await getAnchorProgram();
 
+        // Verify transaction on-chain before updating database
+        const verification = await verifyTransaction(connection, signature);
+
+        if (!verification.verified) {
+            console.error(`❌ Transaction verification failed: ${verification.error}`);
+            return res.status(400).json({
+                success: false,
+                error: 'Transaction verification failed',
+                details: verification.error,
+            });
+        }
+
+        // Verify the transaction invoked our program
+        if (!transactionInvokedProgram(verification.transaction, programId.toString())) {
+            console.error('❌ Transaction did not invoke the lootbox program');
+            return res.status(400).json({
+                success: false,
+                error: 'Transaction did not invoke the lootbox program',
+            });
+        }
+
+        console.log('   ✓ Transaction verified on-chain');
+
         // Fetch project from database to get UUID
         const { data: project, error: projectError } = await supabase
             .from('projects')
@@ -2829,6 +2964,30 @@ router.post('/confirm-settle', async (req, res) => {
 
         console.log(`\n✅ Confirming box ${boxId} settlement for project ${projectId}...`);
         console.log(`   Transaction: ${signature}`);
+
+        // Verify transaction on-chain before updating database
+        const { connection, programId } = await getAnchorProgram();
+        const verification = await verifyTransaction(connection, signature);
+
+        if (!verification.verified) {
+            console.error(`❌ Transaction verification failed: ${verification.error}`);
+            return res.status(400).json({
+                success: false,
+                error: 'Transaction verification failed',
+                details: verification.error,
+            });
+        }
+
+        // Verify the transaction invoked our program
+        if (!transactionInvokedProgram(verification.transaction, programId.toString())) {
+            console.error('❌ Transaction did not invoke the lootbox program');
+            return res.status(400).json({
+                success: false,
+                error: 'Transaction did not invoke the lootbox program',
+            });
+        }
+
+        console.log('   ✓ Transaction verified on-chain');
 
         // Fetch project from database
         const { data: project, error: projectError } = await supabase
@@ -3425,7 +3584,30 @@ router.post('/confirm-refund', async (req, res) => {
         console.log(`   Signature: ${signature}`);
 
         // Initialize Anchor program to verify on-chain state
-        const { program, programId } = await getAnchorProgram();
+        const { program, programId, connection } = await getAnchorProgram();
+
+        // Verify transaction on-chain before updating database
+        const verification = await verifyTransaction(connection, signature);
+
+        if (!verification.verified) {
+            console.error(`❌ Transaction verification failed: ${verification.error}`);
+            return res.status(400).json({
+                success: false,
+                error: 'Transaction verification failed',
+                details: verification.error,
+            });
+        }
+
+        // Verify the transaction invoked our program
+        if (!transactionInvokedProgram(verification.transaction, programId.toString())) {
+            console.error('❌ Transaction did not invoke the lootbox program');
+            return res.status(400).json({
+                success: false,
+                error: 'Transaction did not invoke the lootbox program',
+            });
+        }
+
+        console.log('   ✓ Transaction verified on-chain');
 
         // Derive box PDA
         const [boxInstancePDA] = deriveBoxInstancePDA(programId, projectId, boxId);

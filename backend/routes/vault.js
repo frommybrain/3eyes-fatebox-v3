@@ -17,6 +17,7 @@ import {
     DEFAULT_PAYOUT_MULTIPLIERS,
 } from '../lib/evCalculator.js';
 import logger from '../lib/logger.js';
+import { verifyTransaction, transactionInvokedProgram } from '../lib/utils.js';
 
 const router = express.Router();
 
@@ -590,6 +591,7 @@ router.post('/build-withdraw-tx', async (req, res) => {
 
         const requestedAmount = BigInt(amount);
         const maxWithdrawable = BigInt(withdrawalInfo.withdrawable.maxAmount.raw);
+        const pendingReserve = BigInt(withdrawalInfo.reserved.total.raw);
 
         if (requestedAmount > maxWithdrawable) {
             return res.status(400).json({
@@ -598,6 +600,8 @@ router.post('/build-withdraw-tx', async (req, res) => {
                 maxWithdrawable: withdrawalInfo.withdrawable.maxAmount,
             });
         }
+
+        console.log(`   Pending reserve (passed to on-chain): ${pendingReserve.toString()}`);
 
         // For full_close, we allow it even with pending boxes
         // The maxWithdrawable already accounts for reserved funds
@@ -647,10 +651,12 @@ router.post('/build-withdraw-tx', async (req, res) => {
 
         // Add withdraw instruction from our program
         // Note: This assumes the Anchor program has a withdraw_earnings instruction
+        // The pending_reserve parameter is passed to enforce on-chain reserve protection
         const withdrawIx = await program.methods
             .withdrawEarnings(
                 new BN(project.project_numeric_id),
-                new BN(amount)
+                new BN(amount),
+                new BN(pendingReserve.toString())
             )
             .accounts({
                 owner: ownerPubkey,
@@ -742,6 +748,30 @@ router.post('/confirm-withdraw', async (req, res) => {
         console.log(`\n✅ Confirming withdrawal for project ${projectId}...`);
         console.log(`   Signature: ${signature}`);
 
+        // Verify transaction on-chain before updating database
+        const { connection, programId } = await getAnchorProgram();
+        const verification = await verifyTransaction(connection, signature);
+
+        if (!verification.verified) {
+            console.error(`❌ Transaction verification failed: ${verification.error}`);
+            return res.status(400).json({
+                success: false,
+                error: 'Transaction verification failed',
+                details: verification.error,
+            });
+        }
+
+        // Verify the transaction invoked our program
+        if (!transactionInvokedProgram(verification.transaction, programId.toString())) {
+            console.error('❌ Transaction did not invoke the lootbox program');
+            return res.status(400).json({
+                success: false,
+                error: 'Transaction did not invoke the lootbox program',
+            });
+        }
+
+        console.log('   ✓ Transaction verified on-chain');
+
         // Fetch project
         const { data: project, error: projectError } = await supabase
             .from('projects')
@@ -757,7 +787,7 @@ router.post('/confirm-withdraw', async (req, res) => {
         }
 
         // Get current vault balance for history
-        const { connection } = await getAnchorProgram();
+        // connection already obtained above for transaction verification
         let vaultBalanceBefore = BigInt(0);
         let vaultBalanceAfter = BigInt(0);
 

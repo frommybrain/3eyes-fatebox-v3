@@ -1235,6 +1235,15 @@ function BoxCard({ box, project, onRefresh }) {
             if (err.logs) {
                 console.error('Transaction logs:', err.logs);
             }
+
+            // Clean up error messages for common user-caused errors
+            const errorLower = (err.message || '').toLowerCase();
+            if (errorLower.includes('user rejected') || errorLower.includes('rejected the request')) {
+                errorMessage = 'Transaction cancelled. You can try opening the box again.';
+            } else if (errorLower.includes('insufficient')) {
+                errorMessage = 'Insufficient SOL for transaction fees. Please add SOL and try again.';
+            }
+
             setError(errorMessage);
             endTransaction(false, errorMessage);
         } finally {
@@ -1520,17 +1529,49 @@ function BoxCard({ box, project, onRefresh }) {
                 errorMessage = `Program error: ${err.message}`;
             }
 
-            // Check if this is a user-caused error (they let the box expire)
-            // Only user-caused expiry should NOT be refund-eligible
-            const isUserCausedExpiry = err.message?.includes('expired') ||
-                err.message?.includes('Expired');
+            // Detect user-initiated errors that should NOT trigger refund eligibility
+            // These are errors caused by user action, not system/oracle failures
+            const errorLower = (err.message || '').toLowerCase();
+            const isUserCausedError =
+                // User rejected the transaction in their wallet
+                errorLower.includes('user rejected') ||
+                errorLower.includes('rejected the request') ||
+                errorLower.includes('user denied') ||
+                errorLower.includes('user cancelled') ||
+                errorLower.includes('user canceled') ||
+                errorLower.includes('transaction was rejected') ||
+                // Insufficient funds for transaction fees (user's responsibility)
+                errorLower.includes('insufficient funds') ||
+                errorLower.includes('insufficient lamports') ||
+                errorLower.includes('insufficient sol') ||
+                errorLower.includes('not enough sol') ||
+                // User let the reveal window expire
+                errorLower.includes('expired') ||
+                // Wallet disconnected or not connected
+                errorLower.includes('wallet disconnected') ||
+                errorLower.includes('wallet not connected') ||
+                errorLower.includes('no wallet');
 
-            // Any reveal failure that isn't user-caused expiry should be refund-eligible
-            // This includes: oracle errors, network issues, backend failures, etc.
-            if (!isUserCausedExpiry) {
+            // For user-caused errors, just show the error and let them retry
+            // Don't mark as refund-eligible - they can simply try again
+            if (isUserCausedError) {
+                // Clean up error message for common cases
+                if (errorLower.includes('user rejected') || errorLower.includes('rejected the request')) {
+                    errorMessage = 'Transaction cancelled. You can try revealing again.';
+                } else if (errorLower.includes('insufficient')) {
+                    errorMessage = 'Insufficient SOL for transaction fees. Please add SOL and try again.';
+                } else if (errorLower.includes('expired')) {
+                    errorMessage = 'Reveal window expired. Box is now a Dud.';
+                }
+                // Don't mark as refund-eligible - user can retry
+                console.log('User-caused error during reveal (not marking refund-eligible):', err.message);
+            } else {
+                // True system error (oracle failure, network issue, etc.)
+                // These should allow retry, and if time runs out, become refund-eligible
                 errorMessage = 'System error during reveal. Please try again. If the issue persists and time runs out, a refund will be available.';
 
-                // Mark box as refund-eligible for any system error
+                // Only mark box as refund-eligible for actual system errors
+                // NOT for user-caused errors like rejection or insufficient funds
                 try {
                     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
                     const markResponse = await fetch(`${backendUrl}/api/program/mark-reveal-failed`, {
@@ -1652,6 +1693,15 @@ function BoxCard({ box, project, onRefresh }) {
             if (err.message?.includes('custom program error')) {
                 errorMessage = `Program error: ${err.message}`;
             }
+
+            // Clean up error messages for common user-caused errors
+            const errorLower = (err.message || '').toLowerCase();
+            if (errorLower.includes('user rejected') || errorLower.includes('rejected the request')) {
+                errorMessage = 'Transaction cancelled. You can try claiming again.';
+            } else if (errorLower.includes('insufficient')) {
+                errorMessage = 'Insufficient SOL for transaction fees. Please add SOL and try again.';
+            }
+
             setError(errorMessage);
             endTransaction(false, errorMessage);
         } finally {
@@ -1755,6 +1805,15 @@ function BoxCard({ box, project, onRefresh }) {
             if (err.logs) {
                 console.error('Transaction logs:', err.logs);
             }
+
+            // Clean up error messages for common user-caused errors
+            const errorLower = (err.message || '').toLowerCase();
+            if (errorLower.includes('user rejected') || errorLower.includes('rejected the request')) {
+                errorMessage = 'Transaction cancelled. You can try claiming the refund again.';
+            } else if (errorLower.includes('insufficient')) {
+                errorMessage = 'Insufficient SOL for transaction fees. Please add SOL and try again.';
+            }
+
             setError(errorMessage);
             endTransaction(false, errorMessage);
         } finally {

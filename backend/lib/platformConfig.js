@@ -51,6 +51,12 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
  * - platform_commission_bps: u16 (2 bytes)
  * - treasury_bump: u8 (1 byte)
  * - updated_at: i64 (8 bytes)
+ * - preset1_* (36 bytes total)
+ * - preset2_* (36 bytes total)
+ * - preset3_* (36 bytes total)
+ * - min_box_price: u64 (8 bytes) - Minimum box price in token base units
+ * - refund_grace_period: i64 (8 bytes) - Seconds after commit before refund allowed
+ * - reserved: [u8; 16] (16 bytes)
  *
  * @param {Buffer} data - Raw account data (includes 8-byte discriminator)
  * @returns {Object} Parsed config object
@@ -131,6 +137,126 @@ function parseOnChainConfig(data) {
 
     // Updated at timestamp
     const updatedAt = data.readBigInt64LE(offset);
+    offset += 8;
+
+    // ============================================================================
+    // PRESET 1: "Conservative" - Lower variance, steadier returns
+    // ============================================================================
+    const preset1PayoutRebate = data.readUInt32LE(offset) / 10000;
+    offset += 4;
+    const preset1PayoutBreakeven = data.readUInt32LE(offset) / 10000;
+    offset += 4;
+    const preset1PayoutProfit = data.readUInt32LE(offset) / 10000;
+    offset += 4;
+    const preset1PayoutJackpot = data.readUInt32LE(offset) / 10000;
+    offset += 4;
+    const preset1Tier1Dud = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset1Tier1Rebate = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset1Tier1Breakeven = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset1Tier1Profit = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset1Tier2Dud = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset1Tier2Rebate = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset1Tier2Breakeven = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset1Tier2Profit = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset1Tier3Dud = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset1Tier3Rebate = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset1Tier3Breakeven = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset1Tier3Profit = data.readUInt16LE(offset) / 100;
+    offset += 2;
+
+    // ============================================================================
+    // PRESET 2: "High Risk/High Reward" - Bigger swings, more excitement
+    // ============================================================================
+    const preset2PayoutRebate = data.readUInt32LE(offset) / 10000;
+    offset += 4;
+    const preset2PayoutBreakeven = data.readUInt32LE(offset) / 10000;
+    offset += 4;
+    const preset2PayoutProfit = data.readUInt32LE(offset) / 10000;
+    offset += 4;
+    const preset2PayoutJackpot = data.readUInt32LE(offset) / 10000;
+    offset += 4;
+    const preset2Tier1Dud = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset2Tier1Rebate = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset2Tier1Breakeven = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset2Tier1Profit = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset2Tier2Dud = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset2Tier2Rebate = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset2Tier2Breakeven = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset2Tier2Profit = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset2Tier3Dud = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset2Tier3Rebate = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset2Tier3Breakeven = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset2Tier3Profit = data.readUInt16LE(offset) / 100;
+    offset += 2;
+
+    // ============================================================================
+    // PRESET 3: "Whale" - Highest RTP for big spenders
+    // ============================================================================
+    const preset3PayoutRebate = data.readUInt32LE(offset) / 10000;
+    offset += 4;
+    const preset3PayoutBreakeven = data.readUInt32LE(offset) / 10000;
+    offset += 4;
+    const preset3PayoutProfit = data.readUInt32LE(offset) / 10000;
+    offset += 4;
+    const preset3PayoutJackpot = data.readUInt32LE(offset) / 10000;
+    offset += 4;
+    const preset3Tier1Dud = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset3Tier1Rebate = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset3Tier1Breakeven = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset3Tier1Profit = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset3Tier2Dud = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset3Tier2Rebate = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset3Tier2Breakeven = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset3Tier2Profit = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset3Tier3Dud = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset3Tier3Rebate = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset3Tier3Breakeven = data.readUInt16LE(offset) / 100;
+    offset += 2;
+    const preset3Tier3Profit = data.readUInt16LE(offset) / 100;
+    offset += 2;
+
+    // ============================================================================
+    // SECURITY SETTINGS
+    // ============================================================================
+    const minBoxPrice = data.readBigUInt64LE(offset);
+    offset += 8;
+    const refundGracePeriod = data.readBigInt64LE(offset);
+    offset += 8;
+
+    // Skip reserved bytes (16 bytes)
+    // offset += 16;
 
     return {
         // Core settings
@@ -184,6 +310,56 @@ function parseOnChainConfig(data) {
         platformCommissionBps,
         platformCommissionPercent: platformCommissionBps / 100, // e.g., 500 bps = 5%
         treasuryBump,
+
+        // Preset configurations
+        presets: {
+            preset1: {
+                payoutMultipliers: {
+                    dud: 0, // Preset doesn't store dud - always 0
+                    rebate: preset1PayoutRebate,
+                    breakeven: preset1PayoutBreakeven,
+                    profit: preset1PayoutProfit,
+                    jackpot: preset1PayoutJackpot,
+                },
+                tierProbabilities: {
+                    tier1: { dud: preset1Tier1Dud, rebate: preset1Tier1Rebate, breakeven: preset1Tier1Breakeven, profit: preset1Tier1Profit, jackpot: Math.max(0, 100 - preset1Tier1Dud - preset1Tier1Rebate - preset1Tier1Breakeven - preset1Tier1Profit) },
+                    tier2: { dud: preset1Tier2Dud, rebate: preset1Tier2Rebate, breakeven: preset1Tier2Breakeven, profit: preset1Tier2Profit, jackpot: Math.max(0, 100 - preset1Tier2Dud - preset1Tier2Rebate - preset1Tier2Breakeven - preset1Tier2Profit) },
+                    tier3: { dud: preset1Tier3Dud, rebate: preset1Tier3Rebate, breakeven: preset1Tier3Breakeven, profit: preset1Tier3Profit, jackpot: Math.max(0, 100 - preset1Tier3Dud - preset1Tier3Rebate - preset1Tier3Breakeven - preset1Tier3Profit) },
+                },
+            },
+            preset2: {
+                payoutMultipliers: {
+                    dud: 0,
+                    rebate: preset2PayoutRebate,
+                    breakeven: preset2PayoutBreakeven,
+                    profit: preset2PayoutProfit,
+                    jackpot: preset2PayoutJackpot,
+                },
+                tierProbabilities: {
+                    tier1: { dud: preset2Tier1Dud, rebate: preset2Tier1Rebate, breakeven: preset2Tier1Breakeven, profit: preset2Tier1Profit, jackpot: Math.max(0, 100 - preset2Tier1Dud - preset2Tier1Rebate - preset2Tier1Breakeven - preset2Tier1Profit) },
+                    tier2: { dud: preset2Tier2Dud, rebate: preset2Tier2Rebate, breakeven: preset2Tier2Breakeven, profit: preset2Tier2Profit, jackpot: Math.max(0, 100 - preset2Tier2Dud - preset2Tier2Rebate - preset2Tier2Breakeven - preset2Tier2Profit) },
+                    tier3: { dud: preset2Tier3Dud, rebate: preset2Tier3Rebate, breakeven: preset2Tier3Breakeven, profit: preset2Tier3Profit, jackpot: Math.max(0, 100 - preset2Tier3Dud - preset2Tier3Rebate - preset2Tier3Breakeven - preset2Tier3Profit) },
+                },
+            },
+            preset3: {
+                payoutMultipliers: {
+                    dud: 0,
+                    rebate: preset3PayoutRebate,
+                    breakeven: preset3PayoutBreakeven,
+                    profit: preset3PayoutProfit,
+                    jackpot: preset3PayoutJackpot,
+                },
+                tierProbabilities: {
+                    tier1: { dud: preset3Tier1Dud, rebate: preset3Tier1Rebate, breakeven: preset3Tier1Breakeven, profit: preset3Tier1Profit, jackpot: Math.max(0, 100 - preset3Tier1Dud - preset3Tier1Rebate - preset3Tier1Breakeven - preset3Tier1Profit) },
+                    tier2: { dud: preset3Tier2Dud, rebate: preset3Tier2Rebate, breakeven: preset3Tier2Breakeven, profit: preset3Tier2Profit, jackpot: Math.max(0, 100 - preset3Tier2Dud - preset3Tier2Rebate - preset3Tier2Breakeven - preset3Tier2Profit) },
+                    tier3: { dud: preset3Tier3Dud, rebate: preset3Tier3Rebate, breakeven: preset3Tier3Breakeven, profit: preset3Tier3Profit, jackpot: Math.max(0, 100 - preset3Tier3Dud - preset3Tier3Rebate - preset3Tier3Breakeven - preset3Tier3Profit) },
+                },
+            },
+        },
+
+        // Security settings
+        minBoxPrice: Number(minBoxPrice),
+        refundGracePeriod: Number(refundGracePeriod),
 
         // Metadata
         updatedAt: Number(updatedAt),
@@ -343,6 +519,13 @@ export async function getPlatformConfig({ forceRefresh = false } = {}) {
         platformCommissionBps: onChainConfig?.platformCommissionBps ?? dbConfig.platformCommissionBps ?? 500,
         platformCommissionPercent: onChainConfig?.platformCommissionPercent ?? dbConfig.platformCommissionPercent ?? 5,
         treasuryBump: onChainConfig?.treasuryBump ?? 0,
+
+        // Presets (on-chain only)
+        presets: onChainConfig?.presets ?? null,
+
+        // Security settings (on-chain only)
+        minBoxPrice: onChainConfig?.minBoxPrice ?? 0,
+        refundGracePeriod: onChainConfig?.refundGracePeriod ?? 120, // Default 2 minutes
 
         // Metadata
         onChainUpdatedAt: onChainConfig?.updatedAt ?? null,

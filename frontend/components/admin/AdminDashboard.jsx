@@ -107,6 +107,8 @@ export default function AdminDashboard() {
                     tier3Profit: cfg.tiers?.tier3?.profit ?? 20,
                     // Platform commission (as percentage)
                     platformCommission: cfg.platformCommissionPercent ?? 5,
+                    // Security settings
+                    refundGracePeriod: cfg.refundGracePeriod ?? 120, // 2 minutes default
                 });
             } else {
                 toast.error('Failed to load on-chain config: ' + result.error);
@@ -178,7 +180,10 @@ export default function AdminDashboard() {
 
             const response = await fetch(`${backendUrl}/api/admin/withdraw-treasury`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Wallet-Address': publicKey.toString(),
+                },
                 body: JSON.stringify({ tokenMint }),
             });
 
@@ -234,6 +239,8 @@ export default function AdminDashboard() {
                 tier3Profit: onChainConfigForm.tier3Profit !== tiers.tier3?.profit ? Math.round(onChainConfigForm.tier3Profit * 100) : undefined,
                 // Platform commission (convert percentage to basis points: 5% = 500)
                 platformCommissionBps: onChainConfigForm.platformCommission !== onChainConfig.platformCommissionPercent ? Math.round(onChainConfigForm.platformCommission * 100) : undefined,
+                // Security settings
+                refundGracePeriod: onChainConfigForm.refundGracePeriod !== onChainConfig.refundGracePeriod ? onChainConfigForm.refundGracePeriod : undefined,
             };
 
             // Remove undefined values
@@ -247,7 +254,10 @@ export default function AdminDashboard() {
 
             const response = await fetch(`${backendUrl}/api/admin/update-platform-config`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Wallet-Address': publicKey.toString(),
+                },
                 body: JSON.stringify(payload),
             });
 
@@ -835,6 +845,49 @@ export default function AdminDashboard() {
                                         >
                                             Production (3 hours)
                                         </DegenButton>
+                                    </div>
+                                </div>
+
+                                {/* Security Settings */}
+                                <div className="mb-8 p-6 bg-degen-bg border border-degen-black">
+                                    <h3 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-4">Security Settings</h3>
+                                    <p className="text-degen-text-muted text-sm mb-4">
+                                        Platform-wide security parameters for refunds
+                                    </p>
+                                    <div>
+                                        <DegenInput
+                                            label="Refund Grace Period (seconds)"
+                                            type="number"
+                                            value={onChainConfigForm.refundGracePeriod ?? 120}
+                                            onChange={(e) => setOnChainConfigForm({ ...onChainConfigForm, refundGracePeriod: parseInt(e.target.value) || 120 })}
+                                            min="0"
+                                        />
+                                        <p className="text-degen-text-muted text-xs mt-1">
+                                            Time users must wait after opening before they can request a refund (prevents gaming)
+                                        </p>
+                                        <div className="mt-2 flex gap-2">
+                                            <DegenButton
+                                                onClick={() => setOnChainConfigForm({ ...onChainConfigForm, refundGracePeriod: 60 })}
+                                                variant="warning"
+                                                size="sm"
+                                            >
+                                                1 min (Dev)
+                                            </DegenButton>
+                                            <DegenButton
+                                                onClick={() => setOnChainConfigForm({ ...onChainConfigForm, refundGracePeriod: 120 })}
+                                                variant="success"
+                                                size="sm"
+                                            >
+                                                2 min
+                                            </DegenButton>
+                                            <DegenButton
+                                                onClick={() => setOnChainConfigForm({ ...onChainConfigForm, refundGracePeriod: 300 })}
+                                                variant="info"
+                                                size="sm"
+                                            >
+                                                5 min
+                                            </DegenButton>
+                                        </div>
                                     </div>
                                 </div>
 

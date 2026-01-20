@@ -139,6 +139,133 @@ export function parsePagination(query, defaults = { page: 1, limit: 50, maxLimit
     return { page, limit, offset };
 }
 
+/**
+ * Verify a Solana transaction signature on-chain
+ * Checks that the transaction exists and was successful
+ *
+ * @param {Connection} connection - Solana connection
+ * @param {string} signature - Transaction signature to verify
+ * @param {Object} options - Verification options
+ * @param {number} options.maxRetries - Max retries for confirmation (default: 3)
+ * @param {number} options.retryDelayMs - Delay between retries (default: 1000)
+ * @param {boolean} options.requireSuccess - Require transaction to be successful (default: true)
+ * @returns {Promise<Object>} - { verified: boolean, transaction: Object|null, error: string|null }
+ */
+export async function verifyTransaction(connection, signature, options = {}) {
+    const {
+        maxRetries = 3,
+        retryDelayMs = 1000,
+        requireSuccess = true,
+    } = options;
+
+    try {
+        // First check if the signature format is valid
+        if (!signature || typeof signature !== 'string' || signature.length < 32) {
+            return {
+                verified: false,
+                transaction: null,
+                error: 'Invalid signature format',
+            };
+        }
+
+        // Try to get the transaction with retries
+        let transaction = null;
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                // Get the transaction details
+                transaction = await connection.getTransaction(signature, {
+                    commitment: 'confirmed',
+                    maxSupportedTransactionVersion: 0,
+                });
+
+                if (transaction) break;
+
+                // If not found, wait and retry (might still be confirming)
+                if (attempt < maxRetries) {
+                    await sleep(retryDelayMs);
+                }
+            } catch (err) {
+                console.error(`Transaction fetch attempt ${attempt + 1} failed:`, err.message);
+                if (attempt < maxRetries) {
+                    await sleep(retryDelayMs);
+                }
+            }
+        }
+
+        if (!transaction) {
+            return {
+                verified: false,
+                transaction: null,
+                error: 'Transaction not found on-chain',
+            };
+        }
+
+        // Check if transaction was successful
+        if (requireSuccess && transaction.meta?.err) {
+            return {
+                verified: false,
+                transaction,
+                error: `Transaction failed: ${JSON.stringify(transaction.meta.err)}`,
+            };
+        }
+
+        return {
+            verified: true,
+            transaction,
+            error: null,
+        };
+    } catch (error) {
+        console.error('Transaction verification error:', error.message);
+        return {
+            verified: false,
+            transaction: null,
+            error: `Verification failed: ${error.message}`,
+        };
+    }
+}
+
+/**
+ * Verify that a transaction interacted with a specific program
+ *
+ * @param {Object} transaction - Transaction object from getTransaction
+ * @param {string} programId - Expected program ID
+ * @returns {boolean} - True if program was invoked
+ */
+export function transactionInvokedProgram(transaction, programId) {
+    if (!transaction?.transaction?.message) {
+        return false;
+    }
+
+    const message = transaction.transaction.message;
+
+    // Get account keys (handles both legacy and versioned transactions)
+    let accountKeys;
+    if (message.staticAccountKeys) {
+        // Versioned transaction
+        accountKeys = message.staticAccountKeys.map(k => k.toString());
+    } else if (message.accountKeys) {
+        // Legacy transaction
+        accountKeys = message.accountKeys.map(k => k.toString());
+    } else {
+        return false;
+    }
+
+    return accountKeys.includes(programId);
+}
+
+/**
+ * Extract log messages from a transaction that match a pattern
+ *
+ * @param {Object} transaction - Transaction object from getTransaction
+ * @param {RegExp|string} pattern - Pattern to match in logs
+ * @returns {string[]} - Matching log messages
+ */
+export function extractTransactionLogs(transaction, pattern) {
+    const logs = transaction?.meta?.logMessages || [];
+    const regex = pattern instanceof RegExp ? pattern : new RegExp(pattern);
+    return logs.filter(log => regex.test(log));
+}
+
 export default {
     formatTokenAmount,
     formatTokenDisplay,
@@ -149,4 +276,7 @@ export default {
     sleep,
     retryWithBackoff,
     parsePagination,
+    verifyTransaction,
+    transactionInvokedProgram,
+    extractTransactionLogs,
 };

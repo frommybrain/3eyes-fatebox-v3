@@ -8,6 +8,13 @@ declare_id!("GTpP39xwT47iTUwbC5HZ7TjCiNon2owkLWg84uUyboat");
 // Constants
 const REVEAL_WINDOW_SECONDS: i64 = 3600; // 1 hour to reveal after commit
 
+// Default values for configurable settings (used if platform_config values are 0)
+const DEFAULT_REFUND_GRACE_PERIOD_SECONDS: i64 = 120; // 2 minutes default grace period
+// Note: No minimum box price constant - just prevent zero. Different tokens have different values.
+
+// Switchboard On-Demand program ID (mainnet and devnet)
+const SWITCHBOARD_ON_DEMAND_PROGRAM_ID: &str = "SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv";
+
 #[program]
 pub mod lootbox_platform {
     use super::*;
@@ -137,12 +144,17 @@ pub mod lootbox_platform {
         config.preset3_tier3_profit = 2700;      // 27%
         // Jackpot = 10000 - others = 300 (3%)
 
+        // Security settings with sensible defaults
+        config.min_box_price = 0;  // Not used - kept for future if needed
+        config.refund_grace_period = DEFAULT_REFUND_GRACE_PERIOD_SECONDS;  // 2 minutes
+
         // Reserved bytes initialized to 0
-        config.reserved = [0u8; 32];
+        config.reserved = [0u8; 16];
 
         msg!("Platform config initialized!");
         msg!("Admin: {}", config.admin);
         msg!("Luck time interval: {} seconds", luck_time_interval);
+        msg!("Refund grace period: {} seconds", config.refund_grace_period);
         msg!("3 game presets configured (Conservative, Degen, Whale)");
 
         Ok(())
@@ -183,6 +195,9 @@ pub mod lootbox_platform {
         paused: Option<bool>,
         // Platform commission (basis points, 500 = 5%)
         platform_commission_bps: Option<u16>,
+        // Security settings
+        min_box_price: Option<u64>,
+        refund_grace_period: Option<i64>,
     ) -> Result<()> {
         let config = &mut ctx.accounts.platform_config;
         let clock = Clock::get()?;
@@ -260,6 +275,17 @@ pub mod lootbox_platform {
             msg!("Platform commission updated to {} bps ({}%)", v, v as f64 / 100.0);
         }
 
+        // Update security settings
+        if let Some(v) = min_box_price {
+            config.min_box_price = v;
+            msg!("Min box price updated to {} base units", v);
+        }
+        if let Some(v) = refund_grace_period {
+            require!(v >= 0, LootboxError::InvalidLuckInterval); // Reuse error for negative check
+            config.refund_grace_period = v;
+            msg!("Refund grace period updated to {} seconds", v);
+        }
+
         config.updated_at = clock.unix_timestamp;
 
         msg!("Platform config updated at {}", clock.unix_timestamp);
@@ -290,11 +316,13 @@ pub mod lootbox_platform {
         luck_time_interval: i64,  // Per-project luck interval (0 = use platform default)
     ) -> Result<()> {
         // Check platform is not paused
-        require!(!ctx.accounts.platform_config.paused, LootboxError::PlatformPaused);
+        let platform_config = &ctx.accounts.platform_config;
+        require!(!platform_config.paused, LootboxError::PlatformPaused);
 
         let project_config = &mut ctx.accounts.project_config;
         let clock = Clock::get()?;
 
+        // Validate box price is not zero (different tokens have different values, so no min)
         require!(box_price > 0, LootboxError::InvalidBoxPrice);
         require!(luck_time_interval >= 0, LootboxError::InvalidLuckInterval);
 
@@ -585,16 +613,21 @@ pub mod lootbox_platform {
             revealed_random_value[6], revealed_random_value[7],
         ]);
 
-        // Convert to percentage (0.0 to 0.9999) using full u64 range
-        let random_percentage = (random_u64 as f64) / (u64::MAX as f64);
+        // FIXED-POINT ARITHMETIC: Convert to basis points (0-10000) without floats
+        // We use u128 intermediate to avoid overflow: (random_u64 * 10000) / u64::MAX
+        // This gives us a value in range [0, 10000] representing 0.00% to 100.00%
+        let random_basis_points: u16 = ((random_u64 as u128)
+            .checked_mul(10000)
+            .ok_or(LootboxError::ArithmeticOverflow)?
+            / (u64::MAX as u128)) as u16;
 
-        msg!("Switchboard randomness: u64={}, percentage={:.4}", random_u64, random_percentage);
+        msg!("Switchboard randomness: u64={}, basis_points={}", random_u64, random_basis_points);
 
         // Calculate reward based on luck and randomness using config values
         // Use project's game_preset (0 = default, 1-3 = presets)
         let (reward_amount, is_jackpot, reward_tier) = calculate_reward_from_config(
             current_luck,
-            random_percentage,
+            random_basis_points,
             project_config.box_price,
             platform_config,
             project_config.game_preset,
@@ -605,7 +638,8 @@ pub mod lootbox_platform {
         box_instance.revealed = true;
         box_instance.reward_amount = reward_amount;
         box_instance.is_jackpot = is_jackpot;
-        box_instance.random_percentage = random_percentage;
+        // Store basis points instead of float (backwards compatible: same 8 bytes, different interpretation)
+        box_instance.random_percentage = random_basis_points as f64; // Store as bps for backwards compat
         box_instance.reward_tier = reward_tier;
 
         let tier_name = match reward_tier {
@@ -620,7 +654,7 @@ pub mod lootbox_platform {
         msg!("Box revealed with Switchboard VRF!");
         msg!("Box ID: {}", box_id);
         msg!("Luck: {}/{}", current_luck, platform_config.max_luck);
-        msg!("Random roll: {:.2}%", random_percentage * 100.0);
+        msg!("Random roll: {:.2}%", (random_basis_points as f64) / 100.0);
         msg!("Tier: {} ({})", tier_name, reward_tier);
         msg!("Reward: {}", reward_amount);
         msg!("Is jackpot: {}", is_jackpot);
@@ -699,11 +733,17 @@ pub mod lootbox_platform {
     }
 
     /// Project owner withdraws earnings from vault
-    /// Available balance is calculated off-chain (vault balance minus reserved for unopened boxes)
+    /// Includes reserve protection: vault must retain enough to cover pending box payouts
+    ///
+    /// @param project_id - The project ID
+    /// @param amount - Amount to withdraw
+    /// @param pending_reserve - Minimum reserve that must remain in vault (calculated off-chain)
+    ///                          This should be the max potential payout for all unsettled boxes
     pub fn withdraw_earnings(
         ctx: Context<WithdrawEarnings>,
         project_id: u64,
         amount: u64,
+        pending_reserve: u64,
     ) -> Result<()> {
         let project_config = &ctx.accounts.project_config;
 
@@ -720,7 +760,18 @@ pub mod lootbox_platform {
             LootboxError::InsufficientVaultBalance
         );
 
+        // SECURITY: Ensure vault retains enough for pending box payouts
+        // pending_reserve is the maximum potential payout for unsettled boxes,
+        // calculated off-chain as: sum of (box_price * max_payout_multiplier) for each pending box
+        let available_for_withdrawal = vault_balance.saturating_sub(pending_reserve);
+        require!(
+            amount <= available_for_withdrawal,
+            LootboxError::WithdrawalExceedsAvailable
+        );
+
         msg!("Vault balance: {}", vault_balance);
+        msg!("Pending reserve required: {}", pending_reserve);
+        msg!("Available for withdrawal: {}", available_for_withdrawal);
         msg!("Withdrawal amount: {}", amount);
 
         // Transfer from vault to owner using PDA signer
@@ -757,15 +808,12 @@ pub mod lootbox_platform {
     /// - Box must be committed (randomness_committed = true)
     /// - Box must NOT be revealed (revealed = false)
     /// - Box must NOT be settled (settled = false)
+    /// - At least refund_grace_period seconds must have passed since commit
+    ///   (prevents gaming by immediately requesting refund after bad oracle result)
     ///
     /// Note: The backend tracks which boxes are eligible for refund (system errors)
     /// vs which expired due to user inaction (duds). Refund eligibility is checked
     /// off-chain in the database before this instruction is called.
-    ///
-    /// We do NOT enforce the 1-hour reveal window here because:
-    /// - System failures (oracle errors, network issues) can happen at any time
-    /// - Users should be able to claim refunds immediately when a fault is detected
-    /// - The backend only allows refund for boxes marked refund_eligible in DB
     pub fn refund_box(
         ctx: Context<RefundBox>,
         project_id: u64,
@@ -773,6 +821,8 @@ pub mod lootbox_platform {
     ) -> Result<()> {
         let box_instance = &mut ctx.accounts.box_instance;
         let project_config = &ctx.accounts.project_config;
+        let platform_config = &ctx.accounts.platform_config;
+        let clock = Clock::get()?;
 
         // Verify ownership
         require!(
@@ -788,9 +838,24 @@ pub mod lootbox_platform {
         require!(!box_instance.revealed, LootboxError::BoxAlreadyRevealed);
         require!(!box_instance.settled, LootboxError::BoxAlreadySettled);
 
-        // Note: We intentionally do NOT check the reveal window expiry here.
-        // Refund eligibility (system error vs user inaction) is determined off-chain.
-        // The backend only calls this instruction for boxes marked refund_eligible.
+        // SECURITY: Enforce grace period before refund is allowed
+        // This prevents users from calling refund immediately after seeing an unfavorable
+        // oracle result (the oracle may still resolve successfully within this window)
+        // Use config value, fall back to default if config is 0
+        let grace_period = if platform_config.refund_grace_period > 0 {
+            platform_config.refund_grace_period
+        } else {
+            DEFAULT_REFUND_GRACE_PERIOD_SECONDS
+        };
+
+        let time_since_commit = clock.unix_timestamp - box_instance.committed_at;
+        require!(
+            time_since_commit >= grace_period,
+            LootboxError::RefundGracePeriodNotElapsed
+        );
+
+        msg!("Grace period check passed: {} seconds since commit (min: {})",
+            time_since_commit, grace_period);
 
         // Calculate refund amount (box price minus commission that was already taken)
         // Commission was taken at purchase time, so refund = box_price - commission
@@ -856,6 +921,7 @@ pub mod lootbox_platform {
 
         // Update box price if provided
         if let Some(price) = new_box_price {
+            // Just validate box price is not zero
             require!(price > 0, LootboxError::InvalidBoxPrice);
             project_config.box_price = price;
             msg!("Box price updated to: {}", price);
@@ -991,9 +1057,10 @@ pub mod lootbox_platform {
 /// Calculate reward tier and amount using platform config values
 /// Uses 3 fixed tiers based on luck score
 /// game_preset: 0 = default, 1-3 = presets defined in PlatformConfig
+/// random_basis_points: random value in range 0-10000 (basis points, no floats)
 fn calculate_reward_from_config(
     luck: u8,
-    random_percentage: f64,
+    random_basis_points: u16,
     box_price: u64,
     config: &PlatformConfig,
     game_preset: u8,
@@ -1074,8 +1141,8 @@ fn calculate_reward_from_config(
         }
     };
 
-    // Convert random_percentage from 0.0-1.0 to 0-10000 basis points
-    let roll = (random_percentage * 10000.0) as u16;
+    // Use the random basis points directly (already in 0-10000 range)
+    let roll = random_basis_points;
 
     // Determine tier based on cumulative probabilities
     let mut cumulative: u16 = 0;
@@ -1387,6 +1454,10 @@ pub struct RevealBox<'info> {
     pub vault_token_account: Account<'info, TokenAccount>,
 
     /// CHECK: Switchboard VRF randomness account - verified against box_instance.randomness_account
+    /// Also verified that the account is owned by Switchboard On-Demand program
+    #[account(
+        constraint = randomness_account.owner.to_string() == SWITCHBOARD_ON_DEMAND_PROGRAM_ID @ LootboxError::InvalidSwitchboardOwner
+    )]
     pub randomness_account: AccountInfo<'info>,
 }
 
@@ -1446,6 +1517,12 @@ pub struct SettleBox<'info> {
 #[instruction(project_id: u64, box_id: u64)]
 pub struct RefundBox<'info> {
     pub owner: Signer<'info>,
+
+    #[account(
+        seeds = [b"platform_config"],
+        bump
+    )]
+    pub platform_config: Account<'info, PlatformConfig>,
 
     #[account(
         seeds = [b"project", project_id.to_le_bytes().as_ref()],
@@ -1736,17 +1813,24 @@ pub struct PlatformConfig {
     pub preset3_tier3_breakeven: u16,   // 2 bytes
     pub preset3_tier3_profit: u16,      // 2 bytes = 36 bytes total
 
-    // Reserved for future expansion
-    pub reserved: [u8; 32],             // 32 bytes
+    // ============================================================================
+    // SECURITY SETTINGS (configurable from admin dashboard)
+    // ============================================================================
+    pub min_box_price: u64,             // 8 bytes - Minimum box price in token base units
+    pub refund_grace_period: i64,       // 8 bytes - Seconds after commit before refund allowed
+
+    // Reserved for future expansion (reduced from 32 to 16 to make room for above)
+    pub reserved: [u8; 16],             // 16 bytes
 }
 
 impl PlatformConfig {
-    // Original: 101 bytes + 3 presets (36 each) + 32 reserved = 101 + 108 + 32 = 241 bytes
+    // Original: 101 bytes + 3 presets (36 each) + 16 new fields + 16 reserved = 101 + 108 + 16 + 16 = 241 bytes
     pub const LEN: usize = 32 + 1 + 1 + 1 + 1 + 8 + 4 + 4 + 4 + 4 + 4 + 1 + 2 + 2 + 2 + 2 + 1 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 1 + 8
         + (4 + 4 + 4 + 4 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2) // Preset 1: 36 bytes
         + (4 + 4 + 4 + 4 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2) // Preset 2: 36 bytes
         + (4 + 4 + 4 + 4 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2 + 2) // Preset 3: 36 bytes
-        + 32; // Reserved
+        + 8 + 8  // min_box_price + refund_grace_period
+        + 16; // Reserved
 }
 
 #[account]
@@ -1887,4 +1971,16 @@ pub enum LootboxError {
 
     #[msg("Reveal window has not expired yet (must wait 1 hour after commit)")]
     RevealWindowNotExpired,
+
+    #[msg("Refund grace period has not elapsed (must wait 60 seconds after commit)")]
+    RefundGracePeriodNotElapsed,
+
+    #[msg("Invalid Switchboard randomness account owner")]
+    InvalidSwitchboardOwner,
+
+    #[msg("Box price below minimum (must be >= 0.001 tokens)")]
+    BoxPriceBelowMinimum,
+
+    #[msg("Withdrawal exceeds available balance (reserves needed for pending boxes)")]
+    WithdrawalExceedsAvailable,
 }

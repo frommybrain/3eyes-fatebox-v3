@@ -10,6 +10,7 @@ import { derivePlatformConfigPDA, deriveTreasuryPDA, deriveTreasuryTokenAccount 
 import { getNetworkConfig, getPlatformConfig, clearConfigCache } from '../lib/getNetworkConfig.js';
 import { createClient } from '@supabase/supabase-js';
 import logger, { EventTypes, Severity, ActorTypes } from '../lib/logger.js';
+import { requireSuperAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -23,8 +24,9 @@ const supabase = createClient(
  * POST /api/admin/update-platform-config
  * Updates the on-chain platform config PDA
  * Only callable by the platform admin (deploy wallet)
+ * Requires X-Wallet-Address header matching on-chain admin
  */
-router.post('/update-platform-config', async (req, res) => {
+router.post('/update-platform-config', requireSuperAdmin, async (req, res) => {
     try {
         const {
             // Luck parameters
@@ -56,6 +58,8 @@ router.post('/update-platform-config', async (req, res) => {
             tier3Profit,
             // Platform commission
             platformCommissionBps,
+            // Security settings
+            refundGracePeriod,
         } = req.body;
 
         console.log('\n========================================');
@@ -131,6 +135,9 @@ router.post('/update-platform-config', async (req, res) => {
             tier3Profit: tier3Profit !== undefined ? tier3Profit : null,
             // Platform commission
             platformCommissionBps: platformCommissionBps !== undefined ? platformCommissionBps : null,
+            // Security settings
+            minBoxPrice: null, // Not used - kept for future
+            refundGracePeriod: refundGracePeriod !== undefined ? new BN(refundGracePeriod) : null,
         };
 
         console.log('Update params:', {
@@ -172,6 +179,8 @@ router.post('/update-platform-config', async (req, res) => {
                 updateParams.tier3Profit,
                 null, // paused - not changing
                 updateParams.platformCommissionBps,
+                updateParams.minBoxPrice,
+                updateParams.refundGracePeriod,
             )
             .accounts({
                 admin: adminKeypair.publicKey,
@@ -286,6 +295,9 @@ router.get('/platform-config', async (req, res) => {
                 platformCommissionBps: config.platformCommissionBps,
                 platformCommissionPercent: config.platformCommissionPercent,
                 treasuryBump: config.treasuryBump,
+                // Security settings
+                minBoxPrice: config.minBoxPrice,
+                refundGracePeriod: config.refundGracePeriod,
                 // Additional metadata
                 source: config.source,
                 network: config.network,
@@ -305,8 +317,9 @@ router.get('/platform-config', async (req, res) => {
 /**
  * POST /api/admin/toggle-pause
  * Toggles the platform pause state
+ * Requires X-Wallet-Address header matching on-chain admin
  */
-router.post('/toggle-pause', async (req, res) => {
+router.post('/toggle-pause', requireSuperAdmin, async (req, res) => {
     try {
         const { paused } = req.body;
 
@@ -508,12 +521,13 @@ router.get('/treasury-balances', async (req, res) => {
  * POST /api/admin/withdraw-treasury
  * Withdraw tokens from treasury to admin wallet
  * This is used for batch processing (swap to SOL, buyback, etc.)
+ * Requires X-Wallet-Address header matching on-chain admin
  *
  * Body:
  * - tokenMint: string - Token mint address
  * - amount: string (optional) - Amount to withdraw (defaults to full balance)
  */
-router.post('/withdraw-treasury', async (req, res) => {
+router.post('/withdraw-treasury', requireSuperAdmin, async (req, res) => {
     try {
         const { tokenMint, amount } = req.body;
 

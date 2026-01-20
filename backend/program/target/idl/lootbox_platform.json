@@ -648,15 +648,12 @@
         "- Box must be committed (randomness_committed = true)",
         "- Box must NOT be revealed (revealed = false)",
         "- Box must NOT be settled (settled = false)",
+        "- At least refund_grace_period seconds must have passed since commit",
+        "(prevents gaming by immediately requesting refund after bad oracle result)",
         "",
         "Note: The backend tracks which boxes are eligible for refund (system errors)",
         "vs which expired due to user inaction (duds). Refund eligibility is checked",
-        "off-chain in the database before this instruction is called.",
-        "",
-        "We do NOT enforce the 1-hour reveal window here because:",
-        "- System failures (oracle errors, network issues) can happen at any time",
-        "- Users should be able to claim refunds immediately when a fault is detected",
-        "- The backend only allows refund for boxes marked refund_eligible in DB"
+        "off-chain in the database before this instruction is called."
       ],
       "discriminator": [
         48,
@@ -672,6 +669,33 @@
         {
           "name": "owner",
           "signer": true
+        },
+        {
+          "name": "platform_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "project_config",
@@ -911,7 +935,10 @@
           ]
         },
         {
-          "name": "randomness_account"
+          "name": "randomness_account",
+          "docs": [
+            "Also verified that the account is owned by Switchboard On-Demand program"
+          ]
         }
       ],
       "args": [
@@ -1305,6 +1332,18 @@
           "type": {
             "option": "u16"
           }
+        },
+        {
+          "name": "min_box_price",
+          "type": {
+            "option": "u64"
+          }
+        },
+        {
+          "name": "refund_grace_period",
+          "type": {
+            "option": "i64"
+          }
         }
       ]
     },
@@ -1382,7 +1421,12 @@
       "name": "withdraw_earnings",
       "docs": [
         "Project owner withdraws earnings from vault",
-        "Available balance is calculated off-chain (vault balance minus reserved for unopened boxes)"
+        "Includes reserve protection: vault must retain enough to cover pending box payouts",
+        "",
+        "@param project_id - The project ID",
+        "@param amount - Amount to withdraw",
+        "@param pending_reserve - Minimum reserve that must remain in vault (calculated off-chain)",
+        "This should be the max potential payout for all unsettled boxes"
       ],
       "discriminator": [
         6,
@@ -1479,6 +1523,10 @@
         },
         {
           "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "pending_reserve",
           "type": "u64"
         }
       ]
@@ -1773,6 +1821,26 @@
       "code": 6028,
       "name": "RevealWindowNotExpired",
       "msg": "Reveal window has not expired yet (must wait 1 hour after commit)"
+    },
+    {
+      "code": 6029,
+      "name": "RefundGracePeriodNotElapsed",
+      "msg": "Refund grace period has not elapsed (must wait 60 seconds after commit)"
+    },
+    {
+      "code": 6030,
+      "name": "InvalidSwitchboardOwner",
+      "msg": "Invalid Switchboard randomness account owner"
+    },
+    {
+      "code": 6031,
+      "name": "BoxPriceBelowMinimum",
+      "msg": "Box price below minimum (must be >= 0.001 tokens)"
+    },
+    {
+      "code": 6032,
+      "name": "WithdrawalExceedsAvailable",
+      "msg": "Withdrawal exceeds available balance (reserves needed for pending boxes)"
     }
   ],
   "types": [
@@ -2150,11 +2218,19 @@
             "type": "u16"
           },
           {
+            "name": "min_box_price",
+            "type": "u64"
+          },
+          {
+            "name": "refund_grace_period",
+            "type": "i64"
+          },
+          {
             "name": "reserved",
             "type": {
               "array": [
                 "u8",
-                32
+                16
               ]
             }
           }

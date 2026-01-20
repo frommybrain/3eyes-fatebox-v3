@@ -2219,7 +2219,7 @@ router.post('/build-reveal-box-tx', async (req, res) => {
                     tierName: tierNames[rewardTierOnChain] || 'Unknown',
                     payoutAmount: Number(rewardAmount),
                     isJackpot,
-                    randomPercentage,
+                    randomPercentage: randomPercentage / 100, // Convert basis points to percentage (0-100)
                     luck: currentLuck,
                     badgeImageId: recoveredBadgeImageId,
                 },
@@ -2624,7 +2624,8 @@ router.post('/confirm-reveal', async (req, res) => {
         const tierName = tierNames[rewardTier] || 'Unknown';
 
         console.log(`   On-chain reward: ${tierName} (tier ${rewardTier}) - ${rewardAmountBN.toString()} (${Number(rewardAmount) / Math.pow(10, project.payment_token_decimals || 9)} ${project.payment_token_symbol})`);
-        console.log(`   Luck: ${luck}/60, Random: ${(randomPercentage * 100).toFixed(2)}%`);
+        // Note: randomPercentage is stored on-chain as basis points (0-10000), so divide by 100 to get actual percentage
+        console.log(`   Luck: ${luck}/60, Random: ${(randomPercentage / 100).toFixed(2)}%`);
 
         if (!revealed) {
             throw new Error('Box is not revealed on-chain');
@@ -2648,7 +2649,7 @@ router.post('/confirm-reveal', async (req, res) => {
                 reveal_tx_signature: signature,
                 luck_value: luck,
                 max_luck: 60, // Max luck score is always 60
-                random_percentage: randomPercentage * 100, // Store as percentage (0-100)
+                random_percentage: randomPercentage / 100, // On-chain stores basis points (0-10000), divide by 100 to get percentage (0-100)
                 // Randomness account is closed as part of reveal transaction (reclaims rent to user)
                 randomness_closed: true,
                 // Trophy badge for winning tiers
@@ -2701,7 +2702,7 @@ router.post('/confirm-reveal', async (req, res) => {
                 formatted: Number(rewardAmount) / Math.pow(10, project.payment_token_decimals || 9),
                 isJackpot,
                 luck,
-                randomPercentage,
+                randomPercentage: randomPercentage / 100, // Convert basis points to percentage (0-100)
                 badgeImageId, // Trophy badge ID for winning tiers (null for duds)
             },
             explorerUrl: `https://explorer.solana.com/tx/${signature}?cluster=${config.network}`,
@@ -3162,7 +3163,7 @@ router.get('/box/:projectId/:boxId', async (req, res) => {
                 settled,
                 rewardAmount: rewardAmountBN.toString(),
                 isJackpot,
-                randomPercentage,
+                randomPercentage: randomPercentage / 100, // Convert basis points to percentage (0-100)
             },
             pda: boxInstancePDA.toString(),
         });

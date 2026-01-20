@@ -28,6 +28,10 @@ import {
     XLogo,
 } from '@/components/ui';
 import { getWinShareHandler, getMyProjectShareHandler } from '@/lib/shareManager';
+import TrophyCabinet from '@/components/profile/TrophyCabinet';
+import ProfileStats from '@/components/profile/ProfileStats';
+import ProfileBadges from '@/components/profile/ProfileBadges';
+import DegenAccordion from '@/components/ui/DegenAccordion';
 
 // ===== TESTING CONFIG =====
 // Set to 30 for quick testing, 3600 for production (1 hour)
@@ -231,12 +235,14 @@ function MyProfileTab({ walletAddress }) {
     const { toast } = useToast();
     const [profile, setProfile] = useState(null);
     const [stats, setStats] = useState(null);
+    const [badges, setBadges] = useState([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [username, setUsername] = useState('');
     const [xHandle, setXHandle] = useState('');
     const [usernameAvailable, setUsernameAvailable] = useState(null);
     const [usernameChecking, setUsernameChecking] = useState(false);
+    const [profileTab, setProfileTab] = useState('trophies');
 
     // Fetch profile data
     useEffect(() => {
@@ -251,6 +257,7 @@ function MyProfileTab({ walletAddress }) {
                 if (data.success) {
                     setProfile(data.profile);
                     setStats(data.stats);
+                    setBadges(data.badges || []);
                     if (data.profile) {
                         setUsername(data.profile.username || '');
                         setXHandle(data.profile.xHandle || '');
@@ -341,116 +348,249 @@ function MyProfileTab({ walletAddress }) {
         : '';
 
     return (
-        <div className="max-w-2xl">
-            <DegenCard variant="white" padding="lg" className="mb-6">
-                <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-6">
-                    Profile Settings
-                </h2>
-
-                {/* Wallet Address */}
-                <div className="mb-6">
-                    <label className="block text-degen-black font-medium text-sm uppercase tracking-wider mb-2">
-                        Wallet Address
-                    </label>
-                    <p className="text-degen-text-muted font-mono text-sm bg-degen-container p-3 border border-degen-black">
-                        {walletAddress}
-                    </p>
-                </div>
-
-                {/* Username */}
-                <div className="mb-6">
-                    <label className="block text-degen-black font-medium text-sm uppercase tracking-wider mb-2">
-                        Username
-                    </label>
-                    <div className="relative">
-                        <input
-                            type="text"
-                            value={username}
-                            onChange={(e) => {
-                                const value = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '');
-                                setUsername(value);
-                                setUsernameAvailable(null);
-                            }}
-                            onBlur={() => checkUsername(username)}
-                            placeholder="your_username"
-                            className="w-full px-3 py-2 bg-degen-white text-degen-black placeholder:text-degen-text-muted border border-degen-black outline-none transition-colors duration-100 focus:bg-degen-container"
-                            maxLength={20}
-                        />
-                        {usernameChecking && (
-                            <div className="absolute right-3 top-2 text-degen-text-muted">...</div>
-                        )}
-                        {usernameAvailable === true && !usernameChecking && (
-                            <div className="absolute right-3 top-2 text-degen-green">OK</div>
-                        )}
-                        {usernameAvailable === false && !usernameChecking && (
-                            <div className="absolute right-3 top-2 text-degen-feature">Taken</div>
-                        )}
+        <div className="flex flex-col lg:flex-row gap-6">
+            {/* Left Sidebar - Profile Info & Quick Stats */}
+            <div className="w-full lg:w-1/3 space-y-4">
+                {/* Profile Info Card */}
+                <DegenCard variant="white" padding="md">
+                    {/* Avatar/Icon */}
+                    <div className="w-20 h-20 mx-auto mb-4 bg-degen-black flex items-center justify-center text-degen-white text-3xl font-bold border border-degen-black">
+                        {profile?.username ? profile.username[0].toUpperCase() : '?'}
                     </div>
-                    <p className="text-degen-text-muted text-xs mt-1">
-                        3-20 characters, lowercase letters, numbers, and underscores only
-                    </p>
-                    {profile?.username && (
-                        <p className="text-degen-blue text-sm mt-2">
-                            Your profile: degenbox.fun/profile/{profile.username}
-                        </p>
+
+                    {/* Username */}
+                    <h2 className="text-degen-black text-xl font-medium text-center uppercase tracking-wider mb-2">
+                        {profile?.username || 'Anonymous'}
+                    </h2>
+
+                    {/* X Handle */}
+                    {profile?.xHandle && (
+                        <a
+                            href={`https://x.com/${profile.xHandle}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-degen-blue text-sm text-center block mb-3 hover:underline"
+                        >
+                            @{profile.xHandle}
+                        </a>
                     )}
-                </div>
 
-                {/* X Handle */}
-                <div className="mb-6">
-                    <label className="block text-degen-black font-medium text-sm uppercase tracking-wider mb-2">
-                        X (Twitter) Handle
-                    </label>
-                    <div className="flex items-center gap-2">
-                        <span className="text-degen-text-muted">@</span>
-                        <input
-                            type="text"
-                            value={xHandle}
-                            onChange={(e) => setXHandle(e.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
-                            placeholder="your_handle"
-                            className="flex-1 px-3 py-2 bg-degen-white text-degen-black placeholder:text-degen-text-muted border border-degen-black outline-none transition-colors duration-100 focus:bg-degen-container"
-                            maxLength={15}
-                        />
-                    </div>
-                </div>
-
-                {/* Save Button */}
-                <DegenButton
-                    onClick={handleSave}
-                    disabled={saving || usernameAvailable === false}
-                    variant="primary"
-                    size="lg"
-                >
-                    {saving ? 'Saving...' : 'Save Profile'}
-                </DegenButton>
-            </DegenCard>
-
-            {/* Quick Stats */}
-            {stats && (
-                <DegenCard variant="default" padding="md">
-                    <h3 className="text-degen-black text-lg font-medium uppercase tracking-wider mb-4">
-                        Your Stats
-                    </h3>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                        <div className="text-center p-3 bg-degen-white border border-degen-black">
-                            <p className="text-degen-text-muted text-xs uppercase">Boxes</p>
-                            <p className="text-degen-black text-xl font-medium">{stats.totalBoxes || 0}</p>
-                        </div>
-                        <div className="text-center p-3 bg-degen-white border border-degen-black">
-                            <p className="text-degen-text-muted text-xs uppercase">Wins</p>
-                            <p className="text-degen-black text-xl font-medium">{stats.winsCount || 0}</p>
-                        </div>
-                        <div className="text-center p-3 bg-degen-white border border-degen-black">
-                            <p className="text-degen-text-muted text-xs uppercase">Win Rate</p>
-                            <p className="text-degen-black text-xl font-medium">{stats.winRate || 0}%</p>
-                        </div>
-                        <div className="text-center p-3 bg-degen-white border border-degen-black">
-                            <p className="text-degen-text-muted text-xs uppercase">Jackpots</p>
-                            <p className="text-degen-black text-xl font-medium">{stats.jackpotCount || 0}</p>
-                        </div>
-                    </div>
+                    {/* Wallet */}
+                    <p className="text-degen-text-muted text-xs text-center font-mono mb-4">
+                        {truncatedWallet}
+                    </p>
                 </DegenCard>
-            )}
+
+                {/* Quick Stats Card */}
+                {stats && (
+                    <DegenCard variant="default" padding="md">
+                        <h3 className="text-degen-black text-sm font-medium uppercase tracking-wider mb-3">
+                            Quick Stats
+                        </h3>
+                        <div className="grid grid-cols-2 gap-2">
+                            <div className="text-center p-2 bg-degen-white border border-degen-black">
+                                <p className="text-degen-text-muted text-xs uppercase">Boxes</p>
+                                <p className="text-degen-black text-lg font-medium">{stats.totalBoxes || 0}</p>
+                            </div>
+                            <div className="text-center p-2 bg-degen-white border border-degen-black">
+                                <p className="text-degen-text-muted text-xs uppercase">Wins</p>
+                                <p className="text-degen-black text-lg font-medium">{stats.winsCount || 0}</p>
+                            </div>
+                            <div className={`text-center p-2 border border-degen-black ${stats.jackpotCount > 0 ? 'bg-degen-yellow' : 'bg-degen-white'}`}>
+                                <p className="text-degen-text-muted text-xs uppercase">Jackpots</p>
+                                <p className="text-degen-black text-lg font-medium">{stats.jackpotCount || 0}</p>
+                            </div>
+                            <div className="text-center p-2 bg-degen-white border border-degen-black">
+                                <p className="text-degen-text-muted text-xs uppercase">Projects</p>
+                                <p className="text-degen-black text-lg font-medium">{stats.projectsCreated || 0}</p>
+                            </div>
+                        </div>
+                    </DegenCard>
+                )}
+
+                {/* Badges Preview */}
+                {badges && badges.length > 0 && (
+                    <DegenCard variant="default" padding="md">
+                        <h3 className="text-degen-black text-sm font-medium uppercase tracking-wider mb-3">
+                            Badges ({badges.length})
+                        </h3>
+                        <div className="flex flex-wrap gap-2">
+                            {badges.slice(0, 6).map((badge) => (
+                                <div
+                                    key={badge.badge_type}
+                                    className="w-10 h-10 bg-degen-container border border-degen-black flex items-center justify-center"
+                                    title={badge.name}
+                                >
+                                    {badge.icon ? (
+                                        <img src={badge.icon} alt={badge.name} className="w-6 h-6" />
+                                    ) : (
+                                        <span className="text-xs font-bold">{badge.badge_type[0].toUpperCase()}</span>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </DegenCard>
+                )}
+            </div>
+
+            {/* Right Panel - Tabbed Content */}
+            <div className="w-full lg:w-2/3">
+                <DegenTabs value={profileTab} onValueChange={setProfileTab}>
+                    <DegenTabsList className="mb-4">
+                        <DegenTabsTrigger value="trophies">
+                            Trophies
+                        </DegenTabsTrigger>
+                        <DegenTabsTrigger value="stats">
+                            Stats
+                        </DegenTabsTrigger>
+                        <DegenTabsTrigger value="settings">
+                            Settings
+                        </DegenTabsTrigger>
+                        <DegenTabsTrigger value="support">
+                            Support
+                        </DegenTabsTrigger>
+                    </DegenTabsList>
+
+                    {/* Trophies Tab */}
+                    <DegenTabsContent value="trophies">
+                        <TrophyCabinet walletAddress={walletAddress} username={profile?.username} />
+                    </DegenTabsContent>
+
+                    {/* Stats Tab */}
+                    <DegenTabsContent value="stats">
+                        <ProfileStats stats={stats} />
+                        <ProfileBadges badges={badges} username={profile?.username} className="mt-4" />
+                    </DegenTabsContent>
+
+                    {/* Settings Tab */}
+                    <DegenTabsContent value="settings">
+                        <DegenCard variant="white" padding="lg">
+                            <h2 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-6">
+                                Profile Settings
+                            </h2>
+
+                            {/* Wallet Address */}
+                            <div className="mb-6">
+                                <label className="block text-degen-black font-medium text-sm uppercase tracking-wider mb-2">
+                                    Wallet Address
+                                </label>
+                                <p className="text-degen-text-muted font-mono text-sm bg-degen-container p-3 border border-degen-black break-all">
+                                    {walletAddress}
+                                </p>
+                            </div>
+
+                            {/* Username */}
+                            <div className="mb-6">
+                                <label className="block text-degen-black font-medium text-sm uppercase tracking-wider mb-2">
+                                    Username
+                                </label>
+                                <div className="relative">
+                                    <input
+                                        type="text"
+                                        value={username}
+                                        onChange={(e) => {
+                                            const value = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '');
+                                            setUsername(value);
+                                            setUsernameAvailable(null);
+                                        }}
+                                        onBlur={() => checkUsername(username)}
+                                        placeholder="your_username"
+                                        className="w-full px-3 py-2 bg-degen-white text-degen-black placeholder:text-degen-text-muted border border-degen-black outline-none transition-colors duration-100 focus:bg-degen-container"
+                                        maxLength={20}
+                                    />
+                                    {usernameChecking && (
+                                        <div className="absolute right-3 top-2 text-degen-text-muted">...</div>
+                                    )}
+                                    {usernameAvailable === true && !usernameChecking && (
+                                        <div className="absolute right-3 top-2 text-degen-green">OK</div>
+                                    )}
+                                    {usernameAvailable === false && !usernameChecking && (
+                                        <div className="absolute right-3 top-2 text-degen-feature">Taken</div>
+                                    )}
+                                </div>
+                                <p className="text-degen-text-muted text-xs mt-1">
+                                    3-20 characters, lowercase letters, numbers, and underscores only
+                                </p>
+                            </div>
+
+                            {/* X Handle */}
+                            <div className="mb-6">
+                                <label className="block text-degen-black font-medium text-sm uppercase tracking-wider mb-2">
+                                    X.com Username
+                                </label>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-degen-text-muted">@</span>
+                                    <input
+                                        type="text"
+                                        value={xHandle}
+                                        onChange={(e) => setXHandle(e.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
+                                        placeholder="your_handle"
+                                        className="flex-1 px-3 py-2 bg-degen-white text-degen-black placeholder:text-degen-text-muted border border-degen-black outline-none transition-colors duration-100 focus:bg-degen-container"
+                                        maxLength={15}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Save Button */}
+                            <DegenButton
+                                onClick={handleSave}
+                                disabled={saving || usernameAvailable === false}
+                                variant="primary"
+                                size="lg"
+                            >
+                                {saving ? 'Saving...' : 'Save Profile'}
+                            </DegenButton>
+                        </DegenCard>
+                    </DegenTabsContent>
+
+                    {/* Support Tab */}
+                    <DegenTabsContent value="support">
+                        <DegenCard variant="white" padding="lg">
+                            <h2 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-6">
+                                Frequently Asked Questions
+                            </h2>
+
+                            <div className="space-y-2">
+                                <DegenAccordion title="How do I open a box?">
+                                    <p className="text-degen-text-muted text-sm">
+                                        Click "Open Box" to commit randomness, wait 10 seconds for the oracle, then click "Reveal" to see your result.
+                                    </p>
+                                </DegenAccordion>
+
+                                <DegenAccordion title="What happens if I don't reveal in time?">
+                                    <p className="text-degen-text-muted text-sm">
+                                        You have 1 hour to reveal after opening. If you miss the window, the box becomes a Dud.
+                                    </p>
+                                </DegenAccordion>
+
+                                <DegenAccordion title="How do trophies work?">
+                                    <p className="text-degen-text-muted text-sm">
+                                        Every winning box (rebate or better) earns you a unique trophy badge that appears in your collection.
+                                    </p>
+                                </DegenAccordion>
+
+                                <DegenAccordion title="What are the win tiers?">
+                                    <p className="text-degen-text-muted text-sm">
+                                        Dud (0x), Rebate (0.5x), Break-even (1x), Profit (1.5x), Jackpot (4x)
+                                    </p>
+                                </DegenAccordion>
+
+                                <DegenAccordion title="What if there's a system error during reveal?">
+                                    <p className="text-degen-text-muted text-sm">
+                                        If the oracle or network fails during reveal, you'll be eligible for a full refund of the box price. The refund button will appear automatically.
+                                    </p>
+                                </DegenAccordion>
+
+                                <DegenAccordion title="How do I claim my winnings?">
+                                    <p className="text-degen-text-muted text-sm">
+                                        After revealing a winning box, click the "Claim" button to transfer your reward to your wallet. Make sure you have enough SOL for transaction fees.
+                                    </p>
+                                </DegenAccordion>
+                            </div>
+                        </DegenCard>
+                    </DegenTabsContent>
+                </DegenTabs>
+            </div>
         </div>
     );
 }
@@ -948,6 +1088,22 @@ function BoxCard({ box, project, onRefresh }) {
         }
     };
 
+    // Construct badge URL from tier and badge image ID
+    const getBadgeUrl = (tier, badgeImageId) => {
+        if (!badgeImageId || tier < 2) return null;
+
+        const tierFolders = { 2: '0.5x', 3: '1x', 4: '1.5x', 5: '4x' };
+        const tierPrefixes = { 2: 'badge_0-5x_', 3: 'badge_1x_', 4: 'badge_1-5x_', 5: 'badge_4x_' };
+
+        const folder = tierFolders[tier];
+        const prefix = tierPrefixes[tier];
+        if (!folder || !prefix) return null;
+
+        const paddedId = String(badgeImageId).padStart(3, '0');
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        return `${supabaseUrl}/storage/v1/object/public/badges/${folder}/${prefix}${paddedId}.png`;
+    };
+
     // Handle commit box (Open Box - step 1)
     const handleCommit = async () => {
         if (!publicKey || !signTransaction) return;
@@ -1178,6 +1334,18 @@ function BoxCard({ box, project, onRefresh }) {
                     : '0';
                 endTransaction(true, `Recovered: ${tierName}! Payout: ${payout} ${project.payment_token_symbol}`);
 
+                // Show win popup for winning results (tier > 1, not dud)
+                if (buildResult.reward.tier > 1) {
+                    setWinData({
+                        tier: buildResult.reward.tier,
+                        amount: payout,
+                        tokenSymbol: project.payment_token_symbol,
+                        projectUrl: getProjectUrl(project.subdomain),
+                        badgeUrl: getBadgeUrl(buildResult.reward.tier, buildResult.reward.badgeImageId),
+                    });
+                    setShowWinModal(true);
+                }
+
                 // Refresh boxes list
                 if (onRefresh) onRefresh();
                 return;
@@ -1240,6 +1408,7 @@ function BoxCard({ box, project, onRefresh }) {
                         amount: payout,
                         tokenSymbol: project.payment_token_symbol,
                         projectUrl: getProjectUrl(project.subdomain),
+                        badgeUrl: getBadgeUrl(confirmResult.reward.tier, confirmResult.reward.badgeImageId),
                     });
                     setShowWinModal(true);
                 }
@@ -1288,6 +1457,18 @@ function BoxCard({ box, project, onRefresh }) {
                             ? (retryResult.reward.payoutAmount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
                             : '0';
                         endTransaction(true, `Recovered: ${tierName}! Payout: ${payout} ${project.payment_token_symbol}`);
+
+                        // Show win popup for winning results (tier > 1, not dud)
+                        if (retryResult.reward.tier > 1) {
+                            setWinData({
+                                tier: retryResult.reward.tier,
+                                amount: payout,
+                                tokenSymbol: project.payment_token_symbol,
+                                projectUrl: getProjectUrl(project.subdomain),
+                                badgeUrl: getBadgeUrl(retryResult.reward.tier, retryResult.reward.badgeImageId),
+                            });
+                            setShowWinModal(true);
+                        }
 
                         if (onRefresh) onRefresh();
                         return;
@@ -1788,6 +1969,7 @@ function BoxCard({ box, project, onRefresh }) {
                 tier={winData?.tier}
                 amount={winData?.amount}
                 tokenSymbol={winData?.tokenSymbol}
+                badgeUrl={winData?.badgeUrl}
                 onShare={winData ? getWinShareHandler(winData.tier, {
                     amount: winData.amount,
                     token: winData.tokenSymbol,

@@ -50,7 +50,7 @@ const BADGE_DEFINITIONS = {
  * Compute user stats from boxes table
  */
 async function computeUserStats(walletAddress) {
-    // Get all boxes for this wallet
+    // Get all boxes for this wallet with project details
     const { data: boxes, error: boxesError } = await supabase
         .from('boxes')
         .select(`
@@ -62,6 +62,9 @@ async function computeUserStats(walletAddress) {
             settled_at,
             project_id,
             projects!inner(
+                id,
+                project_name,
+                subdomain,
                 payment_token_symbol,
                 payment_token_decimals,
                 box_price
@@ -85,23 +88,41 @@ async function computeUserStats(walletAddress) {
         throw projectsError;
     }
 
-    // Compute stats
-    const totalBoxes = boxes?.length || 0;
-    const openedBoxes = boxes?.filter(b => b.box_result > 0).length || 0;
-    const pendingBoxes = boxes?.filter(b => b.box_result === 0).length || 0;
+    // Helper function to compute stats for a set of boxes
+    const computeStatsForBoxes = (boxList) => {
+        const totalBoxes = boxList?.length || 0;
+        const openedBoxes = boxList?.filter(b => b.box_result > 0).length || 0;
+        const pendingBoxes = boxList?.filter(b => b.box_result === 0).length || 0;
 
-    // Count by tier (DB values: 1=dud, 2=rebate, 3=breakeven, 4=profit, 5=jackpot, 6=refunded)
-    const dudCount = boxes?.filter(b => b.box_result === 1).length || 0;
-    const rebateCount = boxes?.filter(b => b.box_result === 2).length || 0;
-    const breakevenCount = boxes?.filter(b => b.box_result === 3).length || 0;
-    const profitCount = boxes?.filter(b => b.box_result === 4).length || 0;
-    const jackpotCount = boxes?.filter(b => b.box_result === 5).length || 0;
-    const refundedCount = boxes?.filter(b => b.box_result === 6).length || 0;
+        // Count by tier (DB values: 1=dud, 2=rebate, 3=breakeven, 4=profit, 5=jackpot, 6=refunded)
+        const dudCount = boxList?.filter(b => b.box_result === 1).length || 0;
+        const rebateCount = boxList?.filter(b => b.box_result === 2).length || 0;
+        const breakevenCount = boxList?.filter(b => b.box_result === 3).length || 0;
+        const profitCount = boxList?.filter(b => b.box_result === 4).length || 0;
+        const jackpotCount = boxList?.filter(b => b.box_result === 5).length || 0;
+        const refundedCount = boxList?.filter(b => b.box_result === 6).length || 0;
 
-    // Wins = anything that pays out (rebate, breakeven, profit, jackpot)
-    const winsCount = rebateCount + breakevenCount + profitCount + jackpotCount;
+        // Wins = anything that pays out (rebate, breakeven, profit, jackpot)
+        const winsCount = rebateCount + breakevenCount + profitCount + jackpotCount;
 
-    // Calculate earnings by token
+        return {
+            totalBoxes,
+            openedBoxes,
+            pendingBoxes,
+            winsCount,
+            dudCount,
+            rebateCount,
+            breakevenCount,
+            profitCount,
+            jackpotCount,
+            refundedCount,
+        };
+    };
+
+    // Compute overall stats
+    const overallStats = computeStatsForBoxes(boxes);
+
+    // Calculate earnings by token (overall)
     const earningsByToken = {};
     const spentByToken = {};
 
@@ -142,26 +163,73 @@ async function computeUserStats(walletAddress) {
     }));
 
     // Win rate (exclude pending and refunded)
-    const eligibleForWinRate = openedBoxes - refundedCount;
+    const eligibleForWinRate = overallStats.openedBoxes - overallStats.refundedCount;
     const winRate = eligibleForWinRate > 0
-        ? ((winsCount / eligibleForWinRate) * 100).toFixed(1)
+        ? ((overallStats.winsCount / eligibleForWinRate) * 100).toFixed(1)
         : 0;
 
+    // Compute per-project stats
+    const projectStatsMap = {};
+    boxes?.forEach(box => {
+        const projectId = box.project_id;
+        if (!projectStatsMap[projectId]) {
+            projectStatsMap[projectId] = {
+                projectId,
+                projectName: box.projects?.project_name || 'Unknown',
+                subdomain: box.projects?.subdomain || '',
+                tokenSymbol: box.projects?.payment_token_symbol || 'UNKNOWN',
+                tokenDecimals: box.projects?.payment_token_decimals || 9,
+                boxPrice: box.projects?.box_price || 0,
+                boxes: [],
+            };
+        }
+        projectStatsMap[projectId].boxes.push(box);
+    });
+
+    // Process each project's stats
+    const perProjectStats = Object.values(projectStatsMap).map(project => {
+        const stats = computeStatsForBoxes(project.boxes);
+
+        // Calculate earnings and spent for this project
+        let earned = 0;
+        let spent = 0;
+        project.boxes.forEach(box => {
+            if (box.payout_amount > 0) {
+                earned += Number(box.payout_amount);
+            }
+            spent += Number(project.boxPrice);
+        });
+
+        const decimals = project.tokenDecimals;
+
+        return {
+            projectId: project.projectId,
+            projectName: project.projectName,
+            subdomain: project.subdomain,
+            tokenSymbol: project.tokenSymbol,
+            ...stats,
+            earned: {
+                amount: earned,
+                formatted: (earned / Math.pow(10, decimals)).toFixed(2)
+            },
+            spent: {
+                amount: spent,
+                formatted: (spent / Math.pow(10, decimals)).toFixed(2)
+            },
+            netProfit: {
+                amount: earned - spent,
+                formatted: ((earned - spent) / Math.pow(10, decimals)).toFixed(2)
+            }
+        };
+    });
+
     return {
-        totalBoxes,
-        openedBoxes,
-        pendingBoxes,
-        winsCount,
-        dudCount,
-        rebateCount,
-        breakevenCount,
-        profitCount,
-        jackpotCount,
-        refundedCount,
+        ...overallStats,
         winRate: parseFloat(winRate),
         totalEarnings,
         totalSpent,
-        projectsCreated: projects?.length || 0
+        projectsCreated: projects?.length || 0,
+        perProjectStats,
     };
 }
 
@@ -536,6 +604,205 @@ router.get('/:wallet/stats', async (req, res) => {
         res.status(500).json({
             success: false,
             error: 'Failed to fetch user stats'
+        });
+    }
+});
+
+/**
+ * GET /api/users/:wallet/trophies
+ * Get user's trophy badges (winning boxes with badge_image_id)
+ * Query params:
+ * - limit: number (default 50, max 100)
+ * - offset: number (default 0)
+ */
+router.get('/:wallet/trophies', async (req, res) => {
+    try {
+        const { wallet } = req.params;
+        const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+        const offset = parseInt(req.query.offset) || 0;
+
+        // Fetch winning boxes with badges
+        const { data: trophies, error, count } = await supabase
+            .from('boxes')
+            .select(`
+                id,
+                box_number,
+                box_result,
+                payout_amount,
+                badge_image_id,
+                opened_at,
+                project_id,
+                projects!inner(
+                    subdomain,
+                    project_name,
+                    payment_token_symbol,
+                    payment_token_decimals
+                )
+            `, { count: 'exact' })
+            .eq('owner_wallet', wallet)
+            .not('badge_image_id', 'is', null)
+            .gte('box_result', 2) // Only winning tiers (2=rebate, 3=break-even, 4=profit, 5=jackpot)
+            .order('opened_at', { ascending: false })
+            .range(offset, offset + limit - 1);
+
+        if (error) {
+            console.error('Error fetching trophies:', error);
+            throw error;
+        }
+
+        // Format trophies with badge URLs
+        const formattedTrophies = (trophies || []).map(trophy => {
+            const tier = trophy.box_result;
+            const badgeId = trophy.badge_image_id;
+            const project = trophy.projects;
+
+            // Construct badge URL
+            const tierFolders = { 2: '0.5x', 3: '1x', 4: '1.5x', 5: '4x' };
+            const tierPrefixes = { 2: 'badge_0-5x_', 3: 'badge_1x_', 4: 'badge_1-5x_', 5: 'badge_4x_' };
+            const tierNames = { 2: 'Rebate', 3: 'Break-even', 4: 'Profit', 5: 'Jackpot' };
+
+            const folder = tierFolders[tier];
+            const prefix = tierPrefixes[tier];
+            const paddedId = String(badgeId).padStart(3, '0');
+            const badgeUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/badges/${folder}/${prefix}${paddedId}.png`;
+
+            return {
+                id: trophy.id,
+                boxNumber: trophy.box_number,
+                tier,
+                tierName: tierNames[tier],
+                payoutAmount: trophy.payout_amount,
+                payoutFormatted: trophy.payout_amount
+                    ? (trophy.payout_amount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
+                    : '0',
+                tokenSymbol: project.payment_token_symbol,
+                badgeImageId: badgeId,
+                badgeUrl,
+                openedAt: trophy.opened_at,
+                projectName: project.project_name,
+                projectSubdomain: project.subdomain,
+            };
+        });
+
+        res.json({
+            success: true,
+            trophies: formattedTrophies,
+            total: count || 0,
+            limit,
+            offset,
+        });
+
+    } catch (error) {
+        console.error('Error fetching trophies:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch user trophies'
+        });
+    }
+});
+
+/**
+ * GET /api/users/by-username/:username/trophies
+ * Get user's trophies by username (for public profile pages)
+ */
+router.get('/by-username/:username/trophies', async (req, res) => {
+    try {
+        const { username } = req.params;
+        const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+        const offset = parseInt(req.query.offset) || 0;
+
+        // First lookup wallet by username
+        const { data: profile, error: profileError } = await supabase
+            .from('user_profiles')
+            .select('wallet_address')
+            .eq('username', username)
+            .single();
+
+        if (profileError || !profile) {
+            return res.status(404).json({
+                success: false,
+                error: 'User not found'
+            });
+        }
+
+        // Redirect to wallet-based endpoint logic
+        const wallet = profile.wallet_address;
+
+        // Fetch winning boxes with badges
+        const { data: trophies, error, count } = await supabase
+            .from('boxes')
+            .select(`
+                id,
+                box_number,
+                box_result,
+                payout_amount,
+                badge_image_id,
+                opened_at,
+                project_id,
+                projects!inner(
+                    subdomain,
+                    project_name,
+                    payment_token_symbol,
+                    payment_token_decimals
+                )
+            `, { count: 'exact' })
+            .eq('owner_wallet', wallet)
+            .not('badge_image_id', 'is', null)
+            .gte('box_result', 2)
+            .order('opened_at', { ascending: false })
+            .range(offset, offset + limit - 1);
+
+        if (error) {
+            console.error('Error fetching trophies:', error);
+            throw error;
+        }
+
+        // Format trophies
+        const formattedTrophies = (trophies || []).map(trophy => {
+            const tier = trophy.box_result;
+            const badgeId = trophy.badge_image_id;
+            const project = trophy.projects;
+
+            const tierFolders = { 2: '0.5x', 3: '1x', 4: '1.5x', 5: '4x' };
+            const tierPrefixes = { 2: 'badge_0-5x_', 3: 'badge_1x_', 4: 'badge_1-5x_', 5: 'badge_4x_' };
+            const tierNames = { 2: 'Rebate', 3: 'Break-even', 4: 'Profit', 5: 'Jackpot' };
+
+            const folder = tierFolders[tier];
+            const prefix = tierPrefixes[tier];
+            const paddedId = String(badgeId).padStart(3, '0');
+            const badgeUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/badges/${folder}/${prefix}${paddedId}.png`;
+
+            return {
+                id: trophy.id,
+                boxNumber: trophy.box_number,
+                tier,
+                tierName: tierNames[tier],
+                payoutAmount: trophy.payout_amount,
+                payoutFormatted: trophy.payout_amount
+                    ? (trophy.payout_amount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
+                    : '0',
+                tokenSymbol: project.payment_token_symbol,
+                badgeImageId: badgeId,
+                badgeUrl,
+                openedAt: trophy.opened_at,
+                projectName: project.project_name,
+                projectSubdomain: project.subdomain,
+            };
+        });
+
+        res.json({
+            success: true,
+            trophies: formattedTrophies,
+            total: count || 0,
+            limit,
+            offset,
+        });
+
+    } catch (error) {
+        console.error('Error fetching trophies by username:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch user trophies'
         });
     }
 });

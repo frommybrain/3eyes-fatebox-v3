@@ -38,6 +38,7 @@ import {
     DEFAULT_PAYOUT_MULTIPLIERS,
 } from '../lib/evCalculator.js';
 import logger, { EventTypes, Severity, ActorTypes } from '../lib/logger.js';
+import { getRandomBadgeId } from '../config/badges.js';
 
 const router = express.Router();
 
@@ -2074,6 +2075,9 @@ router.post('/build-reveal-box-tx', async (req, res) => {
             console.log(`   - Random %: ${(randomPercentage * 100).toFixed(2)}%`);
             console.log(`   - Settled: ${isSettled}`);
 
+            // Assign a random badge for winning tiers (2-5)
+            const recoveredBadgeImageId = getRandomBadgeId(rewardTierDB);
+
             // Update database with on-chain result
             const { error: updateError } = await supabase
                 .from('boxes')
@@ -2082,6 +2086,7 @@ router.post('/build-reveal-box-tx', async (req, res) => {
                     payout_amount: Number(rewardAmount),
                     luck_value: currentLuck,
                     opened_at: new Date().toISOString(),
+                    badge_image_id: recoveredBadgeImageId,
                 })
                 .eq('id', box.id);
 
@@ -2104,6 +2109,7 @@ router.post('/build-reveal-box-tx', async (req, res) => {
                     isJackpot,
                     randomPercentage,
                     luck: currentLuck,
+                    badgeImageId: recoveredBadgeImageId,
                 },
                 message: 'Box was already revealed on-chain. Result has been recovered.',
             });
@@ -2188,6 +2194,9 @@ router.post('/build-reveal-box-tx', async (req, res) => {
                             // Get luck from before revealed field
                             const luckRefresh = dataRefresh[8 + 8 + 8 + 32 + 8 + 8]; // luck offset
 
+                            // Assign a random badge for winning tiers (2-5)
+                            const raceConditionBadgeId = getRandomBadgeId(rewardTierDBRefresh);
+
                             // Update database
                             await supabase
                                 .from('boxes')
@@ -2196,6 +2205,7 @@ router.post('/build-reveal-box-tx', async (req, res) => {
                                     payout_amount: Number(rewardAmountRefresh),
                                     luck_value: luckRefresh,
                                     opened_at: new Date().toISOString(),
+                                    badge_image_id: raceConditionBadgeId,
                                 })
                                 .eq('id', box.id);
 
@@ -2211,6 +2221,7 @@ router.post('/build-reveal-box-tx', async (req, res) => {
                                     isJackpot: isJackpotRefresh,
                                     randomPercentage: randomPercentageRefresh,
                                     luck: luckRefresh,
+                                    badgeImageId: raceConditionBadgeId,
                                 },
                                 message: 'Race condition detected - result recovered from on-chain.',
                             });
@@ -2487,10 +2498,15 @@ router.post('/confirm-reveal', async (req, res) => {
         // Update box record in database with ON-CHAIN values
         // NOTE: DB uses 0=pending, 1-5=results; On-chain uses 0-4 for results
         // We add 1 to on-chain tier to get DB value
+        const dbTier = rewardTier + 1;
+
+        // Assign a random badge for winning tiers (2-5)
+        const badgeImageId = getRandomBadgeId(dbTier);
+
         const { error: updateError } = await supabase
             .from('boxes')
             .update({
-                box_result: rewardTier + 1, // DB: 1=dud, 2=rebate, 3=break-even, 4=profit, 5=jackpot (on-chain + 1)
+                box_result: dbTier, // DB: 1=dud, 2=rebate, 3=break-even, 4=profit, 5=jackpot (on-chain + 1)
                 payout_amount: rewardAmount,
                 opened_at: new Date().toISOString(),
                 // New verification columns
@@ -2500,6 +2516,8 @@ router.post('/confirm-reveal', async (req, res) => {
                 random_percentage: randomPercentage * 100, // Store as percentage (0-100)
                 // Randomness account is closed as part of reveal transaction (reclaims rent to user)
                 randomness_closed: true,
+                // Trophy badge for winning tiers
+                badge_image_id: badgeImageId,
             })
             .eq('project_id', project.id)
             .eq('box_number', boxId);
@@ -2549,6 +2567,7 @@ router.post('/confirm-reveal', async (req, res) => {
                 isJackpot,
                 luck,
                 randomPercentage,
+                badgeImageId, // Trophy badge ID for winning tiers (null for duds)
             },
             explorerUrl: `https://explorer.solana.com/tx/${signature}?cluster=${config.network}`,
         });

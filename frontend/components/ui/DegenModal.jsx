@@ -200,7 +200,16 @@ export default function DegenModal({
 }
 
 /**
- * WinModal - Pre-configured modal for displaying win results with card images
+ * WinModal - Pre-configured modal for displaying win results with trophy badge images
+ *
+ * Props:
+ * - isOpen: boolean
+ * - onClose: function
+ * - tier: number (2=rebate, 3=break-even, 4=profit, 5=jackpot)
+ * - amount: string/number - Formatted payout amount
+ * - tokenSymbol: string
+ * - badgeUrl: string - URL to the trophy badge image from Supabase
+ * - onShare: function
  */
 export function WinModal({
     isOpen,
@@ -208,13 +217,14 @@ export function WinModal({
     tier,
     amount,
     tokenSymbol,
+    badgeUrl,
     onShare,
 }) {
     const tierConfig = {
-        2: { name: 'Rebate', variant: 'default', image: '/images/cards/db_card_rebate.png' },
-        3: { name: 'Break-even', variant: 'default', image: '/images/cards/db_card_break-even.png' },
-        4: { name: 'Profit', variant: 'success', image: '/images/cards/db_card_profit.png' },
-        5: { name: 'Jackpot', variant: 'jackpot', image: '/images/cards/db_card_jackpot.png' },
+        2: { name: 'Rebate', variant: 'default' },
+        3: { name: 'Break-even', variant: 'default' },
+        4: { name: 'Profit', variant: 'success' },
+        5: { name: 'Jackpot', variant: 'jackpot' },
     };
 
     const config = tierConfig[tier] || tierConfig[2];
@@ -229,14 +239,23 @@ export function WinModal({
             size="sm"
         >
             <div className="flex flex-col">
-                {/* Card Image */}
-                <div className="relative w-full aspect-square mb-2">
-                    <Image
-                        src={config.image}
-                        alt={config.name}
-                        fill
-                        className="object-contain"
-                    />
+                {/* Trophy Badge Image */}
+                <div className="relative w-full aspect-square mb-2 border border-degen-black">
+                    {badgeUrl ? (
+                        <Image
+                            src={badgeUrl}
+                            alt={config.name}
+                            fill
+                            className="object-cover"
+                            unoptimized
+                        />
+                    ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-degen-container">
+                            <span className="text-degen-text-muted text-4xl font-bold uppercase">
+                                {config.name}
+                            </span>
+                        </div>
+                    )}
                 </div>
 
                 {/* Share Button */}

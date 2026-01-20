@@ -259,6 +259,22 @@ export default function ProjectPage({ subdomain }) {
                 });
             }
 
+            // Show dashboard link toast after a short delay
+            setTimeout(() => {
+                toast.info(
+                    <span>
+                        View your boxes now in your{' '}
+                        <a href="https://degenbox.fun/dashboard" className="underline font-medium hover:text-white">
+                            dashboard
+                        </a>
+                    </span>,
+                    {
+                        title: 'Boxes Ready!',
+                        duration: 10000,
+                    }
+                );
+            }, 1000);
+
             // Optimistic update + silent refresh for smooth UI
             startTransition(() => {
                 setOptimisticProject({

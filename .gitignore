@@ -49,3 +49,6 @@ test-ledger/
 backend/test-buyer-wallet.json
 *-wallet.json
 !package*.json
+
+# Image generation (temporary)
+backend/imageGen/

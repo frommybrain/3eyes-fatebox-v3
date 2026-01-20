@@ -1,11 +1,12 @@
 'use client';
 
 import { useWallet } from '@solana/wallet-adapter-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import WalletButton from '@/components/wallet/WalletButton';
 import useNetworkStore from '@/store/useNetworkStore';
+import usePurchasingStore from '@/store/usePurchasingStore';
 
 /**
  * Get the base domain URL (strips subdomain if on a project subdomain)
@@ -50,17 +51,36 @@ function isOnSubdomain() {
 export default function Header() {
   const { publicKey } = useWallet();
   const { config } = useNetworkStore();
-  const isAdmin = publicKey && config?.adminWallet && publicKey.toString() === config.adminWallet.toString();
+    const isAdmin = publicKey && config?.adminWallet && publicKey.toString() === config.adminWallet.toString();
 
   // Track if we're on a subdomain (client-side only to avoid hydration mismatch)
   const [onSubdomain, setOnSubdomain] = useState(false);
   const [baseUrl, setBaseUrl] = useState('');
+  const [testActive, setTestActive] = useState(false);
 
   useEffect(() => {
     // Only run on client
     setOnSubdomain(isOnSubdomain());
     setBaseUrl(getBaseDomainUrl());
   }, []);
+
+  // Test button handler - simulates clicking buy and getting 3 boxes confirmed
+  const handleTestCamera = useCallback(() => {
+    if (testActive) return;
+    setTestActive(true);
+    usePurchasingStore.getState().startPurchasing(3); // Move camera to purchase position, expect 3 boxes
+
+    // Simulate batch confirmation after a short delay (like wallet signing)
+    setTimeout(() => {
+      usePurchasingStore.getState().queueBoxDrops(3);
+    }, 500);
+
+    // Reset test button state after animation completes
+    // (endPurchasing is called automatically when all boxes have dropped)
+    setTimeout(() => {
+      setTestActive(false);
+    }, 5000);
+  }, [testActive]);
 
   // Build href - use absolute URL only when on subdomain, otherwise use relative path
   const getHref = (path) => {
@@ -134,6 +154,19 @@ export default function Header() {
             )}
           </>
         )}
+
+        {/* Test Camera Button */}
+        <button
+          onClick={handleTestCamera}
+          disabled={testActive}
+          className={`px-3 py-1.5 text-xs uppercase tracking-wider font-medium rounded transition-colors ${
+            testActive
+              ? 'bg-degen-warning text-white cursor-not-allowed'
+              : 'bg-degen-black/10 text-degen-black hover:bg-degen-black hover:text-white'
+          }`}
+        >
+          {testActive ? 'Testing...' : 'Test Camera'}
+        </button>
 
         <div className="ml-2 border-l border-degen-black/20 pl-4">
           <WalletButton />

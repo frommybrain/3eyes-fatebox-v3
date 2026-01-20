@@ -7,8 +7,6 @@ import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { Transaction, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { getAssociatedTokenAddress } from '@solana/spl-token';
 import { PublicKey } from '@solana/web3.js';
-import bs58 from 'bs58';
-import MainCanvas from '@/components/three/mainCanvas';
 import useProjectStore from '@/store/useProjectStore';
 import useNetworkStore from '@/store/useNetworkStore';
 import {
@@ -18,12 +16,14 @@ import {
     DegenLoadingState,
     useToast,
 } from '@/components/ui';
+import ProjectMainCanvas from '@/components/three/projectMainCanvas';
+import usePurchasingStore from '@/store/usePurchasingStore';
 
 export default function ProjectPage({ subdomain }) {
     const router = useRouter();
     const { toast } = useToast();
     const [mounted, setMounted] = useState(false);
-    const [purchasing, setPurchasing] = useState(false);
+    const [localPurchasing, setLocalPurchasing] = useState(false);
     const [isPending, startTransition] = useTransition();
 
     // Batch purchase state
@@ -133,7 +133,8 @@ export default function ProjectPage({ subdomain }) {
             return;
         }
 
-        setPurchasing(true);
+        setLocalPurchasing(true);
+        usePurchasingStore.getState().startPurchasing(quantity); // Move camera to purchase position, set expected box count
         setPurchaseProgress(null);
 
         try {
@@ -238,6 +239,9 @@ export default function ProjectPage({ subdomain }) {
 
                 totalBoxesPurchased += txData.boxIds.length;
                 allPurchasedBoxIds.push(...txData.boxIds);
+
+                // Queue box drops for this confirmed batch
+                usePurchasingStore.getState().queueBoxDrops(txData.boxIds.length);
             }
 
             // Success!
@@ -282,8 +286,9 @@ export default function ProjectPage({ subdomain }) {
                 });
             }
         } finally {
-            setPurchasing(false);
+            setLocalPurchasing(false);
             setPurchaseProgress(null);
+            // Note: endPurchasing() is called by DroppingBoxManager when all boxes have dropped
         }
     };
 
@@ -305,7 +310,6 @@ export default function ProjectPage({ subdomain }) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-degen-bg">
                 <DegenCard variant="white" padding="lg" className="max-w-md mx-auto text-center">
-                    <div className="text-6xl mb-4">🚫</div>
                     <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-2">
                         Project Not Found
                     </h1>
@@ -328,7 +332,6 @@ export default function ProjectPage({ subdomain }) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-degen-bg">
                 <DegenCard variant="white" padding="lg" className="max-w-md mx-auto text-center">
-                    <div className="text-6xl mb-4">⏸️</div>
                     <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-2">
                         Project Paused
                     </h1>
@@ -373,11 +376,11 @@ export default function ProjectPage({ subdomain }) {
             )}
 
             {/* Project UI Overlay */}
-            <div className={`fixed top-0 left-0 w-screen h-screen z-10 pointer-events-none transition-opacity duration-100 ${isPending ? 'opacity-80' : 'opacity-100'}`}>
+            <div className={`fixed top-0 left-0 w-full lg:w-1/3 h-screen z-10 pointer-events-none transition-opacity duration-100 border-r border-degen-black ${isPending ? 'opacity-80' : 'opacity-100'}`}>
                 <div className="flex flex-col items-center justify-center h-full pointer-events-auto px-4">
 
                     {/* Main Container */}
-                    <DegenCard variant="white" padding="lg" className="w-full max-w-sm">
+                    <DegenCard variant="white" padding="lg" className="w-full">
                         {/* Project Name */}
                         <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider text-center mb-6">
                             {displayProject.project_name}
@@ -419,7 +422,7 @@ export default function ProjectPage({ subdomain }) {
                             <div className="flex items-center justify-center gap-4">
                                 <button
                                     onClick={decrementQuantity}
-                                    disabled={quantity <= 1 || purchasing}
+                                    disabled={quantity <= 1 || localPurchasing}
                                     className="w-10 h-10 rounded-full border-2 border-degen-black text-degen-black font-bold text-xl
                                              hover:bg-degen-black hover:text-white transition-colors
                                              disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-degen-black"
@@ -431,7 +434,7 @@ export default function ProjectPage({ subdomain }) {
                                 </span>
                                 <button
                                     onClick={incrementQuantity}
-                                    disabled={quantity >= 10 || purchasing}
+                                    disabled={quantity >= 10 || localPurchasing}
                                     className="w-10 h-10 rounded-full border-2 border-degen-black text-degen-black font-bold text-xl
                                              hover:bg-degen-black hover:text-white transition-colors
                                              disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-degen-black"
@@ -476,12 +479,12 @@ export default function ProjectPage({ subdomain }) {
                         {/* Buy Box Button */}
                         <DegenButton
                             onClick={handleBuyBoxes}
-                            disabled={!connected || purchasing || (connected && !hasEnoughTokens)}
+                            disabled={!connected || localPurchasing || (connected && !hasEnoughTokens)}
                             variant="warning"
                             size="xl"
                             fullWidth
                         >
-                            {purchasing
+                            {localPurchasing
                                 ? (purchaseProgress
                                     ? `Purchasing (${purchaseProgress.current}/${purchaseProgress.total})...`
                                     : 'Preparing...')
@@ -505,8 +508,10 @@ export default function ProjectPage({ subdomain }) {
                 </div>
             </div>
 
-            {/* 3D Canvas Background */}
-            {/*<MainCanvas purchasing={purchasing} />*/}
+
+            <div className="hidden lg:block" >
+                <ProjectMainCanvas />
+            </div>
         </>
     );
 }

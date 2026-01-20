@@ -10,6 +10,7 @@ export default function Floor({ size }) {
             <mesh
                 position={[0, -0.01, 0]}
                 rotation={[-Math.PI / 2, 0, 0]}
+                castShadow receiveShadow
             >
                 <planeGeometry args={[size, size]} />
                 <meshStandardMaterial color="#e7e7e7" />

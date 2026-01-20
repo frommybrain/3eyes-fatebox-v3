@@ -133,7 +133,7 @@ export default function Dashboard() {
                     <div className="mb-4">
                         <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">Dashboard</h1>
                         <p className="text-degen-text-muted text-sm">
-                            Manage your projects and view your purchased boxes
+                            Manage your projects, purchased boxes and profile
                         </p>
                     </div>
                     <DegenCard variant="white" padding="lg" className="text-center">
@@ -153,7 +153,7 @@ export default function Dashboard() {
     const isDevnet = config?.network === 'devnet';
 
     return (
-        <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-4">
+        <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-2 md:px-4">
             <div className="w-full mx-auto">
                 {/* Network Badge */}
                 {isDevnet && (
@@ -167,14 +167,12 @@ export default function Dashboard() {
                 {/* Header */}
                 <div className="mb-4">
                     <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">Dashboard</h1>
-                    <p className="text-degen-text-muted text-sm">
-                        Manage your projects and view your purchased boxes
-                    </p>
+
                 </div>
 
                 {/* Tab Navigation */}
                 <DegenTabs value={activeTab} onValueChange={setActiveTab}>
-                    <DegenTabsList className="mb-8">
+                    <DegenTabsList className="mb-4">
                         <DegenTabsTrigger value="boxes">
                             My Boxes
                         </DegenTabsTrigger>
@@ -232,7 +230,7 @@ function MyProjectsTab({ projects, projectsLoading, projectsError }) {
             ) : projects.length === 0 ? (
                 <DegenEmptyState
                     title="No Projects Yet"
-                    description="Create your first lootbox project to get started!"
+                    description="Spin up your first Degenbox project"
                     action="Create Your First Project"
                     actionHref="/dashboard/create"
                 />
@@ -366,16 +364,16 @@ function MyProfileTab({ walletAddress }) {
     return (
         <div className="flex flex-col lg:flex-row gap-6">
             {/* Left Sidebar - Profile Info & Quick Stats */}
-            <div className="w-full lg:w-1/3 space-y-4">
+            <div className="w-full lg:w-1/3 space-y-3">
                 {/* Profile Info Card */}
-                <DegenCard variant="white" padding="md">
+                <DegenCard variant="white" padding="sm">
                     {/* Avatar/Icon */}
-                    <div className="w-20 h-20 mx-auto mb-4 bg-degen-black flex items-center justify-center text-degen-white text-3xl font-bold border border-degen-black">
+                    <div className="w-20 h-20 mx-auto mb-3 bg-degen-black flex items-center justify-center text-degen-white text-3xl font-bold border border-degen-black">
                         {profile?.username ? profile.username[0].toUpperCase() : '?'}
                     </div>
 
                     {/* Username */}
-                    <h2 className="text-degen-black text-xl font-medium text-center uppercase tracking-wider mb-2">
+                    <h2 className="text-degen-black text-xl font-medium text-center uppercase tracking-wider mb-1">
                         {profile?.username || 'Anonymous'}
                     </h2>
 
@@ -385,7 +383,7 @@ function MyProfileTab({ walletAddress }) {
                             href={`https://x.com/${profile.xHandle}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-degen-blue text-sm text-center block mb-3 hover:underline"
+                            className="text-degen-blue text-sm text-center block mb-1 hover:underline"
                         >
                             @{profile.xHandle}
                         </a>
@@ -462,9 +460,9 @@ function MyProfileTab({ walletAddress }) {
                         <DegenTabsTrigger value="settings">
                             Settings
                         </DegenTabsTrigger>
-                        <DegenTabsTrigger value="support">
+                        {/*<DegenTabsTrigger value="support">
                             Support
-                        </DegenTabsTrigger>
+                        </DegenTabsTrigger>*/}
                     </DegenTabsList>
 
                     {/* Trophies Tab */}
@@ -560,7 +558,7 @@ function MyProfileTab({ walletAddress }) {
                     </DegenTabsContent>
 
                     {/* Support Tab */}
-                    <DegenTabsContent value="support">
+                    {/*<DegenTabsContent value="support">
                         <DegenCard variant="white" padding="lg">
                             <h2 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-6">
                                 Frequently Asked Questions
@@ -604,7 +602,7 @@ function MyProfileTab({ walletAddress }) {
                                 </DegenAccordion>
                             </div>
                         </DegenCard>
-                    </DegenTabsContent>
+                    </DegenTabsContent>*/}
                 </DegenTabs>
             </div>
         </div>
@@ -734,7 +732,7 @@ function ProjectBoxesGroup({ projectGroup, onRefresh }) {
                             href={projectUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-degen-blue hover:underline text-sm hidden lg:block"
+                            className="text-degen-blue hover:underline text-sm hidden md:block"
                         >
                             {project.subdomain}.degenbox.fun
                         </a>
@@ -743,13 +741,13 @@ function ProjectBoxesGroup({ projectGroup, onRefresh }) {
                             href={projectUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-degen-blue hover:underline text-sm block lg:hidden"
+                            className="text-degen-blue hover:underline text-sm block md:hidden"
                         >
                             Go to project
                         </a>
                     </div>
                 </div>
-                <div className="text-right">
+                <div className="text-right hidden md:block">
                     <p className="text-degen-black font-medium">{boxes.length} box{boxes.length !== 1 ? 'es' : ''}</p>
                     <p className="text-degen-text-muted text-sm">
                         {pendingBoxes} pending, {revealedBoxes} revealed
@@ -1885,7 +1883,7 @@ function BoxCard({ box, project, onRefresh }) {
             </div>
 
             {/* Error Display - Fixed height container (shows content or empty space) */}
-            <div className="h-[48px] mt-2 flex items-center justify-center">
+            {/*<div className="h-[12px] mt-2 flex items-center justify-center">
                 {error ? (
                     <div className="bg-red-50 border border-red-200 rounded px-2 py-1.5 w-full">
                         <p className="text-red-700 text-xs font-medium">
@@ -1900,7 +1898,10 @@ function BoxCard({ box, project, onRefresh }) {
                         </p>
                     </div>
                 ) : null}
-            </div>
+            </div>*/}
+            {/* Empty spacer */}
+            <div className="h-[24px] mt-2 flex items-center justify-center" />
+
 
             {/* Action Button - Fixed height container */}
             <div className="h-[36px] flex items-center justify-center">

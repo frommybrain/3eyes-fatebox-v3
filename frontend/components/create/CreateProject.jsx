@@ -305,8 +305,7 @@ export default function CreateProject() {
             <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-6">
                 <div className="max-w-3xl mx-auto">
                     <div className="mb-8">
-                        <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">Create New Project</h1>
-                        <p className="text-degen-text-muted text-lg">Launch your own lootbox project</p>
+                        <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">Create Project</h1>
                     </div>
                     <DegenCard variant="white" padding="lg" className="text-center">
                         <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-4">
@@ -329,7 +328,7 @@ export default function CreateProject() {
     const estimatedVaultFunding = Math.ceil(boxPriceNum * 30);
 
     return (
-        <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-6">
+        <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-2 md:px-6">
             <div className="max-w-3xl mx-auto">
                 {/* Network Badge */}
                 {isDevnet && (
@@ -342,10 +341,7 @@ export default function CreateProject() {
 
                 {/* Header */}
                 <div className="mb-8">
-                    <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">Create New Project</h1>
-                    <p className="text-degen-text-muted text-lg">
-                        Launch your own lootbox platform
-                    </p>
+                    <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">Create Project</h1>
                 </div>
 
                 {/* Progress Steps */}
@@ -402,8 +398,8 @@ export default function CreateProject() {
                                 <div className="flex items-center text-degen-text-muted text-sm">.degenbox.fun</div>
                             </div>
                             {isDevnet && (
-                                <p className="text-degen-warning text-xs mt-1">
-                                    Devnet projects will have "devnet-" prefix
+                                <p className="text-degen-black text-xs mt-1">
+                                    Devnet projects will have devnet- prefix
                                 </p>
                             )}
                             {errors.subdomain && <p className="text-degen-feature text-sm mt-1">{errors.subdomain}</p>}
@@ -415,7 +411,7 @@ export default function CreateProject() {
                                 label="Description"
                                 value={formData.description}
                                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                                placeholder="Not run out of your 9 lives yet? Try your luck with cats lootboxes"
+                                //placeholder="..."
                                 rows={3}
                             />
                         </div>

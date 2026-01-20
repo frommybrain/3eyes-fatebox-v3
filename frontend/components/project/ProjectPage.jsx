@@ -677,7 +677,7 @@ export default function ProjectPage({ subdomain }) {
 
             {/* Project UI Panel */}
             <div className={`fixed top-0 left-0 w-full lg:w-1/3 h-screen z-10 pointer-events-none transition-opacity duration-100 border-r border-degen-black ${isPending ? 'opacity-80' : 'opacity-100'}`}>
-                <div className="flex flex-col items-center justify-center h-full pointer-events-auto px-4">
+                <div className="flex flex-col items-center justify-center h-full pointer-events-auto px-2 md:px-4">
                     <DegenCard variant="white" padding="lg" className="w-full">
                         {renderCardContent()}
                     </DegenCard>

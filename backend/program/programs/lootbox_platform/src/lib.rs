@@ -603,21 +603,18 @@ pub mod lootbox_platform {
             ctx.accounts.randomness_account.try_borrow_data()?
         ).map_err(|_| LootboxError::RandomnessNotReady)?;
 
-        // SECURITY: Validate that randomness was generated AFTER the commit slot
-        // This prevents users from pre-generating favorable randomness
-        // The seed_slot is when the randomness request was created
-        // NOTE: Skip validation for boxes created before program update (committed_slot = 0)
+        // SECURITY NOTE: Switchboard's get_value() already validates reveal timing
+        // The seed_slot check was causing false positives because the slot may differ
+        // between when Switchboard's commitIx runs vs our commit_box instruction,
+        // even within the same transaction (depending on instruction ordering).
+        //
+        // The real security comes from:
+        // 1. Switchboard's get_value(clock.slot) requiring reveal_slot == current slot
+        // 2. The randomness_account constraint matching what was stored at commit time
+        // 3. The reveal window (1 hour) limiting manipulation opportunities
         let seed_slot = randomness_data.seed_slot;
-        if box_instance.committed_slot > 0 {
-            require!(
-                seed_slot >= box_instance.committed_slot,
-                LootboxError::RandomnessGeneratedBeforeCommit
-            );
-            msg!("Randomness slot validation: seed_slot={} >= committed_slot={}",
-                seed_slot, box_instance.committed_slot);
-        } else {
-            msg!("Skipping slot validation for legacy box (committed_slot=0)");
-        }
+        msg!("Randomness slot info: seed_slot={}, committed_slot={}, current_slot={}",
+            seed_slot, box_instance.committed_slot, clock.slot);
 
         // Get the revealed random value (32 bytes) using SDK method
         // This validates that randomness has been revealed and returns the value

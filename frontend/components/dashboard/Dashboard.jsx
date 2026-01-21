@@ -40,6 +40,9 @@ import DegenAccordion from '@/components/ui/DegenAccordion';
 // ===== TESTING CONFIG =====
 // Set to 30 for quick testing, 3600 for production (1 hour)
 const REVEAL_WINDOW_SECONDS = 3600;
+// Refund grace period - must wait this many seconds after commit before refund is allowed
+// This prevents abuse where users could commit, see oracle results, then refund if unfavorable
+const REFUND_GRACE_PERIOD_SECONDS = 120; // 2 minutes - matches on-chain default
 // ===========================
 
 /**
@@ -922,6 +925,7 @@ function BoxCard({ box, project, onRefresh }) {
     const [revealCountdown, setRevealCountdown] = useState(null); // seconds until reveal enabled
     const [expiryCountdown, setExpiryCountdown] = useState(null); // seconds until commit expires
     const [commitCooldown, setCommitCooldown] = useState(null); // seconds until "Open Box" enabled after purchase
+    const [refundCooldown, setRefundCooldown] = useState(null); // seconds until refund enabled (grace period)
     const [, startBoxTransition] = useTransition();
 
     // Win popup state
@@ -1015,6 +1019,38 @@ function BoxCard({ box, project, onRefresh }) {
         const interval = setInterval(updateCountdowns, 1000);
         return () => clearInterval(interval);
     }, [isCommitted, box.committed_at]);
+
+    // Refund grace period countdown - must wait before refund is allowed
+    useEffect(() => {
+        if (!isRefundEligible || !box.committed_at) {
+            setRefundCooldown(null);
+            return;
+        }
+
+        const committedTime = parseAsUTC(box.committed_at);
+        if (!committedTime) {
+            setRefundCooldown(null);
+            return;
+        }
+
+        const GRACE_PERIOD = REFUND_GRACE_PERIOD_SECONDS * 1000;
+
+        const updateRefundCooldown = () => {
+            const now = Date.now();
+            const timeSinceCommit = now - committedTime;
+            const timeUntilRefundAllowed = GRACE_PERIOD - timeSinceCommit;
+
+            if (timeUntilRefundAllowed > 0) {
+                setRefundCooldown(Math.ceil(timeUntilRefundAllowed / 1000));
+            } else {
+                setRefundCooldown(0);
+            }
+        };
+
+        updateRefundCooldown();
+        const interval = setInterval(updateRefundCooldown, 1000);
+        return () => clearInterval(interval);
+    }, [isRefundEligible, box.committed_at]);
 
     // Format expiry countdown as MM:SS
     const formatExpiryTime = (seconds) => {
@@ -1993,13 +2029,31 @@ function BoxCard({ box, project, onRefresh }) {
                         </span>
                     </button>
                 ) : isRefundEligible ? (
-                    // Refund available - show refund button
+                    // Refund available - show refund button with grace period countdown
                     <button
                         onClick={handleRefund}
-                        disabled={isProcessing}
-                        className="w-full h-[36px] text-sm font-medium uppercase tracking-wider bg-degen-black text-degen-white border border-degen-black hover:bg-degen-primary transition-all duration-100"
+                        disabled={isProcessing || refundCooldown > 0}
+                        className={`
+                            relative w-full h-[36px] text-sm font-medium uppercase tracking-wider
+                            border border-degen-black overflow-hidden
+                            transition-all duration-100
+                            ${refundCooldown > 0 ? 'bg-degen-container text-degen-text-muted cursor-not-allowed' : 'bg-degen-black text-degen-white hover:bg-degen-primary'}
+                        `}
                     >
-                        {isProcessing && processingStep === 'refund' ? 'Refunding...' : 'Claim Refund'}
+                        {/* Progress bar for grace period countdown */}
+                        {refundCooldown > 0 && (
+                            <div
+                                className="absolute inset-y-0 left-0 bg-degen-black/30 transition-all duration-1000 ease-linear"
+                                style={{ width: `${((REFUND_GRACE_PERIOD_SECONDS - refundCooldown) / REFUND_GRACE_PERIOD_SECONDS) * 100}%` }}
+                            />
+                        )}
+                        <span className="relative z-10">
+                            {isProcessing && processingStep === 'refund'
+                                ? 'Refunding...'
+                                : refundCooldown > 0
+                                    ? `Refund in ${refundCooldown}s`
+                                    : 'Claim Refund'}
+                        </span>
                     </button>
                 ) : isRefunded ? (
                     // Already refunded - text centered in fixed height

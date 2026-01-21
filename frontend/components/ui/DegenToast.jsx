@@ -56,7 +56,7 @@ function ToastItem({ toast, onDismiss }) {
     return (
         <div
             className={`
-                flex items-start gap-3 p-3 min-w-[280px] max-w-[380px]
+                flex items-start gap-3 p-3 w-full
                 border ${variant.border}
                 ${variant.bg}
                 ${variant.text}
@@ -124,7 +124,7 @@ export function DegenToastProvider({ children }) {
             {children}
 
             <div
-                className="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2 pointer-events-none"
+                className="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:w-[380px] z-[9999] flex flex-col gap-2 pointer-events-none"
                 aria-live="polite"
             >
                 {toasts.map((t) => (

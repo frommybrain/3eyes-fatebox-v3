@@ -766,12 +766,31 @@ router.get('/treasury-logs', async (req, res) => {
             });
         }
 
+        // Get unique token mints to look up symbols
+        const uniqueMints = [...new Set(logs.map(log => log.token_mint).filter(Boolean))];
+
+        // Fetch token symbols from projects table
+        const tokenSymbolMap = {};
+        if (uniqueMints.length > 0) {
+            const { data: projects } = await supabase
+                .from('projects')
+                .select('payment_token_mint, payment_token_symbol')
+                .in('payment_token_mint', uniqueMints);
+
+            if (projects) {
+                projects.forEach(p => {
+                    tokenSymbolMap[p.payment_token_mint] = p.payment_token_symbol;
+                });
+            }
+        }
+
         // Get network config for explorer URL
         const config = await getNetworkConfig();
         const cluster = config.network === 'mainnet-beta' ? '' : `?cluster=${config.network}`;
 
-        // Enhance logs with explorer links
+        // Enhance logs with explorer links and token symbols
         const enhancedLogs = logs.map(log => ({
+            token_symbol: tokenSymbolMap[log.token_mint] || null,
             ...log,
             explorer_links: {
                 tx_signature: log.tx_signature

@@ -368,6 +368,43 @@ router.get('/', async (req, res) => {
             throw error;
         }
 
+        // Fetch box counts for each project using optimized RPC function
+        if (projects && projects.length > 0) {
+            const projectIds = projects.map(p => p.id);
+
+            // Try the optimized RPC function first (aggregates at DB level)
+            const { data: counts, error: rpcError } = await supabase
+                .rpc('get_project_box_counts', { project_ids: projectIds });
+
+            if (!rpcError && counts) {
+                const countsByProject = counts.reduce((acc, row) => {
+                    acc[row.project_id] = row.total_boxes;
+                    return acc;
+                }, {});
+
+                projects.forEach(project => {
+                    project.total_boxes_sold = countsByProject[project.id] || 0;
+                });
+            } else {
+                // Fallback: fetch and count client-side
+                const { data: boxes, error: boxError } = await supabase
+                    .from('boxes')
+                    .select('project_id')
+                    .in('project_id', projectIds);
+
+                if (!boxError && boxes) {
+                    const countsByProject = boxes.reduce((acc, box) => {
+                        acc[box.project_id] = (acc[box.project_id] || 0) + 1;
+                        return acc;
+                    }, {});
+
+                    projects.forEach(project => {
+                        project.total_boxes_sold = countsByProject[project.id] || 0;
+                    });
+                }
+            }
+        }
+
         return res.json({
             success: true,
             network: config.network,

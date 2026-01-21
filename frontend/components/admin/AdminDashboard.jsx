@@ -41,11 +41,61 @@ export default function AdminDashboard() {
     const [treasuryLogs, setTreasuryLogs] = useState([]);
     const [treasuryLogsLoading, setTreasuryLogsLoading] = useState(false);
 
+    // Server health state
+    const [serverHealth, setServerHealth] = useState(null); // null = loading, { status, latency, error? }
+
     // Check if user is admin
     const isAdmin = publicKey && config && publicKey.toString() === config.adminWallet.toString();
 
     useEffect(() => {
         setMounted(true);
+    }, []);
+
+    // Check server health on mount and periodically
+    useEffect(() => {
+        const checkServerHealth = async () => {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+            const startTime = Date.now();
+
+            try {
+                const response = await fetch(`${backendUrl}/health`, {
+                    method: 'GET',
+                    cache: 'no-store',
+                });
+                const latency = Date.now() - startTime;
+
+                if (response.ok) {
+                    const data = await response.json();
+                    setServerHealth({
+                        status: 'online',
+                        latency,
+                        environment: data.environment,
+                        version: data.version,
+                        timestamp: data.timestamp,
+                    });
+                } else {
+                    setServerHealth({
+                        status: 'error',
+                        latency,
+                        error: `HTTP ${response.status}`,
+                    });
+                }
+            } catch (error) {
+                setServerHealth({
+                    status: 'offline',
+                    latency: Date.now() - startTime,
+                    error: error.message,
+                });
+            }
+        };
+
+        // Check immediately
+        checkServerHealth();
+
+        // Then check every 30 seconds
+        const interval = setInterval(checkServerHealth, 30000);
+
+        return () => clearInterval(interval);
     }, []);
 
     // Load data when admin is connected
@@ -452,9 +502,9 @@ export default function AdminDashboard() {
                     </p>
                 </div>
 
-                {/* Network Status */}
+                {/* Network & Server Status */}
                 <DegenCard variant="white" padding="lg" className="mb-6">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-wrap items-center justify-between gap-4">
                         <div>
                             <p className="text-degen-text-muted text-sm uppercase tracking-wider mb-1">Current Network</p>
                             <p className="text-degen-black text-2xl font-medium">
@@ -470,6 +520,33 @@ export default function AdminDashboard() {
                         <div>
                             <p className="text-degen-text-muted text-sm uppercase tracking-wider mb-1">RPC URL</p>
                             <p className="text-degen-black text-sm font-mono">{config.rpcUrl ? `${config.rpcUrl.slice(0, 30)}...` : 'Not configured'}</p>
+                        </div>
+                        <div>
+                            <p className="text-degen-text-muted text-sm uppercase tracking-wider mb-1">Backend Server</p>
+                            {serverHealth === null ? (
+                                <div className="flex items-center gap-2">
+                                    <div className="w-3 h-3 rounded-full bg-degen-text-muted animate-pulse" />
+                                    <span className="text-degen-text-muted text-sm">Checking...</span>
+                                </div>
+                            ) : serverHealth.status === 'online' ? (
+                                <div className="flex items-center gap-2">
+                                    <div className="w-3 h-3 rounded-full bg-green-500" />
+                                    <span className="text-green-600 text-sm font-medium">Online</span>
+                                    <span className="text-degen-text-muted text-xs">({serverHealth.latency}ms)</span>
+                                </div>
+                            ) : serverHealth.status === 'error' ? (
+                                <div className="flex items-center gap-2">
+                                    <div className="w-3 h-3 rounded-full bg-yellow-500" />
+                                    <span className="text-yellow-600 text-sm font-medium">Error</span>
+                                    <span className="text-degen-text-muted text-xs" title={serverHealth.error}>({serverHealth.error})</span>
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-2">
+                                    <div className="w-3 h-3 rounded-full bg-red-500" />
+                                    <span className="text-red-600 text-sm font-medium">Offline</span>
+                                    <span className="text-degen-text-muted text-xs" title={serverHealth.error}>(unreachable)</span>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </DegenCard>
@@ -1474,7 +1551,7 @@ export default function AdminDashboard() {
                                                             <div>
                                                                 <p className="text-degen-text-muted text-xs uppercase">Amount Withdrawn</p>
                                                                 <p className="text-degen-black font-medium">
-                                                                    {(Number(log.amount_withdrawn) / 1e9).toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                                                                    {(Number(log.amount_withdrawn) / 1e9).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${log.token_symbol || ''}
                                                                 </p>
                                                             </div>
                                                         )}

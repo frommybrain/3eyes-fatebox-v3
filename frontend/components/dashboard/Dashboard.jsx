@@ -1,7 +1,7 @@
 // components/dashboard/Dashboard.jsx
 'use client';
 
-import { useEffect, useState, useCallback, useTransition, useOptimistic } from 'react';
+import { useEffect, useState, useCallback, useTransition, useOptimistic, useMemo } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { Transaction } from '@solana/web3.js';
@@ -20,6 +20,7 @@ import {
     DegenLoadingState,
     DegenEmptyState,
     DegenInput,
+    DegenDropdown,
     CardDropdown,
     useToast,
     useTransaction,
@@ -710,16 +711,61 @@ function MyBoxesTab({ walletAddress }) {
     );
 }
 
+// Filter definitions for box states
+const BOX_FILTERS = {
+    all: { label: 'All', filter: () => true },
+    unopened: {
+        label: 'Unopened',
+        filter: (b) => b.box_result === 0 && !b.randomness_committed,
+    },
+    wins: {
+        label: 'Wins',
+        filter: (b) => b.box_result >= 2 && b.box_result <= 5,
+    },
+    lost: {
+        label: 'Lost',
+        filter: (b) => b.box_result === 1,
+    },
+    unclaimed: {
+        label: 'Unclaimed',
+        // Unclaimed wins (has payout but not settled) or unclaimed refunds (refund eligible but not yet refunded)
+        filter: (b) => (b.box_result >= 2 && b.box_result <= 5 && !b.settled_at) || (b.refund_eligible && b.box_result !== 6),
+    },
+    refund: {
+        label: 'Refund',
+        // All refund-related boxes: eligible for refund OR already refunded
+        filter: (b) => b.refund_eligible || b.box_result === 6,
+    },
+    expired: {
+        label: 'Expired',
+        // Committed but not revealed (stuck in opening state)
+        filter: (b) => b.randomness_committed && b.box_result === 0,
+    },
+};
+
 function ProjectBoxesGroup({ projectGroup, onRefresh }) {
     const { project, boxes } = projectGroup;
     const projectUrl = getProjectUrl(project.subdomain);
+    const [activeFilter, setActiveFilter] = useState('all');
 
-    // Sort boxes by box_number in reverse order (newest first)
-    const sortedBoxes = [...boxes].sort((a, b) => b.box_number - a.box_number);
+    // Count boxes for each filter category
+    const filterCounts = useMemo(() => {
+        const counts = {};
+        Object.keys(BOX_FILTERS).forEach(key => {
+            counts[key] = boxes.filter(BOX_FILTERS[key].filter).length;
+        });
+        return counts;
+    }, [boxes]);
 
-    // Count box states
-    const pendingBoxes = boxes.filter(b => b.box_result === 0).length;
-    const revealedBoxes = boxes.filter(b => b.box_result !== 0).length;
+    // Filter and sort boxes
+    const filteredAndSortedBoxes = useMemo(() => {
+        const filtered = boxes.filter(BOX_FILTERS[activeFilter].filter);
+        return [...filtered].sort((a, b) => b.box_number - a.box_number);
+    }, [boxes, activeFilter]);
+
+    // Count box states for header display
+    const pendingBoxes = filterCounts.unopened + filterCounts.expired;
+    const revealedBoxes = filterCounts.wins + filterCounts.lost + filterCounts.refund;
 
     return (
         <DegenCard variant="default" padding="none" className="overflow-hidden">
@@ -758,18 +804,78 @@ function ProjectBoxesGroup({ projectGroup, onRefresh }) {
                 </div>
             </div>
 
+            {/* Filter - Dropdown on mobile, Tabs on desktop */}
+            <div className="px-3 pt-3 pb-2 border-b border-degen-border">
+                {/* Mobile Dropdown */}
+                <div className="sm:hidden">
+                    <DegenDropdown
+                        options={Object.entries(BOX_FILTERS).map(([key, { label }]) => ({
+                            value: key,
+                            label,
+                            count: filterCounts[key],
+                        }))}
+                        value={activeFilter}
+                        onChange={setActiveFilter}
+                        showCounts={true}
+                    />
+                </div>
+
+                {/* Desktop Tabs */}
+                <div className="hidden sm:flex gap-1 overflow-x-auto">
+                    {Object.entries(BOX_FILTERS).map(([key, { label }]) => {
+                        const count = filterCounts[key];
+                        const isActive = activeFilter === key;
+                        // Hide filters with 0 count (except 'all')
+                        if (count === 0 && key !== 'all') return null;
+
+                        return (
+                            <button
+                                key={key}
+                                onClick={() => setActiveFilter(key)}
+                                className={`
+                                    px-3 py-1.5 text-xs font-medium uppercase tracking-wider
+                                    border transition-colors duration-100
+                                    flex items-center gap-1.5
+                                    ${isActive
+                                        ? 'bg-degen-black text-white border-degen-black'
+                                        : 'bg-white text-degen-black border-degen-black hover:bg-degen-container'
+                                    }
+                                `}
+                            >
+                                {label}
+                                <span className={`
+                                    text-[10px] px-1.5 py-0.5 rounded-sm
+                                    ${isActive
+                                        ? 'bg-white/20 text-white'
+                                        : 'bg-degen-container text-degen-text-muted'
+                                    }
+                                `}>
+                                    {count}
+                                </span>
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+
             {/* Boxes Grid */}
             <div className="p-3">
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                    {sortedBoxes.map((box) => (
-                        <BoxCard
-                            key={box.id}
-                            box={box}
-                            project={project}
-                            onRefresh={onRefresh}
-                        />
-                    ))}
-                </div>
+                {filteredAndSortedBoxes.length === 0 ? (
+                    <div className="text-center py-8 text-degen-text-muted">
+                        No boxes match this filter
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                        {filteredAndSortedBoxes.map((box) => (
+                            <BoxCard
+                                key={box.id}
+                                box={box}
+                                project={project}
+                                onRefresh={onRefresh}
+                            />
+                        ))}
+                    </div>
+                )}
             </div>
         </DegenCard>
     );

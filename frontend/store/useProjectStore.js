@@ -161,7 +161,8 @@ const useProjectStore = create((set, get) => ({
         set({ projectsLoading: true, projectsError: null });
 
         try {
-            const { data, error } = await supabase
+            // Fetch projects
+            const { data: projects, error } = await supabase
                 .from('projects')
                 .select('*')
                 .eq('owner_wallet', ownerWallet)
@@ -170,12 +171,64 @@ const useProjectStore = create((set, get) => ({
 
             if (error) throw error;
 
+            // Fetch box counts for each project
+            if (projects && projects.length > 0) {
+                const projectIds = projects.map(p => p.id);
+
+                // Try to use the optimized RPC function first (aggregates at DB level)
+                const { data: counts, error: rpcError } = await supabase
+                    .rpc('get_project_box_counts', { project_ids: projectIds });
+
+                if (!rpcError && counts) {
+                    // Create lookup from RPC results
+                    const statsByProject = counts.reduce((acc, row) => {
+                        acc[row.project_id] = {
+                            total: row.total_boxes,
+                            settled: row.settled_boxes,
+                        };
+                        return acc;
+                    }, {});
+
+                    // Merge counts into projects
+                    projects.forEach(project => {
+                        const stats = statsByProject[project.id] || { total: 0, settled: 0 };
+                        project.total_boxes_created = stats.total;
+                        project.total_boxes_settled = stats.settled;
+                    });
+                } else {
+                    // Fallback: fetch boxes and count client-side
+                    const { data: boxes, error: boxError } = await supabase
+                        .from('boxes')
+                        .select('project_id, settled_at')
+                        .in('project_id', projectIds);
+
+                    if (!boxError && boxes) {
+                        const statsByProject = boxes.reduce((acc, box) => {
+                            if (!acc[box.project_id]) {
+                                acc[box.project_id] = { total: 0, settled: 0 };
+                            }
+                            acc[box.project_id].total++;
+                            if (box.settled_at) {
+                                acc[box.project_id].settled++;
+                            }
+                            return acc;
+                        }, {});
+
+                        projects.forEach(project => {
+                            const stats = statsByProject[project.id] || { total: 0, settled: 0 };
+                            project.total_boxes_created = stats.total;
+                            project.total_boxes_settled = stats.settled;
+                        });
+                    }
+                }
+            }
+
             set({
-                projects: data || [],
+                projects: projects || [],
                 projectsLoading: false,
             });
 
-            return data;
+            return projects;
         } catch (error) {
             console.error('Failed to load projects by owner:', error);
             set({

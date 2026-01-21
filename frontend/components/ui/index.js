@@ -4,6 +4,7 @@ export { default as DegenCard, DegenCardHeader, DegenCardTitle, DegenCardDescrip
 export { DegenTabs, DegenTabsList, DegenTabsTrigger, DegenTabsContent } from './DegenTabs';
 export { default as DegenBadge } from './DegenBadge';
 export { default as DegenInput, DegenTextarea, DegenSelect } from './DegenInput';
+export { default as DegenDropdown } from './DegenDropdown';
 export { default as DegenLoader, DegenLoadingState } from './DegenLoader';
 export { default as DegenEmptyState } from './DegenEmptyState';
 export { DegenToastProvider, useToast } from './DegenToast';

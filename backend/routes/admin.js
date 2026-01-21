@@ -62,6 +62,8 @@ router.post('/update-platform-config', requireSuperAdmin, async (req, res) => {
             platformCommissionBps,
             // Security settings
             refundGracePeriod,
+            // Emergency pause
+            paused,
         } = req.body;
 
         console.log('\n========================================');
@@ -140,6 +142,8 @@ router.post('/update-platform-config', requireSuperAdmin, async (req, res) => {
             // Security settings
             minBoxPrice: null, // Not used - kept for future
             refundGracePeriod: refundGracePeriod !== undefined ? new BN(refundGracePeriod) : null,
+            // Emergency pause
+            paused: paused !== undefined ? paused : null,
         };
 
         console.log('Update params:', {
@@ -179,7 +183,7 @@ router.post('/update-platform-config', requireSuperAdmin, async (req, res) => {
                 updateParams.tier3Rebate,
                 updateParams.tier3Breakeven,
                 updateParams.tier3Profit,
-                null, // paused - not changing
+                updateParams.paused, // Emergency pause toggle
                 updateParams.platformCommissionBps,
                 updateParams.minBoxPrice,
                 updateParams.refundGracePeriod,
@@ -325,7 +329,16 @@ router.post('/toggle-pause', requireSuperAdmin, async (req, res) => {
     try {
         const { paused } = req.body;
 
-        console.log(`\nToggling platform pause: ${paused ? 'PAUSING' : 'UNPAUSING'}`);
+        if (paused === undefined) {
+            return res.status(400).json({
+                success: false,
+                error: 'paused parameter is required (true or false)',
+            });
+        }
+
+        console.log(`\n========================================`);
+        console.log(`  Emergency ${paused ? 'PAUSE' : 'UNPAUSE'} Platform`);
+        console.log(`========================================`);
 
         // Load deploy wallet
         const deployWalletJson = process.env.DEPLOY_WALLET_JSON;
@@ -336,20 +349,95 @@ router.post('/toggle-pause', requireSuperAdmin, async (req, res) => {
             });
         }
 
-        const secretKey = Uint8Array.from(JSON.parse(deployWalletJson));
-        const adminKeypair = Keypair.fromSecretKey(secretKey);
+        let adminKeypair;
+        try {
+            const secretKey = Uint8Array.from(JSON.parse(deployWalletJson));
+            adminKeypair = Keypair.fromSecretKey(secretKey);
+        } catch (e) {
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to parse deploy wallet keypair',
+            });
+        }
 
         const config = await getNetworkConfig();
         const { program, connection, programId } = await getAnchorProgram();
         const [platformConfigPDA] = derivePlatformConfigPDA(programId);
 
-        // For pausing, we need to use update_platform_config with all null except we'd need a dedicated pause instruction
-        // Since we don't have a dedicated pause instruction, we'll need to add one or use update_platform_config creatively
-        // For now, return a message that this needs implementation
+        // Build transaction to update just the pause flag
+        // All other params are null to leave them unchanged
+        const tx = await program.methods
+            .updatePlatformConfig(
+                null, // baseLuck
+                null, // maxLuck
+                null, // luckTimeInterval
+                null, // payoutDud
+                null, // payoutRebate
+                null, // payoutBreakeven
+                null, // payoutProfit
+                null, // payoutJackpot
+                null, // tier1MaxLuck
+                null, // tier1Dud
+                null, // tier1Rebate
+                null, // tier1Breakeven
+                null, // tier1Profit
+                null, // tier2MaxLuck
+                null, // tier2Dud
+                null, // tier2Rebate
+                null, // tier2Breakeven
+                null, // tier2Profit
+                null, // tier3Dud
+                null, // tier3Rebate
+                null, // tier3Breakeven
+                null, // tier3Profit
+                paused, // paused - the only thing we're changing
+                null, // platformCommissionBps
+                null, // minBoxPrice
+                null, // refundGracePeriod
+            )
+            .accounts({
+                admin: adminKeypair.publicKey,
+                platformConfig: platformConfigPDA,
+            })
+            .transaction();
 
-        return res.status(501).json({
-            success: false,
-            error: 'Pause toggle not yet implemented. Add a dedicated pause instruction to the program.',
+        // Get recent blockhash
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+        tx.recentBlockhash = blockhash;
+        tx.lastValidBlockHeight = lastValidBlockHeight;
+        tx.feePayer = adminKeypair.publicKey;
+
+        // Sign with admin keypair
+        tx.sign(adminKeypair);
+
+        // Send transaction
+        console.log('Sending transaction...');
+        const signature = await connection.sendRawTransaction(tx.serialize(), {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
+        });
+
+        console.log(`Transaction sent: ${signature}`);
+
+        // Wait for confirmation
+        await connection.confirmTransaction(signature, 'confirmed');
+        console.log(`Platform ${paused ? 'PAUSED' : 'UNPAUSED'} successfully!`);
+
+        // Clear config cache so next read gets updated state
+        clearConfigCache();
+
+        // Log the action
+        logger.log(EventTypes.ADMIN_EMERGENCY_ACTION, {
+            action: paused ? 'PLATFORM_PAUSED' : 'PLATFORM_UNPAUSED',
+            signature,
+            admin: adminKeypair.publicKey.toString(),
+        });
+
+        return res.json({
+            success: true,
+            paused,
+            signature,
+            explorerUrl: `https://explorer.solana.com/tx/${signature}?cluster=${config.network}`,
         });
 
     } catch (error) {

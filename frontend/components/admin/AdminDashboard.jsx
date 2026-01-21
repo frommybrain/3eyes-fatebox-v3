@@ -33,6 +33,7 @@ export default function AdminDashboard() {
     const [onChainConfigLoading, setOnChainConfigLoading] = useState(false);
     const [onChainConfigForm, setOnChainConfigForm] = useState({});
     const [savingOnChain, setSavingOnChain] = useState(false);
+    const [togglingPause, setTogglingPause] = useState(false);
 
     // Treasury state
     const [treasuryData, setTreasuryData] = useState(null);
@@ -168,6 +169,42 @@ export default function AdminDashboard() {
             toast.error('Failed to load on-chain config');
         }
         setOnChainConfigLoading(false);
+    };
+
+    // Toggle platform pause state
+    const handleTogglePlatformPause = async () => {
+        if (!onChainConfig) return;
+
+        const newPausedState = !onChainConfig.paused;
+        const action = newPausedState ? 'pause' : 'unpause';
+
+        if (!confirm(`Are you sure you want to ${action} the entire platform? ${newPausedState ? 'This will prevent ALL box purchases and settlements.' : 'This will re-enable box purchases and settlements.'}`)) {
+            return;
+        }
+
+        setTogglingPause(true);
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+            const response = await fetch(`${backendUrl}/api/admin/toggle-pause`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paused: newPausedState }),
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                toast.success(`Platform ${newPausedState ? 'paused' : 'unpaused'} successfully!`);
+                // Refresh config to show new state
+                await loadOnChainConfig();
+            } else {
+                toast.error('Failed to toggle pause: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Error toggling platform pause:', error);
+            toast.error('Failed to toggle platform pause: ' + error.message);
+        }
+        setTogglingPause(false);
     };
 
     // Load treasury data
@@ -843,6 +880,42 @@ export default function AdminDashboard() {
                                             </DegenBadge>
                                         </div>
                                     </div>
+                                </div>
+
+                                {/* Emergency Controls */}
+                                <div className={`mb-6 p-4 border-2 ${onChainConfig.paused ? 'bg-red-100 border-red-500' : 'bg-green-100 border-green-500'}`}>
+                                    <h3 className="text-degen-black text-lg font-medium uppercase tracking-wider mb-3">Emergency Controls</h3>
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className="text-degen-black font-medium">
+                                                Platform is currently: <span className={onChainConfig.paused ? 'text-red-600' : 'text-green-600'}>
+                                                    {onChainConfig.paused ? 'PAUSED' : 'ACTIVE'}
+                                                </span>
+                                            </p>
+                                            <p className="text-degen-text-muted text-sm mt-1">
+                                                {onChainConfig.paused
+                                                    ? 'All box purchases and settlements are currently disabled.'
+                                                    : 'Users can purchase and settle boxes normally.'}
+                                            </p>
+                                        </div>
+                                        <DegenButton
+                                            onClick={handleTogglePlatformPause}
+                                            variant={onChainConfig.paused ? 'success' : 'danger'}
+                                            size="lg"
+                                            disabled={togglingPause}
+                                        >
+                                            {togglingPause
+                                                ? 'Processing...'
+                                                : onChainConfig.paused
+                                                    ? 'UNPAUSE PLATFORM'
+                                                    : 'PAUSE PLATFORM'}
+                                        </DegenButton>
+                                    </div>
+                                    {onChainConfig.paused && (
+                                        <div className="mt-3 p-2 bg-red-200 border border-red-400 text-red-800 text-sm">
+                                            <strong>Warning:</strong> The platform is paused. Users cannot purchase or settle boxes until you unpause.
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Platform Commission */}

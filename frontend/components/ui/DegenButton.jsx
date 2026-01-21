@@ -51,6 +51,12 @@ const variants = {
         hoverBg: 'hover:bg-degen-black hover:text-degen-yellow',
         border: 'border-degen-black',
     },
+    danger: {
+        bg: 'bg-red-600',
+        text: 'text-white',
+        hoverBg: 'hover:bg-red-700',
+        border: 'border-red-600',
+    },
 };
 
 const sizes = {

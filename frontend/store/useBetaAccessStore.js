@@ -19,7 +19,8 @@ const BETA_WALLETS = [
     '9QHdhNhawBFr6No6mktKReDDDMm8wTGjAZyrDPrRuN79',
     'HC2djD3qPYdYqt5zHEyqAf5cXMWhf144v6f9s9s1FY2A',
     'GDKA3WjyGQXc8TMZ5qySV1ESXtdMwFcGC4ApAxZaq8gv',
-    '8iN8eRREfCA9LfPQNktL4n6vDxNv2toh3KxbUpvMxpmH'
+    '8iN8eRREfCA9LfPQNktL4n6vDxNv2toh3KxbUpvMxpmH',
+    'HHeCpHsNKWWBLdzt4RtmEsBT2WT6VpSPw5PtWJJA2o59'
 ];
 
 // Simple store without persistence (avoids hydration issues)

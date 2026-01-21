@@ -435,9 +435,12 @@ export default function ProjectPage({ subdomain }) {
     // User needs to connect wallet (not connected and no beta requirement, or beta but needs wallet)
     const needsWalletConnection = !connected && !connecting;
 
+    // Platform is paused (global emergency pause)
+    const isPlatformPaused = config?.paused === true;
+
     // Ready to show purchase UI - all conditions met
     const isReadyForPurchase = !isInitialLoading && !isProjectNotFound && !isProjectPaused &&
-        (!BETA_MODE_ENABLED || hasAccess) && displayProject;
+        !isPlatformPaused && (!BETA_MODE_ENABLED || hasAccess) && displayProject;
 
     // Show loading overlay when:
     // 1. Wallet is connected (or connecting) AND
@@ -540,6 +543,27 @@ export default function ProjectPage({ subdomain }) {
                     </h1>
                     <p className="text-degen-text-muted mb-6">
                         {projectError || `The project "${subdomain}" does not exist.`}
+                    </p>
+                    <DegenButton onClick={() => router.push('/')} variant="primary">
+                        Go to Homepage
+                    </DegenButton>
+                </div>
+            );
+        }
+
+        // Platform paused (global emergency pause)
+        if (config?.paused) {
+            return (
+                <div className="text-center">
+                    <div className="inline-block px-3 py-1 bg-red-500 text-white text-xs font-bold uppercase tracking-wider mb-4">
+                        Platform Maintenance
+                    </div>
+                    <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-2">
+                        Platform Temporarily Paused
+                    </h1>
+                    <p className="text-degen-text-muted mb-6">
+                        The platform is undergoing maintenance. Box purchases are temporarily disabled.
+                        Please check back soon!
                     </p>
                     <DegenButton onClick={() => router.push('/')} variant="primary">
                         Go to Homepage

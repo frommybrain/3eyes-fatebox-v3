@@ -170,6 +170,17 @@ export default function Dashboard() {
                     </div>
                 )}
 
+                {/* Platform Paused Notice */}
+                {config?.paused && (
+                    <div className="mb-6 p-4 bg-red-100 border-2 border-red-500 text-center">
+                        <h2 className="text-red-700 text-xl font-bold uppercase mb-2">Platform Temporarily Paused</h2>
+                        <p className="text-red-600">
+                            The platform is currently undergoing maintenance. Box purchases, opening, and settlements are temporarily disabled.
+                            Your existing boxes are safe. Please check back soon.
+                        </p>
+                    </div>
+                )}
+
                 {/* Header */}
                 <div className="mb-4">
                     <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">Dashboard</h1>
@@ -2201,7 +2212,10 @@ function BoxCard({ box, project, onRefresh }) {
 
             {/* Action Button - Fixed height container */}
             <div className="h-[36px] flex items-center justify-center">
-                {isPending ? (
+                {config?.paused ? (
+                    // Platform is paused - show disabled message
+                    <span className="text-degen-text-muted text-xs font-medium">Platform Paused</span>
+                ) : isPending ? (
                     // Step 1: Open Box (commit randomness) - with cooldown after purchase
                     <button
                         onClick={() => setShowOpenConfirm(true)}

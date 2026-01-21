@@ -49,9 +49,11 @@ const REVEAL_WINDOW_SECONDS = 3600;
 // ===========================
 
 // Initialize Supabase client
+// Use service role key for backend operations that need to bypass RLS
+// (e.g., updating boxes after commit/reveal/settle)
 const supabase = createClient(
     process.env.SUPABASE_URL,
-    process.env.SUPABASE_ANON_KEY
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
 );
 
 /**

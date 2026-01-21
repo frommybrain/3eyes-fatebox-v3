@@ -172,6 +172,10 @@ export default function ProjectPage({ subdomain }) {
         usePurchasingStore.getState().startPurchasing(quantity); // Move camera to purchase position, set expected box count
         setPurchaseProgress(null);
 
+        // Track purchases outside try block so catch block can access them
+        let totalBoxesPurchased = 0;
+        const allPurchasedBoxIds = [];
+
         try {
             const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
 
@@ -199,8 +203,6 @@ export default function ProjectPage({ subdomain }) {
             console.log(`   Total boxes: ${buildResult.totalBoxes}`);
 
             const { transactions } = buildResult;
-            let totalBoxesPurchased = 0;
-            const allPurchasedBoxIds = [];
 
             // Step 2: Process each transaction sequentially
             for (let i = 0; i < transactions.length; i++) {
@@ -299,7 +301,7 @@ export default function ProjectPage({ subdomain }) {
                 toast.info(
                     <span>
                         View your boxes now in your{' '}
-                        <a href="https://degenbox.fun/dashboard" className="underline font-medium hover:text-white">
+                        <a href="/dashboard" className="underline font-medium hover:text-white">
                             dashboard
                         </a>
                     </span>,
@@ -324,13 +326,11 @@ export default function ProjectPage({ subdomain }) {
         } catch (error) {
             console.error('❌ Box purchase failed:', error);
 
-            // Get how many boxes were actually purchased before the error
-            const boxesPurchased = purchaseProgress?.boxesPurchased || 0;
-
             // Handle partial success vs total failure
-            if (boxesPurchased > 0) {
+            // Use totalBoxesPurchased directly (not from state which may be stale)
+            if (totalBoxesPurchased > 0) {
                 // Partial success - update expected count so camera returns after these boxes drop
-                usePurchasingStore.getState().startPurchasing(boxesPurchased);
+                usePurchasingStore.getState().startPurchasing(totalBoxesPurchased);
 
                 // Check if user rejected/cancelled vs other error
                 const errorLower = (error.message || '').toLowerCase();
@@ -339,23 +339,24 @@ export default function ProjectPage({ subdomain }) {
                     errorLower.includes('user denied');
 
                 if (wasCancelled) {
-                    toast.info(`Purchased ${boxesPurchased} boxes. Remaining boxes were cancelled.`, {
+                    toast.info(`Purchased ${totalBoxesPurchased} boxes. Remaining boxes were cancelled.`, {
                         title: 'Partial Purchase',
                         duration: 8000,
                     });
                 } else {
-                    toast.warning(`Purchased ${boxesPurchased} boxes before error occurred. Check your dashboard for details.`, {
+                    toast.warning(`Purchased ${totalBoxesPurchased} boxes before error occurred. Check your dashboard for details.`, {
                         title: 'Partial Purchase',
                         duration: 8000,
                     });
                 }
 
                 // Show dashboard link after partial purchase
+                const purchasedCount = totalBoxesPurchased; // Capture for closure
                 setTimeout(() => {
                     toast.info(
                         <span>
-                            View your {boxesPurchased} boxes in your{' '}
-                            <a href="https://degenbox.fun/dashboard" className="underline font-medium hover:text-white">
+                            View your {purchasedCount} boxes in your{' '}
+                            <a href="/dashboard" className="underline font-medium hover:text-white">
                                 dashboard
                             </a>
                         </span>,
@@ -369,7 +370,7 @@ export default function ProjectPage({ subdomain }) {
                 // Refresh project data
                 startTransition(() => {
                     setOptimisticProject({
-                        total_boxes_created: (currentProject.total_boxes_created || 0) + boxesPurchased
+                        total_boxes_created: (currentProject.total_boxes_created || 0) + totalBoxesPurchased
                     });
                     refreshCurrentProject(subdomain);
                 });

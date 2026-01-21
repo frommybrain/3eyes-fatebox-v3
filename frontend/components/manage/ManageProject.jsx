@@ -4,6 +4,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWallet } from '@solana/wallet-adapter-react';
+
+// Super admin wallet - only this wallet can manage projects
+const SUPER_ADMIN_WALLET = 'Fop6HTZr57VAHw8t2S8MGwJvxJ9BGWHvLfLrRajKMv6';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { Transaction } from '@solana/web3.js';
 import { supabase } from '@/lib/supabase';
@@ -56,6 +59,10 @@ export default function ManageProject({ projectId }) {
     const [luckIntervalSeconds, setLuckIntervalSeconds] = useState(0);
     const [updatingLuckInterval, setUpdatingLuckInterval] = useState(false);
 
+    // Box price settings state
+    const [newBoxPrice, setNewBoxPrice] = useState('');
+    const [updatingBoxPrice, setUpdatingBoxPrice] = useState(false);
+
     // On-chain config for luck calculation (baseLuck, maxLuck)
     const [onChainConfig, setOnChainConfig] = useState(null);
 
@@ -63,11 +70,24 @@ export default function ManageProject({ projectId }) {
     const [vaultBalance, setVaultBalance] = useState(null);
     const [loadingVaultBalance, setLoadingVaultBalance] = useState(false);
 
+    // Check if current user is the super admin
+    const isAdmin = publicKey?.toString() === SUPER_ADMIN_WALLET;
+
+    // Redirect non-admin users
     useEffect(() => {
-        if (connected && publicKey) {
+        if (connected && publicKey && !isAdmin) {
+            toast.error('Access denied. Only administrators can manage projects.');
+            router.push('/dashboard');
+        }
+    }, [connected, publicKey, isAdmin, router, toast]);
+
+    // Load project data for admin users
+    useEffect(() => {
+        if (connected && publicKey && isAdmin) {
             loadProject();
         }
-    }, [projectId, connected, publicKey]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [projectId, connected, publicKey, isAdmin]);
 
     // Fetch on-chain platform config for baseLuck/maxLuck
     useEffect(() => {
@@ -216,6 +236,69 @@ export default function ManageProject({ projectId }) {
             toast.error(error.message || 'Failed to update luck interval');
         } finally {
             setUpdatingLuckInterval(false);
+        }
+    };
+
+    // Update box price (on-chain + database)
+    const handleUpdateBoxPrice = async () => {
+        if (!project || !publicKey || !sendTransaction) return;
+
+        const decimals = project.payment_token_decimals || 9;
+        const priceInSmallestUnit = Math.floor(parseFloat(newBoxPrice) * Math.pow(10, decimals));
+
+        if (isNaN(priceInSmallestUnit) || priceInSmallestUnit <= 0) {
+            toast.error('Please enter a valid box price greater than 0');
+            return;
+        }
+
+        setUpdatingBoxPrice(true);
+        try {
+            // Step 1: Build transaction via backend
+            const response = await fetch(`${backendUrl}/api/program/build-update-project-tx`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    ownerWallet: publicKey.toString(),
+                    newBoxPrice: priceInSmallestUnit,
+                }),
+            });
+
+            const buildResult = await response.json();
+
+            if (!buildResult.success) {
+                throw new Error(buildResult.error || 'Failed to build transaction');
+            }
+
+            // Step 2: Send transaction using wallet adapter
+            const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            transaction.recentBlockhash = blockhash;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+
+            const signature = await sendTransaction(transaction, connection, {
+                skipPreflight: true,
+            });
+            await connection.confirmTransaction(signature, 'confirmed');
+
+            // Step 3: Update database
+            const { error: dbError } = await supabase
+                .from('projects')
+                .update({ box_price: priceInSmallestUnit })
+                .eq('id', projectId);
+
+            if (dbError) {
+                console.warn('DB update failed:', dbError);
+            }
+
+            toast.success('Box price updated successfully!');
+            setNewBoxPrice('');
+            loadProject();
+        } catch (error) {
+            console.error('Error updating box price:', error);
+            toast.error(error.message || 'Failed to update box price');
+        } finally {
+            setUpdatingBoxPrice(false);
         }
     };
 
@@ -502,6 +585,24 @@ export default function ManageProject({ projectId }) {
                     </a>
                 </div>
 
+                {/* Platform Paused Notice */}
+                {config?.paused && (
+                    <DegenCard variant="white" padding="lg" className="mb-8">
+                        <div className="text-center">
+                            <div className="inline-block px-3 py-1 bg-red-500 text-white text-xs font-bold uppercase tracking-wider mb-4">
+                                Platform Maintenance
+                            </div>
+                            <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-2">
+                                Platform Temporarily Paused
+                            </h2>
+                            <p className="text-degen-text-muted">
+                                The platform is undergoing maintenance. Project management actions (withdrawals, settings changes, closing projects) are temporarily disabled.
+                                Your project data is safe. Please check back soon.
+                            </p>
+                        </div>
+                    </DegenCard>
+                )}
+
                 {/* Project Stats Bar */}
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
                     <div className="bg-degen-white p-4 border border-degen-black text-center">
@@ -553,6 +654,7 @@ export default function ManageProject({ projectId }) {
                             projectUrl={projectUrl}
                             saving={saving}
                             togglePause={togglePause}
+                            platformPaused={config?.paused}
                         />
                     </DegenTabsContent>
 
@@ -575,6 +677,7 @@ export default function ManageProject({ projectId }) {
                             withdrawalHistory={withdrawalHistory}
                             loadingHistory={loadingHistory}
                             loadWithdrawalHistory={loadWithdrawalHistory}
+                            platformPaused={config?.paused}
                         />
                     </DegenTabsContent>
 
@@ -588,6 +691,11 @@ export default function ManageProject({ projectId }) {
                             setLuckIntervalSeconds={setLuckIntervalSeconds}
                             updatingLuckInterval={updatingLuckInterval}
                             handleUpdateLuckInterval={handleUpdateLuckInterval}
+                            newBoxPrice={newBoxPrice}
+                            setNewBoxPrice={setNewBoxPrice}
+                            updatingBoxPrice={updatingBoxPrice}
+                            handleUpdateBoxPrice={handleUpdateBoxPrice}
+                            platformPaused={config?.paused}
                         />
                     </DegenTabsContent>
                 </DegenTabs>
@@ -599,7 +707,7 @@ export default function ManageProject({ projectId }) {
 // ============================================================================
 // Overview Tab
 // ============================================================================
-function OverviewTab({ project, projectUrl, saving, togglePause }) {
+function OverviewTab({ project, projectUrl, saving, togglePause, platformPaused }) {
     return (
         <div className="space-y-6">
             {/* Project Status */}
@@ -624,7 +732,7 @@ function OverviewTab({ project, projectUrl, saving, togglePause }) {
                             </div>
                             <DegenButton
                                 onClick={togglePause}
-                                disabled={saving}
+                                disabled={saving || platformPaused}
                                 variant={project.is_paused ? 'warning' : 'success'}
                                 size="sm"
                             >
@@ -719,6 +827,7 @@ function WithdrawalsTab({
     withdrawalHistory,
     loadingHistory,
     loadWithdrawalHistory,
+    platformPaused,
 }) {
     return (
         <div className="space-y-6">
@@ -886,12 +995,12 @@ function WithdrawalsTab({
 
                                             <DegenButton
                                                 onClick={handleWithdrawProfits}
-                                                disabled={withdrawing}
+                                                disabled={withdrawing || platformPaused}
                                                 variant="success"
                                                 size="lg"
                                                 className="w-full"
                                             >
-                                                {withdrawing ? 'Processing Withdrawal...' : `Withdraw ${parseFloat(withdrawalInfo.withdrawable.profitOnly.formatted).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${project.payment_token_symbol} Profit`}
+                                                {platformPaused ? 'Platform Paused' : withdrawing ? 'Processing Withdrawal...' : `Withdraw ${parseFloat(withdrawalInfo.withdrawable.profitOnly.formatted).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${project.payment_token_symbol} Profit`}
                                             </DegenButton>
                                         </div>
                                     ) : (
@@ -929,8 +1038,9 @@ function WithdrawalsTab({
                                                 onClick={() => setShowCloseConfirmation(true)}
                                                 variant="feature"
                                                 size="md"
+                                                disabled={platformPaused}
                                             >
-                                                Close Project & Withdraw {parseFloat(withdrawalInfo.withdrawable.maxAmount.formatted).toLocaleString(undefined, { maximumFractionDigits: 4 })} {project.payment_token_symbol}
+                                                {platformPaused ? 'Platform Paused' : `Close Project & Withdraw ${parseFloat(withdrawalInfo.withdrawable.maxAmount.formatted).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${project.payment_token_symbol}`}
                                             </DegenButton>
                                         </div>
                                     ) : (
@@ -966,9 +1076,9 @@ function WithdrawalsTab({
                                                     onClick={handleCloseProject}
                                                     variant="feature"
                                                     size="md"
-                                                    disabled={closingProject}
+                                                    disabled={closingProject || platformPaused}
                                                 >
-                                                    {closingProject ? 'Closing Project...' : 'Yes, Close Project Permanently'}
+                                                    {platformPaused ? 'Platform Paused' : closingProject ? 'Closing Project...' : 'Yes, Close Project Permanently'}
                                                 </DegenButton>
                                             </div>
                                         </div>
@@ -1078,9 +1188,90 @@ function SettingsTab({
     setLuckIntervalSeconds,
     updatingLuckInterval,
     handleUpdateLuckInterval,
+    newBoxPrice,
+    setNewBoxPrice,
+    updatingBoxPrice,
+    handleUpdateBoxPrice,
+    platformPaused,
 }) {
+    // Format current box price for display
+    const decimals = project.payment_token_decimals || 9;
+    const currentBoxPrice = project.box_price / Math.pow(10, decimals);
+
     return (
         <div className="space-y-6">
+            {/* Box Price Settings */}
+            <DegenCard variant="white" padding="lg">
+                <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-6">Box Price</h2>
+
+                <p className="text-degen-text-muted text-sm mb-4">
+                    Set the price for new boxes. This affects all future purchases - existing unopened boxes will
+                    still use their original purchase price for reward calculations.
+                </p>
+
+                {/* Current Price Display */}
+                <div className="bg-degen-bg p-4 border border-degen-black mb-4">
+                    <div className="flex justify-between items-center">
+                        <div>
+                            <p className="text-degen-text-muted text-xs uppercase mb-1">Current Box Price</p>
+                            <p className="text-degen-black font-medium text-xl">
+                                {currentBoxPrice.toLocaleString(undefined, { maximumFractionDigits: 4 })} {project.payment_token_symbol || 'TOKEN'}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Edit Box Price */}
+                <div className="space-y-4">
+                    <DegenInput
+                        label={`New Box Price (${project.payment_token_symbol || 'TOKEN'})`}
+                        type="number"
+                        value={newBoxPrice}
+                        onChange={(e) => setNewBoxPrice(e.target.value)}
+                        placeholder={`Enter new price (e.g., ${currentBoxPrice})`}
+                        min="0"
+                        step="0.0001"
+                        hint="Price must be greater than 0"
+                    />
+
+                    {/* Preview */}
+                    {newBoxPrice && parseFloat(newBoxPrice) > 0 && (
+                        <div className="p-3 bg-degen-container border border-degen-text-light">
+                            <div className="flex justify-between items-center">
+                                <span className="text-degen-text-muted text-sm">New price:</span>
+                                <span className="text-degen-black font-medium">
+                                    {parseFloat(newBoxPrice).toLocaleString(undefined, { maximumFractionDigits: 4 })} {project.payment_token_symbol || 'TOKEN'}
+                                </span>
+                            </div>
+                            {parseFloat(newBoxPrice) !== currentBoxPrice && (
+                                <div className="flex justify-between items-center mt-1">
+                                    <span className="text-degen-text-muted text-sm">Change:</span>
+                                    <span className={`font-medium ${parseFloat(newBoxPrice) > currentBoxPrice ? 'text-green-600' : 'text-red-600'}`}>
+                                        {parseFloat(newBoxPrice) > currentBoxPrice ? '+' : ''}
+                                        {((parseFloat(newBoxPrice) - currentBoxPrice) / currentBoxPrice * 100).toFixed(1)}%
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Save Button */}
+                    <DegenButton
+                        onClick={handleUpdateBoxPrice}
+                        disabled={updatingBoxPrice || platformPaused || !newBoxPrice || parseFloat(newBoxPrice) <= 0}
+                        variant="primary"
+                        size="md"
+                    >
+                        {platformPaused ? 'Platform Paused' : updatingBoxPrice ? 'Updating...' : 'Update Box Price'}
+                    </DegenButton>
+
+                    <p className="text-degen-text-muted text-xs">
+                        Note: This requires an on-chain transaction. Existing unopened boxes are not affected -
+                        they will use their original purchase price for reward calculations.
+                    </p>
+                </div>
+            </DegenCard>
+
             {/* Luck Settings */}
             <DegenCard variant="white" padding="lg">
                 <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-6">Luck Settings</h2>
@@ -1175,11 +1366,11 @@ function SettingsTab({
                     {/* Save Button */}
                     <DegenButton
                         onClick={handleUpdateLuckInterval}
-                        disabled={updatingLuckInterval || luckIntervalSeconds === (project.luck_interval_seconds || 0)}
+                        disabled={updatingLuckInterval || platformPaused || luckIntervalSeconds === (project.luck_interval_seconds || 0)}
                         variant="primary"
                         size="md"
                     >
-                        {updatingLuckInterval ? 'Updating...' : 'Update Luck Interval'}
+                        {platformPaused ? 'Platform Paused' : updatingLuckInterval ? 'Updating...' : 'Update Luck Interval'}
                     </DegenButton>
 
                     <p className="text-degen-text-muted text-xs">

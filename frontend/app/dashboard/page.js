@@ -3,7 +3,6 @@
 
 import { Suspense } from 'react';
 import Dashboard from '@/components/dashboard/Dashboard';
-import BetaGate from '@/components/auth/BetaGate';
 
 export const metadata = {
     title: 'My Projects | DegenBox',
@@ -20,10 +19,8 @@ function DashboardLoading() {
 
 export default function DashboardPage() {
     return (
-        <BetaGate>
-            <Suspense fallback={<DashboardLoading />}>
-                <Dashboard />
-            </Suspense>
-        </BetaGate>
+        <Suspense fallback={<DashboardLoading />}>
+            <Dashboard />
+        </Suspense>
     );
 }

@@ -1918,6 +1918,10 @@
           {
             "name": "snapshot_game_preset",
             "type": "u8"
+          },
+          {
+            "name": "purchased_price",
+            "type": "u64"
           }
         ]
       }

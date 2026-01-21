@@ -9,7 +9,6 @@ import { getAssociatedTokenAddress } from '@solana/spl-token';
 import { PublicKey } from '@solana/web3.js';
 import useProjectStore from '@/store/useProjectStore';
 import useNetworkStore from '@/store/useNetworkStore';
-import useBetaAccessStore, { BETA_MODE_ENABLED } from '@/store/useBetaAccessStore';
 import {
     DegenButton,
     DegenCard,
@@ -44,9 +43,6 @@ export default function ProjectPage({ subdomain }) {
     // Wallet hooks
     const { publicKey, connected, connecting, sendTransaction } = useWallet();
     const { connection } = useConnection();
-
-    // Beta access store
-    const { hasAccess, checkAccess, grantAccess } = useBetaAccessStore();
 
     // Zustand stores
     const {
@@ -127,29 +123,6 @@ export default function ProjectPage({ subdomain }) {
             unsubscribe();
         };
     }, [subdomain]);
-
-    // Check beta access when wallet connects
-    useEffect(() => {
-        // If beta mode is disabled, grant access immediately
-        if (!BETA_MODE_ENABLED) {
-            grantAccess('public');
-            return;
-        }
-
-        // If already has access, nothing to do
-        if (hasAccess) return;
-
-        // Wait for wallet connection state to stabilize
-        if (connecting) return;
-
-        // If wallet is connected, check allowlist
-        if (connected && publicKey) {
-            const walletAddress = publicKey.toString();
-            if (checkAccess(walletAddress)) {
-                grantAccess(walletAddress);
-            }
-        }
-    }, [connected, connecting, publicKey, hasAccess, checkAccess, grantAccess]);
 
     // Fetch balances when wallet connects or project loads
     useEffect(() => {
@@ -428,12 +401,7 @@ export default function ProjectPage({ subdomain }) {
     // Project is paused/inactive
     const isProjectPaused = displayProject && (!displayProject.is_active || displayProject.is_paused);
 
-    // Beta access check (only relevant if beta mode is enabled)
-    const isBetaCheckPending = BETA_MODE_ENABLED && !hasAccess && connecting;
-    const isBetaDenied = BETA_MODE_ENABLED && !hasAccess && connected && !connecting;
-    const needsWalletForBeta = BETA_MODE_ENABLED && !hasAccess && !connected && !connecting;
-
-    // User needs to connect wallet (not connected and no beta requirement, or beta but needs wallet)
+    // User needs to connect wallet
     const needsWalletConnection = !connected && !connecting;
 
     // Platform is paused (global emergency pause)
@@ -441,15 +409,15 @@ export default function ProjectPage({ subdomain }) {
 
     // Ready to show purchase UI - all conditions met
     const isReadyForPurchase = !isInitialLoading && !isProjectNotFound && !isProjectPaused &&
-        !isPlatformPaused && (!BETA_MODE_ENABLED || hasAccess) && displayProject;
+        !isPlatformPaused && displayProject;
 
     // Show loading overlay when:
     // 1. Wallet is connected (or connecting) AND
     // 2. We're still loading data OR canvas isn't ready
     // Don't show overlay if user hasn't connected wallet yet
     const isWalletActive = connected || connecting;
-    const isStillLoading = isInitialLoading || isBetaCheckPending || (isReadyForPurchase && !canvasReady);
-    const showLoadingOverlay = isWalletActive && isStillLoading && !isProjectNotFound && !isProjectPaused && !isBetaDenied;
+    const isStillLoading = isInitialLoading || (isReadyForPurchase && !canvasReady);
+    const showLoadingOverlay = isWalletActive && isStillLoading && !isProjectNotFound && !isProjectPaused;
 
     // Network badge (show if devnet)
     const showNetworkBadge = config?.network === 'devnet';
@@ -472,32 +440,8 @@ export default function ProjectPage({ subdomain }) {
     // =========================================================================
 
     const renderCardContent = () => {
-        // If wallet not connected AND beta mode requires wallet, show beta prompt first
-        // (before we even try to load project data display)
-        if (needsWalletForBeta) {
-            return (
-                <div className="text-center">
-                    <div className="inline-block px-3 py-1 bg-degen-yellow text-degen-black text-xs font-bold uppercase tracking-wider mb-6">
-                        Beta Access Required
-                    </div>
-                    <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-4">
-                        DegenBox Beta
-                    </h1>
-                    <p className="text-degen-text-muted mb-6">
-                        Connect your wallet to verify beta access.
-                    </p>
-                    <div className="mb-4">
-                        <WalletButton />
-                    </div>
-                    <p className="text-xs text-degen-text-muted">
-                        Connect your wallet to check if you have beta access
-                    </p>
-                </div>
-            );
-        }
-
-        // If wallet not connected and no beta mode, show connect wallet prompt
-        if (needsWalletConnection && !BETA_MODE_ENABLED) {
+        // If wallet not connected, show connect wallet prompt
+        if (needsWalletConnection) {
             return (
                 <div className="text-center">
                     <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-4">
@@ -514,7 +458,7 @@ export default function ProjectPage({ subdomain }) {
         }
 
         // Loading skeleton - only show when wallet is connected and loading
-        if (isInitialLoading || isBetaCheckPending) {
+        if (isInitialLoading) {
             return (
                 <>
                     <SkeletonText width="180px" height="1.75rem" className="mx-auto mb-6" />
@@ -587,41 +531,6 @@ export default function ProjectPage({ subdomain }) {
                     <DegenButton onClick={() => router.push('/')} variant="primary">
                         Browse Other Projects
                     </DegenButton>
-                </div>
-            );
-        }
-
-        // Beta access denied
-        if (isBetaDenied) {
-            return (
-                <div className="text-center">
-                    <div className="inline-block px-3 py-1 bg-degen-yellow text-degen-black text-xs font-bold uppercase tracking-wider mb-6">
-                        Beta Access Required
-                    </div>
-                    <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-4">
-                        {displayProject?.project_name || 'DegenBox Beta'}
-                    </h1>
-                    <div className="bg-red-50 border border-red-200 p-4 mb-4">
-                        <p className="text-red-600 text-sm font-medium">Access Denied</p>
-                        <p className="text-red-500 text-xs mt-1">
-                            Your wallet is not on the beta access list.
-                        </p>
-                    </div>
-                    <p className="text-xs text-degen-text-muted mb-4">
-                        Connected: {publicKey?.toString().slice(0, 4)}...{publicKey?.toString().slice(-4)}
-                    </p>
-                    <p className="text-xs text-degen-text-muted">
-                        Contact the team on{' '}
-                        <a
-                            href="https://twitter.com/3eyesworld"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-degen-blue hover:underline"
-                        >
-                            Twitter
-                        </a>
-                        {' '}to request beta access.
-                    </p>
                 </div>
             );
         }

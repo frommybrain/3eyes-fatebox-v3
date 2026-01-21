@@ -4,6 +4,9 @@
 import { useState, useEffect } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useRouter } from 'next/navigation';
+
+// Super admin wallet - only this wallet can create projects
+const SUPER_ADMIN_WALLET = 'Fop6HTZr57VAHw8t2S8MGwJvxJ9BGWHvLfLrRajKMv6';
 import { Transaction } from '@solana/web3.js';
 import useNetworkStore from '@/store/useNetworkStore';
 import { checkSubdomainAvailability, generateSubdomain } from '@/lib/getNetworkConfig';
@@ -56,9 +59,20 @@ export default function CreateProject() {
     // On-chain config for luck calculation (baseLuck, maxLuck)
     const [onChainConfig, setOnChainConfig] = useState(null);
 
+    // Check if current user is the super admin
+    const isAdmin = publicKey?.toString() === SUPER_ADMIN_WALLET;
+
     useEffect(() => {
         setMounted(true);
     }, []);
+
+    // Redirect non-admin users
+    useEffect(() => {
+        if (mounted && connected && !isAdmin) {
+            toast.error('Access denied. Only administrators can create projects.');
+            router.push('/dashboard');
+        }
+    }, [mounted, connected, isAdmin, router, toast]);
 
     // Fetch on-chain platform config for baseLuck/maxLuck
     useEffect(() => {
@@ -327,6 +341,32 @@ export default function CreateProject() {
     const boxPriceNum = parseFloat(formData.boxPrice) || 0;
     const estimatedVaultFunding = Math.ceil(boxPriceNum * 30);
 
+    // Show access denied for non-admins (before redirect completes)
+    if (mounted && connected && !isAdmin) {
+        return (
+            <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-2 md:px-6">
+                <div className="max-w-xl mx-auto">
+                    <DegenCard variant="white" padding="lg">
+                        <div className="text-center">
+                            <div className="inline-block px-3 py-1 bg-red-500 text-white text-xs font-bold uppercase tracking-wider mb-4">
+                                Access Denied
+                            </div>
+                            <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-2">
+                                Admin Only
+                            </h2>
+                            <p className="text-degen-text-muted mb-6">
+                                Project creation is currently restricted to platform administrators.
+                            </p>
+                            <DegenButton onClick={() => router.push('/dashboard')} variant="primary">
+                                Back to Dashboard
+                            </DegenButton>
+                        </div>
+                    </DegenCard>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-2 md:px-6">
             <div className="max-w-3xl mx-auto">
@@ -339,12 +379,36 @@ export default function CreateProject() {
                     </div>
                 )}
 
-                {/* Header */}
-                <div className="mb-8">
-                    <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">Create Project</h1>
-                </div>
+                {/* Platform Paused Notice */}
+                {config?.paused && (
+                    <DegenCard variant="white" padding="lg" className="mb-6">
+                        <div className="text-center">
+                            <div className="inline-block px-3 py-1 bg-red-500 text-white text-xs font-bold uppercase tracking-wider mb-4">
+                                Platform Maintenance
+                            </div>
+                            <h2 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-2">
+                                Platform Temporarily Paused
+                            </h2>
+                            <p className="text-degen-text-muted mb-6">
+                                The platform is undergoing maintenance. Project creation is temporarily disabled.
+                                Please check back soon!
+                            </p>
+                            <DegenButton onClick={() => router.push('/dashboard')} variant="primary">
+                                Back to Dashboard
+                            </DegenButton>
+                        </div>
+                    </DegenCard>
+                )}
 
-                {/* Progress Steps */}
+                {/* Main Form Content - Hidden when platform is paused */}
+                {!config?.paused && (
+                    <>
+                        {/* Header */}
+                        <div className="mb-8">
+                            <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">Create Project</h1>
+                        </div>
+
+                        {/* Progress Steps */}
                 <div className="flex mb-8 gap-2">
                     <div className={`flex-1 h-1 ${step >= 1 ? 'bg-degen-black' : 'bg-degen-text-light'}`} />
                     <div className={`flex-1 h-1 ${step >= 2 ? 'bg-degen-black' : 'bg-degen-text-light'}`} />
@@ -665,6 +729,8 @@ export default function CreateProject() {
                             </DegenButton>
                         </div>
                     </DegenCard>
+                )}
+                </>
                 )}
             </div>
         </div>

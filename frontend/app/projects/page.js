@@ -2,7 +2,6 @@
 // Browse all projects on the platform
 
 import ProjectsGrid from '@/components/projects/ProjectsGrid';
-import BetaGate from '@/components/auth/BetaGate';
 
 export const metadata = {
     title: 'Browse Projects | DegenBox',
@@ -11,8 +10,6 @@ export const metadata = {
 
 export default function ProjectsPage() {
     return (
-        <BetaGate>
-            <ProjectsGrid />
-        </BetaGate>
+        <ProjectsGrid />
     );
 }

@@ -1924,6 +1924,10 @@ export type LootboxPlatform = {
           {
             "name": "snapshotGamePreset",
             "type": "u8"
+          },
+          {
+            "name": "purchasedPrice",
+            "type": "u64"
           }
         ]
       }

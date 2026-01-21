@@ -39,7 +39,7 @@ export function DegenTabsList({ children, className = '' }) {
     );
 }
 
-export function DegenTabsTrigger({ children, value, className = '', disabled = false }) {
+export function DegenTabsTrigger({ children, value, className = '', disabled = false, label }) {
     const context = useContext(TabsContext);
     const isActive = context?.value === value;
 
@@ -54,13 +54,21 @@ export function DegenTabsTrigger({ children, value, className = '', disabled = f
                 transition-colors duration-100
                 ${isActive
                     ? 'bg-degen-black text-degen-white'
-                    : 'bg-degen-white text-degen-black hover:bg-degen-black hover:text-degen-white'
+                    : disabled
+                        ? 'bg-white/10 cursor-not-allowed'
+                        : 'bg-degen-white text-degen-black hover:bg-degen-black hover:text-degen-white cursor-pointer'
                 }
-                ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                 ${className}
             `}
         >
-            {children}
+            {label ? (
+                <>
+                    <span className={disabled && !isActive ? 'opacity-50' : ''}>{label}</span>
+                    {children}
+                </>
+            ) : (
+                <span className={disabled && !isActive ? 'opacity-50' : ''}>{children}</span>
+            )}
         </button>
     );
 }

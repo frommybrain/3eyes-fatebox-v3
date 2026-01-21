@@ -442,6 +442,8 @@ pub mod lootbox_platform {
         box_instance.randomness_committed = false; // Will be true after commit_box
         box_instance.committed_slot = 0; // Set during commit_box
         box_instance.snapshot_game_preset = 0; // Set during commit_box
+        // SECURITY: Store price at purchase time to protect against price manipulation
+        box_instance.purchased_price = project_config.box_price;
 
         // Update project stats
         project_config.total_boxes_created = box_id;
@@ -651,10 +653,12 @@ pub mod lootbox_platform {
         // Calculate reward based on luck and randomness using config values
         // SECURITY: Use the SNAPSHOTTED game preset from commit time, not current project config
         // This prevents admin from changing odds after user commits
+        // SECURITY: Use purchased_price (frozen at purchase time) instead of current box_price
+        // This prevents reward manipulation via price changes after purchase
         let (reward_amount, is_jackpot, reward_tier) = calculate_reward_from_config(
             current_luck,
             random_basis_points,
-            project_config.box_price,
+            box_instance.purchased_price,
             platform_config,
             box_instance.snapshot_game_preset, // Use snapshot, not project_config.game_preset
         )?;
@@ -894,18 +898,20 @@ pub mod lootbox_platform {
         // During purchase: commission goes to treasury, remainder goes to vault
         // Refund should only return what's in vault (box_price - commission)
         // This prevents fund drainage where vault pays more than it received
+        // SECURITY: Use purchased_price (frozen at purchase time) instead of current box_price
+        // This ensures refund matches what was actually paid
         let commission_bps = platform_config.platform_commission_bps as u64;
-        let commission_amount = project_config.box_price
+        let commission_amount = box_instance.purchased_price
             .checked_mul(commission_bps)
             .ok_or(LootboxError::ArithmeticOverflow)?
             .checked_div(10000)
             .ok_or(LootboxError::ArithmeticOverflow)?;
-        let refund_amount = project_config.box_price
+        let refund_amount = box_instance.purchased_price
             .checked_sub(commission_amount)
             .ok_or(LootboxError::ArithmeticOverflow)?;
 
-        msg!("Refund calculation: box_price={}, commission={}bps ({}), refund={}",
-            project_config.box_price, commission_bps, commission_amount, refund_amount);
+        msg!("Refund calculation: purchased_price={}, commission={}bps ({}), refund={}",
+            box_instance.purchased_price, commission_bps, commission_amount, refund_amount);
 
         // Verify vault has sufficient balance
         require!(
@@ -1926,11 +1932,13 @@ pub struct BoxInstance {
     pub committed_slot: u64,          // 8 bytes - Slot when randomness was committed
     // SECURITY: Snapshot game preset at commit time to prevent mid-game odds manipulation
     pub snapshot_game_preset: u8,     // 1 byte - Game preset frozen at commit time
+    // SECURITY: Store box price at purchase time to prevent reward manipulation via price changes
+    pub purchased_price: u64,         // 8 bytes - Box price frozen at purchase time
 }
 
 impl BoxInstance {
-    // Updated: 118 + 8 (committed_slot) + 1 (snapshot_game_preset) = 127 bytes
-    pub const LEN: usize = 8 + 8 + 32 + 8 + 8 + 1 + 1 + 1 + 8 + 1 + 8 + 1 + 32 + 1 + 8 + 1;
+    // Updated: 127 + 8 (purchased_price) = 135 bytes
+    pub const LEN: usize = 8 + 8 + 32 + 8 + 8 + 1 + 1 + 1 + 8 + 1 + 8 + 1 + 32 + 1 + 8 + 1 + 8;
 }
 
 // ============================================================================

@@ -40,6 +40,9 @@ import ProfileStats from '@/components/profile/ProfileStats';
 import ProfileBadges from '@/components/profile/ProfileBadges';
 import DegenAccordion from '@/components/ui/DegenAccordion';
 
+// Super admin wallet - only this wallet can access My Projects tab
+const SUPER_ADMIN_WALLET = 'Fop6HTZr57VAHw8t2S8MGwJvxJ9BGWHvLfLrRajKMv6';
+
 // ===== TESTING CONFIG =====
 // Set to 30 for quick testing, 3600 for production (1 hour)
 const REVEAL_WINDOW_SECONDS = 3600;
@@ -158,6 +161,9 @@ export default function Dashboard() {
     // Network badge
     const isDevnet = config?.network === 'devnet';
 
+    // Check if current user is the super admin
+    const isAdmin = publicKey?.toString() === SUPER_ADMIN_WALLET;
+
     return (
         <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-2 md:px-4">
             <div className="w-full mx-auto">
@@ -188,26 +194,42 @@ export default function Dashboard() {
                 </div>
 
                 {/* Tab Navigation */}
-                <DegenTabs value={activeTab} onValueChange={setActiveTab}>
+                <DegenTabs value={activeTab} onValueChange={(value) => {
+                    // Prevent non-admins from accessing projects tab
+                    if (value === 'projects' && !isAdmin) return;
+                    setActiveTab(value);
+                }}>
                     <DegenTabsList className="mb-4">
                         <DegenTabsTrigger value="boxes">
                             My Boxes
                         </DegenTabsTrigger>
-                        <DegenTabsTrigger value="projects">
-                            My Projects
+                        <DegenTabsTrigger
+                            value="projects"
+                            disabled={!isAdmin}
+                            className={!isAdmin ? 'relative' : ''}
+                            label="My Projects"
+                        >
+                            {!isAdmin && (
+                                <span className="absolute -top-2 -right-3 px-1.5 py-0.5 text-[10px] font-bold uppercase bg-degen-yellow text-degen-black rounded-sm whitespace-nowrap">
+                                    Coming Soon
+                                </span>
+                            )}
                         </DegenTabsTrigger>
                         <DegenTabsTrigger value="profile">
                             Profile
                         </DegenTabsTrigger>
                     </DegenTabsList>
 
-                    <DegenTabsContent value="projects">
-                        <MyProjectsTab
-                            projects={projects}
-                            projectsLoading={projectsLoading}
-                            projectsError={projectsError}
-                        />
-                    </DegenTabsContent>
+                    {/* Only render projects tab content for admins */}
+                    {isAdmin && (
+                        <DegenTabsContent value="projects">
+                            <MyProjectsTab
+                                projects={projects}
+                                projectsLoading={projectsLoading}
+                                projectsError={projectsError}
+                            />
+                        </DegenTabsContent>
+                    )}
 
                     <DegenTabsContent value="boxes">
                         <MyBoxesTab walletAddress={publicKey?.toString()} />
@@ -247,7 +269,7 @@ function MyProjectsTab({ projects, projectsLoading, projectsError }) {
             ) : projects.length === 0 ? (
                 <DegenEmptyState
                     title="No Projects Yet"
-                    description="Spin up your first Degenbox project"
+                    description="Create your first DegenBox project"
                     action="Create Your First Project"
                     actionHref="/dashboard/create"
                 />
@@ -686,7 +708,7 @@ function MyBoxesTab({ walletAddress }) {
             <DegenEmptyState
                 icon=""
                 title="No Boxes Yet"
-                description="You haven't purchased any lootboxes yet. Browse projects to get started!"
+                description="You haven't purchased any lootboxes yet"
             />
         );
     }

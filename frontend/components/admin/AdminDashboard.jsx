@@ -735,45 +735,7 @@ export default function AdminDashboard() {
                             </div>
                         </div>
 
-                        {/* Game Settings Notice */}
-                        <div className="mb-8 p-6 bg-degen-yellow border border-degen-black">
-                            <h3 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-4">Game Settings</h3>
-                            <p className="text-degen-black text-sm">
-                                Game settings (luck interval, payout multipliers, tier probabilities) are now managed in the
-                                <strong> On-Chain Config</strong> tab. These values are stored on the Solana blockchain for
-                                provable fairness.
-                            </p>
-                            <DegenButton
-                                onClick={() => {
-                                    setActiveTab('onchain');
-                                    if (!onChainConfig) loadOnChainConfig();
-                                }}
-                                variant="primary"
-                                size="sm"
-                                className="mt-4"
-                            >
-                                Go to On-Chain Config
-                            </DegenButton>
-                        </div>
-
-                        {/* Project Creation Settings Section */}
-                        <div className="mb-8 p-6 bg-degen-bg border border-degen-black">
-                            <h3 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-4">Project Creation Settings</h3>
-
-                            {/* Dynamic Vault Funding Info */}
-                            <div className="p-4 bg-degen-yellow border border-degen-black">
-                                <p className="text-degen-black font-medium mb-2">Dynamic Vault Funding</p>
-                                <p className="text-degen-black text-sm mb-2">
-                                    Vault funding is now calculated dynamically based on the project&apos;s box price.
-                                    This ensures creators only need to fund what&apos;s statistically required.
-                                </p>
-                                <div className="text-degen-black text-sm space-y-1">
-                                    <p><strong>Formula:</strong> ~30x box price (minimum)</p>
-                                    <p><strong>Based on:</strong> 99th percentile worst-case variance analysis</p>
-                                    <p><strong>Example:</strong> 1,000 token box price → ~30,000 token vault funding</p>
-                                </div>
-                            </div>
-                        </div>
+                        
 
                         {/* Fees Section */}
                         <div className="mb-8 p-6 bg-degen-bg border border-degen-black">
@@ -797,14 +759,7 @@ export default function AdminDashboard() {
                                 </p>
                             </div>
 
-                            {/* Box Commission Note */}
-                            <div className="p-4 bg-degen-yellow border border-degen-black">
-                                <p className="text-degen-black font-medium mb-1">Box Commission</p>
-                                <p className="text-degen-black text-sm">
-                                    Platform revenue is collected via box purchase commission (configured in On-Chain Config tab).
-                                    No withdrawal fees are charged to creators.
-                                </p>
-                            </div>
+                            
                         </div>
 
                         {/* Current Values Display */}
@@ -1241,16 +1196,7 @@ export default function AdminDashboard() {
                                                     <p className="text-sm text-degen-text-muted">{getAdvice(tier3EV * 100, 'Tier 3')}</p>
                                                 </div>
 
-                                                {/* Summary */}
-                                                <div className="p-4 bg-degen-yellow border border-degen-black">
-                                                    <p className="text-degen-black font-medium mb-2">Quick Reference:</p>
-                                                    <ul className="text-sm text-degen-black space-y-1">
-                                                        <li>• <strong>Slots/Pokies:</strong> 85-95% RTP typical</li>
-                                                        <li>• <strong>Roulette:</strong> 94.7% RTP (single zero)</li>
-                                                        <li>• <strong>Recommended:</strong> Tier 1: 70-80% | Tier 2: 80-90% | Tier 3: 90-98%</li>
-                                                        <li>• <strong>Key insight:</strong> High RTP keeps players engaged; house edge compounds over volume</li>
-                                                    </ul>
-                                                </div>
+                                                
                                             </div>
                                         );
                                     })()}

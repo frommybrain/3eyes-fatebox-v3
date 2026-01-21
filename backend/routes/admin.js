@@ -428,10 +428,14 @@ router.post('/toggle-pause', requireSuperAdmin, async (req, res) => {
 
         // Log the action (don't let logging failure crash the response)
         try {
-            logger.log(EventTypes.ADMIN_EMERGENCY_ACTION, {
-                action: paused ? 'PLATFORM_PAUSED' : 'PLATFORM_UNPAUSED',
-                signature,
-                admin: adminKeypair.publicKey.toString(),
+            logger.log({
+                eventType: EventTypes.ADMIN_EMERGENCY_ACTION,
+                severity: Severity.WARNING,
+                actorWallet: adminKeypair.publicKey.toString(),
+                txSignature: signature,
+                metadata: {
+                    action: paused ? 'PLATFORM_PAUSED' : 'PLATFORM_UNPAUSED',
+                },
             });
         } catch (logError) {
             console.error('Failed to log emergency action:', logError);

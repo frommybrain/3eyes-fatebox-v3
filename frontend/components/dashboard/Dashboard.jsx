@@ -32,6 +32,7 @@ import {
     MyProfileTabSkeleton,
     DashboardSkeleton,
     BoxCardSkeleton,
+    OpenBoxConfirmModal,
 } from '@/components/ui';
 import { getWinShareHandler, getMyProjectShareHandler } from '@/lib/shareManager';
 import TrophyCabinet from '@/components/profile/TrophyCabinet';
@@ -1039,6 +1040,9 @@ function BoxCard({ box, project, onRefresh }) {
     const [showWinModal, setShowWinModal] = useState(false);
     const [winData, setWinData] = useState(null);
 
+    // Open box confirmation modal state
+    const [showOpenConfirm, setShowOpenConfirm] = useState(false);
+
     // Optimistic box state for instant UI feedback
     const [optimisticBox, setOptimisticBox] = useOptimistic(
         box,
@@ -1165,6 +1169,23 @@ function BoxCard({ box, project, onRefresh }) {
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
         return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    // Calculate current luck based on hold time
+    const calculateCurrentLuck = () => {
+        if (!box.created_at || !config) return config?.baseLuck || 5;
+
+        const createdTime = parseAsUTC(box.created_at);
+        if (!createdTime) return config?.baseLuck || 5;
+
+        const holdTimeSeconds = Math.floor((Date.now() - createdTime) / 1000);
+        // Use project's luck interval if set, otherwise platform default
+        const luckInterval = project?.luck_interval_seconds || config?.luckIntervalSeconds || 3600;
+        const baseLuck = config?.baseLuck || 5;
+        const maxLuck = config?.maxLuck || 60;
+
+        const bonusLuck = Math.floor(holdTimeSeconds / luckInterval);
+        return Math.min(baseLuck + bonusLuck, maxLuck);
     };
 
     // Format payout amount
@@ -2183,7 +2204,7 @@ function BoxCard({ box, project, onRefresh }) {
                 {isPending ? (
                     // Step 1: Open Box (commit randomness) - with cooldown after purchase
                     <button
-                        onClick={handleCommit}
+                        onClick={() => setShowOpenConfirm(true)}
                         disabled={isProcessing || (commitCooldown !== null && commitCooldown > 0)}
                         className={`
                             relative w-full h-[36px] text-sm font-medium uppercase tracking-wider
@@ -2304,6 +2325,20 @@ function BoxCard({ box, project, onRefresh }) {
                     token: winData.tokenSymbol,
                     projectUrl: winData.projectUrl,
                 }) : null}
+            />
+
+            {/* Open Box Confirmation Modal */}
+            <OpenBoxConfirmModal
+                isOpen={showOpenConfirm}
+                onClose={() => setShowOpenConfirm(false)}
+                onConfirm={() => {
+                    setShowOpenConfirm(false);
+                    handleCommit();
+                }}
+                boxNumber={box.box_number}
+                currentLuck={calculateCurrentLuck()}
+                maxLuck={config?.maxLuck || 60}
+                isProcessing={isProcessing && processingStep === 'commit'}
             />
         </div>
     );

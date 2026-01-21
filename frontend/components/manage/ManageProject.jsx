@@ -165,10 +165,6 @@ export default function ManageProject({ projectId }) {
         handleUpdate({ is_paused: !project.is_paused });
     };
 
-    const toggleActive = () => {
-        handleUpdate({ is_active: !project.is_active });
-    };
-
     // Update luck interval (on-chain + database)
     const handleUpdateLuckInterval = async () => {
         if (!project || !publicKey || !sendTransaction) return;
@@ -622,35 +618,18 @@ function OverviewTab({ project, projectUrl, saving, toggleActive, togglePause })
                     <div className="space-y-4">
                         <div className="flex items-center justify-between p-4 bg-degen-bg border border-degen-black">
                             <div>
-                                <h3 className="text-degen-black font-medium uppercase tracking-wider">Active Status</h3>
+                                <h3 className="text-degen-black font-medium uppercase tracking-wider">Box Sales</h3>
                                 <p className="text-sm text-degen-text-muted">
-                                    {project.is_active ? 'Project is live and accepting boxes' : 'Project is inactive'}
-                                </p>
-                            </div>
-                            <DegenButton
-                                onClick={toggleActive}
-                                disabled={saving}
-                                variant={project.is_active ? 'success' : 'feature'}
-                                size="sm"
-                            >
-                                {project.is_active ? 'Active' : 'Inactive'}
-                            </DegenButton>
-                        </div>
-
-                        <div className="flex items-center justify-between p-4 bg-degen-bg border border-degen-black">
-                            <div>
-                                <h3 className="text-degen-black font-medium uppercase tracking-wider">Paused Status</h3>
-                                <p className="text-sm text-degen-text-muted">
-                                    {project.is_paused ? 'New boxes are paused' : 'Accepting new boxes'}
+                                    {project.is_paused ? 'Box sales are paused - users cannot purchase new boxes' : 'Project is live and accepting box purchases'}
                                 </p>
                             </div>
                             <DegenButton
                                 onClick={togglePause}
                                 disabled={saving}
-                                variant={project.is_paused ? 'warning' : 'blue'}
+                                variant={project.is_paused ? 'warning' : 'success'}
                                 size="sm"
                             >
-                                {project.is_paused ? 'Paused' : 'Running'}
+                                {project.is_paused ? 'Paused' : 'Live'}
                             </DegenButton>
                         </div>
                     </div>

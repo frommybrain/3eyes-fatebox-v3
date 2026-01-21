@@ -375,3 +375,90 @@ export function ProjectCreatedModal({
         </DegenModal>
     );
 }
+
+/**
+ * OpenBoxConfirmModal - Confirmation modal before opening a box
+ * Explains what happens during the reveal process
+ */
+export function OpenBoxConfirmModal({
+    isOpen,
+    onClose,
+    onConfirm,
+    boxNumber,
+    currentLuck,
+    maxLuck,
+    isProcessing = false,
+}) {
+    return (
+        <DegenModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Open Box"
+            variant="default"
+            showClose={!isProcessing}
+            closeOnBackdrop={!isProcessing}
+            size="md"
+        >
+            <div className="py-2">
+                <p className="text-degen-black text-lg font-medium mb-4">
+                    Ready to open Box #{boxNumber}?
+                </p>
+
+                <div className="bg-degen-bg border border-degen-black p-4 mb-4">
+                    <p className="text-degen-text-muted text-sm uppercase tracking-wider mb-3">
+                        What happens next:
+                    </p>
+                    <ul className="space-y-2 text-sm text-degen-black">
+                        <li className="flex items-start gap-2">
+                            <span className="text-degen-blue font-bold">1.</span>
+                            <span>Your luck score will be <strong>frozen</strong> at {currentLuck || '?'}/{maxLuck || 60}</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                            <span className="text-degen-blue font-bold">2.</span>
+                            <span>Wait <strong>~10 seconds</strong> for the oracle to generate randomness</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                            <span className="text-degen-blue font-bold">3.</span>
+                            <span>Click <strong>Reveal</strong> to see your result</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                            <span className="text-degen-blue font-bold">4.</span>
+                            <span>Winnings are <strong>automatically claimed</strong> to your wallet</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <div className="bg-degen-yellow/20 border border-degen-yellow p-3 mb-4">
+                    <p className="text-degen-black text-sm">
+                        <strong>Important:</strong> You must reveal within <strong>1 hour</strong> of opening, or the box expires as a Dud.
+                    </p>
+                </div>
+
+                <div className="flex gap-2">
+                    <DegenButton
+                        onClick={onClose}
+                        variant="secondary"
+                        size="md"
+                        disabled={isProcessing}
+                        className="flex-1"
+                    >
+                        Cancel
+                    </DegenButton>
+                    <DegenButton
+                        onClick={onConfirm}
+                        variant="primary"
+                        size="md"
+                        disabled={isProcessing}
+                        className="flex-1"
+                    >
+                        {isProcessing ? 'Opening...' : 'Open Box'}
+                    </DegenButton>
+                </div>
+
+                <p className="text-degen-text-muted text-xs text-center mt-3">
+                    Good luck!
+                </p>
+            </div>
+        </DegenModal>
+    );
+}

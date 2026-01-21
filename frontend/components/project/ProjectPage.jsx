@@ -324,22 +324,84 @@ export default function ProjectPage({ subdomain }) {
         } catch (error) {
             console.error('❌ Box purchase failed:', error);
 
-            // Check if partial success
-            if (purchaseProgress && purchaseProgress.boxesPurchased > 0) {
-                toast.warning(`Purchased ${purchaseProgress.boxesPurchased} boxes before error occurred.`, {
-                    title: 'Partial Purchase',
-                    duration: 8000,
+            // Get how many boxes were actually purchased before the error
+            const boxesPurchased = purchaseProgress?.boxesPurchased || 0;
+
+            // Handle partial success vs total failure
+            if (boxesPurchased > 0) {
+                // Partial success - update expected count so camera returns after these boxes drop
+                usePurchasingStore.getState().startPurchasing(boxesPurchased);
+
+                // Check if user rejected/cancelled vs other error
+                const errorLower = (error.message || '').toLowerCase();
+                const wasCancelled = errorLower.includes('user rejected') ||
+                    errorLower.includes('rejected the request') ||
+                    errorLower.includes('user denied');
+
+                if (wasCancelled) {
+                    toast.info(`Purchased ${boxesPurchased} boxes. Remaining boxes were cancelled.`, {
+                        title: 'Partial Purchase',
+                        duration: 8000,
+                    });
+                } else {
+                    toast.warning(`Purchased ${boxesPurchased} boxes before error occurred. Check your dashboard for details.`, {
+                        title: 'Partial Purchase',
+                        duration: 8000,
+                    });
+                }
+
+                // Show dashboard link after partial purchase
+                setTimeout(() => {
+                    toast.info(
+                        <span>
+                            View your {boxesPurchased} boxes in your{' '}
+                            <a href="https://degenbox.fun/dashboard" className="underline font-medium hover:text-white">
+                                dashboard
+                            </a>
+                        </span>,
+                        {
+                            title: 'Boxes Ready!',
+                            duration: 10000,
+                        }
+                    );
+                }, 1000);
+
+                // Refresh project data
+                startTransition(() => {
+                    setOptimisticProject({
+                        total_boxes_created: (currentProject.total_boxes_created || 0) + boxesPurchased
+                    });
+                    refreshCurrentProject(subdomain);
                 });
             } else {
-                toast.error(error.message || 'Failed to purchase boxes. Please try again.', {
-                    title: 'Purchase Failed',
-                    duration: 6000,
-                });
+                // Total failure - end purchasing immediately since no boxes will drop
+                usePurchasingStore.getState().endPurchasing();
+
+                // Show appropriate error message
+                const errorLower = (error.message || '').toLowerCase();
+                if (errorLower.includes('user rejected') || errorLower.includes('rejected the request')) {
+                    toast.info('Transaction cancelled.', {
+                        title: 'Cancelled',
+                        duration: 4000,
+                    });
+                } else if (errorLower.includes('insufficient')) {
+                    toast.error('Insufficient funds. Please check your wallet balance.', {
+                        title: 'Purchase Failed',
+                        duration: 6000,
+                    });
+                } else {
+                    toast.error(error.message || 'Failed to purchase boxes. Please try again.', {
+                        title: 'Purchase Failed',
+                        duration: 6000,
+                    });
+                }
             }
+
+            // Refresh balances regardless of outcome
+            fetchBalances();
         } finally {
             setLocalPurchasing(false);
             setPurchaseProgress(null);
-            // Note: endPurchasing() is called by DroppingBoxManager when all boxes have dropped
         }
     };
 

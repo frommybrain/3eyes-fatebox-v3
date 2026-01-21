@@ -339,12 +339,12 @@ export default function ProjectPage({ subdomain }) {
                     errorLower.includes('user denied');
 
                 if (wasCancelled) {
-                    toast.info(`Purchased ${totalBoxesPurchased} boxes. Remaining boxes were cancelled.`, {
+                    toast.success(`Purchased ${totalBoxesPurchased} boxes. Remaining boxes were cancelled.`, {
                         title: 'Partial Purchase',
                         duration: 8000,
                     });
                 } else {
-                    toast.warning(`Purchased ${totalBoxesPurchased} boxes before error occurred. Check your dashboard for details.`, {
+                    toast.success(`Purchased ${totalBoxesPurchased} boxes before error occurred. Check your dashboard for details.`, {
                         title: 'Partial Purchase',
                         duration: 8000,
                     });

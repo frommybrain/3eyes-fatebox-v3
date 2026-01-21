@@ -552,7 +552,6 @@ export default function ManageProject({ projectId }) {
                             project={project}
                             projectUrl={projectUrl}
                             saving={saving}
-                            toggleActive={toggleActive}
                             togglePause={togglePause}
                         />
                     </DegenTabsContent>
@@ -600,7 +599,7 @@ export default function ManageProject({ projectId }) {
 // ============================================================================
 // Overview Tab
 // ============================================================================
-function OverviewTab({ project, projectUrl, saving, toggleActive, togglePause }) {
+function OverviewTab({ project, projectUrl, saving, togglePause }) {
     return (
         <div className="space-y-6">
             {/* Project Status */}

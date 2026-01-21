@@ -730,6 +730,18 @@ pub mod lootbox_platform {
             ];
             let signer = &[&seeds[..]];
 
+            // SECURITY: Mark as settled BEFORE CPI to prevent reentrancy
+            // If a malicious token program calls back into our program, the box is already settled
+            box_instance.settled = true;
+
+            // Update project stats BEFORE CPI
+            project_config.total_boxes_settled = project_config.total_boxes_settled
+                .checked_add(1)
+                .ok_or(LootboxError::ArithmeticOverflow)?;
+            project_config.total_paid_out = project_config.total_paid_out
+                .checked_add(box_instance.reward_amount)
+                .ok_or(LootboxError::ArithmeticOverflow)?;
+
             let cpi_accounts = Transfer {
                 from: ctx.accounts.vault_token_account.to_account_info(),
                 to: ctx.accounts.owner_token_account.to_account_info(),
@@ -738,18 +750,13 @@ pub mod lootbox_platform {
             let cpi_program = ctx.accounts.token_program.to_account_info();
             let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
             token::transfer(cpi_ctx, box_instance.reward_amount)?;
+        } else {
+            // No reward to transfer, but still mark as settled
+            box_instance.settled = true;
+            project_config.total_boxes_settled = project_config.total_boxes_settled
+                .checked_add(1)
+                .ok_or(LootboxError::ArithmeticOverflow)?;
         }
-
-        // Mark as settled
-        box_instance.settled = true;
-
-        // Update project stats
-        project_config.total_boxes_settled = project_config.total_boxes_settled
-            .checked_add(1)
-            .ok_or(LootboxError::ArithmeticOverflow)?;
-        project_config.total_paid_out = project_config.total_paid_out
-            .checked_add(box_instance.reward_amount)
-            .ok_or(LootboxError::ArithmeticOverflow)?;
 
         msg!("Box settled!");
         msg!("Box ID: {}", box_id);
@@ -883,11 +890,22 @@ pub mod lootbox_platform {
         msg!("Grace period check passed: {} seconds since commit (min: {})",
             time_since_commit, grace_period);
 
-        // Calculate refund amount (box price minus commission that was already taken)
-        // Commission was taken at purchase time, so refund = box_price - commission
-        // Actually, let's refund the full box price from vault
-        // The commission was sent to treasury at purchase, we'll eat that as platform cost
-        let refund_amount = project_config.box_price;
+        // SECURITY: Calculate refund amount as only what the vault received
+        // During purchase: commission goes to treasury, remainder goes to vault
+        // Refund should only return what's in vault (box_price - commission)
+        // This prevents fund drainage where vault pays more than it received
+        let commission_bps = platform_config.platform_commission_bps as u64;
+        let commission_amount = project_config.box_price
+            .checked_mul(commission_bps)
+            .ok_or(LootboxError::ArithmeticOverflow)?
+            .checked_div(10000)
+            .ok_or(LootboxError::ArithmeticOverflow)?;
+        let refund_amount = project_config.box_price
+            .checked_sub(commission_amount)
+            .ok_or(LootboxError::ArithmeticOverflow)?;
+
+        msg!("Refund calculation: box_price={}, commission={}bps ({}), refund={}",
+            project_config.box_price, commission_bps, commission_amount, refund_amount);
 
         // Verify vault has sufficient balance
         require!(
@@ -1704,15 +1722,17 @@ pub struct WithdrawTreasury<'info> {
     /// Treasury's token account for this mint (source)
     #[account(
         mut,
-        constraint = treasury_token_account.owner == treasury.key() @ LootboxError::InvalidRandomnessAccount,
-        constraint = treasury_token_account.mint == token_mint.key() @ LootboxError::InvalidRandomnessAccount
+        constraint = treasury_token_account.owner == treasury.key() @ LootboxError::InvalidTreasuryTokenAccount,
+        constraint = treasury_token_account.mint == token_mint.key() @ LootboxError::InvalidTreasuryTokenAccount
     )]
     pub treasury_token_account: Account<'info, TokenAccount>,
 
     /// Admin's token account (destination)
+    /// SECURITY: Must be owned by the admin to prevent redirecting withdrawals
     #[account(
         mut,
-        constraint = admin_token_account.mint == token_mint.key() @ LootboxError::InvalidRandomnessAccount
+        constraint = admin_token_account.mint == token_mint.key() @ LootboxError::InvalidOwnerTokenAccount,
+        constraint = admin_token_account.owner == admin.key() @ LootboxError::InvalidOwnerTokenAccount
     )]
     pub admin_token_account: Account<'info, TokenAccount>,
 

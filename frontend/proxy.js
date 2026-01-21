@@ -105,6 +105,12 @@ export function proxy(request) {
     // Example: http://localhost:3000?subdomain=catbox
     const devSubdomain = searchParams.get('subdomain');
     if (devSubdomain && (hostname.includes('localhost') || hostname.includes('127.0.0.1'))) {
+        // SECURITY: Validate subdomain format to prevent path traversal
+        const isValidSubdomain = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(devSubdomain);
+        if (!isValidSubdomain) {
+            console.error('Invalid subdomain format in query param:', devSubdomain);
+            return NextResponse.next(); // Ignore invalid subdomain
+        }
         // Rewrite to project page with subdomain as prop
         const url = request.nextUrl.clone();
         url.pathname = `/project/${devSubdomain}${pathname}`;

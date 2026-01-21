@@ -243,12 +243,30 @@ export function generateSubdomain(requestedSubdomain, network) {
 }
 
 /**
+ * Validate subdomain format to prevent URL injection
+ * @param {string} subdomain - Subdomain to validate
+ * @returns {boolean} - True if valid
+ */
+export function isValidSubdomain(subdomain) {
+    if (!subdomain || typeof subdomain !== 'string') return false;
+    // Only allow lowercase alphanumeric and hyphens, 1-63 chars (DNS limit)
+    // Must not start or end with hyphen
+    return /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(subdomain);
+}
+
+/**
  * Get the full URL for a project page
  * Uses NEXT_PUBLIC_PLATFORM_URL if set, otherwise detects localhost vs production
  * @param {string} subdomain - Project subdomain (e.g., 'devnet-myproject')
  * @returns {string} - Full project URL
  */
 export function getProjectUrl(subdomain) {
+    // SECURITY: Validate subdomain format to prevent URL injection/path traversal
+    if (!isValidSubdomain(subdomain)) {
+        console.error('Invalid subdomain format:', subdomain);
+        return '/'; // Return safe fallback
+    }
+
     // Check for explicit platform URL in env
     const platformUrl = process.env.NEXT_PUBLIC_PLATFORM_URL;
     if (platformUrl) {

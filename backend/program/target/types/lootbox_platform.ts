@@ -1624,7 +1624,8 @@ export type LootboxPlatform = {
         {
           "name": "adminTokenAccount",
           "docs": [
-            "Admin's token account (destination)"
+            "Admin's token account (destination)",
+            "SECURITY: Must be owned by the admin to prevent redirecting withdrawals"
           ],
           "writable": true
         },

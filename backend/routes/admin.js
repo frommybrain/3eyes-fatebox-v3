@@ -426,12 +426,16 @@ router.post('/toggle-pause', requireSuperAdmin, async (req, res) => {
         // Clear config cache so next read gets updated state
         clearConfigCache();
 
-        // Log the action
-        logger.log(EventTypes.ADMIN_EMERGENCY_ACTION, {
-            action: paused ? 'PLATFORM_PAUSED' : 'PLATFORM_UNPAUSED',
-            signature,
-            admin: adminKeypair.publicKey.toString(),
-        });
+        // Log the action (don't let logging failure crash the response)
+        try {
+            logger.log(EventTypes.ADMIN_EMERGENCY_ACTION, {
+                action: paused ? 'PLATFORM_PAUSED' : 'PLATFORM_UNPAUSED',
+                signature,
+                admin: adminKeypair.publicKey.toString(),
+            });
+        } catch (logError) {
+            console.error('Failed to log emergency action:', logError);
+        }
 
         return res.json({
             success: true,

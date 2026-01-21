@@ -606,14 +606,18 @@ pub mod lootbox_platform {
         // SECURITY: Validate that randomness was generated AFTER the commit slot
         // This prevents users from pre-generating favorable randomness
         // The seed_slot is when the randomness request was created
+        // NOTE: Skip validation for boxes created before program update (committed_slot = 0)
         let seed_slot = randomness_data.seed_slot;
-        require!(
-            seed_slot >= box_instance.committed_slot,
-            LootboxError::RandomnessGeneratedBeforeCommit
-        );
-
-        msg!("Randomness slot validation: seed_slot={} >= committed_slot={}",
-            seed_slot, box_instance.committed_slot);
+        if box_instance.committed_slot > 0 {
+            require!(
+                seed_slot >= box_instance.committed_slot,
+                LootboxError::RandomnessGeneratedBeforeCommit
+            );
+            msg!("Randomness slot validation: seed_slot={} >= committed_slot={}",
+                seed_slot, box_instance.committed_slot);
+        } else {
+            msg!("Skipping slot validation for legacy box (committed_slot=0)");
+        }
 
         // Get the revealed random value (32 bytes) using SDK method
         // This validates that randomness has been revealed and returns the value

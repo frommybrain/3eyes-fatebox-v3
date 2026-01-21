@@ -65,6 +65,30 @@ export function isValidSolanaAddress(address) {
 }
 
 /**
+ * Validate a numeric project ID
+ * @param {string|number} id - The ID to validate
+ * @returns {Object} - { valid: boolean, value: number|null, error: string|null }
+ */
+export function validateNumericId(id) {
+    const numericId = parseInt(id, 10);
+
+    if (isNaN(numericId)) {
+        return { valid: false, value: null, error: 'Invalid ID format - must be a number' };
+    }
+
+    if (numericId <= 0) {
+        return { valid: false, value: null, error: 'Invalid ID - must be positive' };
+    }
+
+    // Prevent extremely large IDs that could cause issues
+    if (numericId > 2147483647) { // Max safe 32-bit integer
+        return { valid: false, value: null, error: 'Invalid ID - value too large' };
+    }
+
+    return { valid: true, value: numericId, error: null };
+}
+
+/**
  * Sanitize an error message for client response
  * Removes sensitive information like file paths, stack traces, etc.
  * @param {string} message - Original error message
@@ -266,12 +290,127 @@ export function extractTransactionLogs(transaction, pattern) {
     return logs.filter(log => regex.test(log));
 }
 
+/**
+ * Extract withdrawal amount from program logs
+ * Looks for "Withdrawal amount: X" pattern in transaction logs
+ *
+ * @param {Object} transaction - Transaction object from getTransaction
+ * @returns {bigint|null} - Withdrawal amount or null if not found
+ */
+export function extractWithdrawalAmountFromLogs(transaction) {
+    const logs = transaction?.meta?.logMessages || [];
+    for (const log of logs) {
+        // Match "Withdrawal amount: 123456" pattern
+        const match = log.match(/Withdrawal amount:\s*(\d+)/);
+        if (match) {
+            return BigInt(match[1]);
+        }
+    }
+    return null;
+}
+
+/**
+ * Extract the first signer from a transaction
+ * The first signer is typically the fee payer / transaction initiator
+ *
+ * @param {Object} transaction - Transaction object from getTransaction
+ * @returns {string|null} - Public key string of first signer or null
+ */
+export function extractTransactionSigner(transaction) {
+    if (!transaction?.transaction?.message) {
+        return null;
+    }
+
+    const message = transaction.transaction.message;
+
+    // Get account keys
+    let accountKeys;
+    if (message.staticAccountKeys) {
+        accountKeys = message.staticAccountKeys;
+    } else if (message.accountKeys) {
+        accountKeys = message.accountKeys;
+    } else {
+        return null;
+    }
+
+    // First account is typically the fee payer/signer
+    if (accountKeys.length > 0) {
+        return accountKeys[0].toString();
+    }
+
+    return null;
+}
+
+/**
+ * Verify a withdrawal transaction matches expected parameters
+ *
+ * @param {Object} transaction - Transaction object from getTransaction
+ * @param {string} expectedOwner - Expected owner wallet address
+ * @param {string|bigint} expectedAmount - Expected withdrawal amount
+ * @param {number} tolerance - Amount tolerance in basis points (default: 100 = 1%)
+ * @returns {Object} - { valid: boolean, actualAmount: bigint|null, actualSigner: string|null, error: string|null }
+ */
+export function verifyWithdrawalTransaction(transaction, expectedOwner, expectedAmount, tolerance = 100) {
+    const actualAmount = extractWithdrawalAmountFromLogs(transaction);
+    const actualSigner = extractTransactionSigner(transaction);
+
+    if (!actualAmount) {
+        return {
+            valid: false,
+            actualAmount: null,
+            actualSigner,
+            error: 'Could not extract withdrawal amount from transaction logs',
+        };
+    }
+
+    if (!actualSigner) {
+        return {
+            valid: false,
+            actualAmount,
+            actualSigner: null,
+            error: 'Could not extract transaction signer',
+        };
+    }
+
+    // Verify signer is the expected owner
+    if (actualSigner !== expectedOwner) {
+        return {
+            valid: false,
+            actualAmount,
+            actualSigner,
+            error: `Transaction signer (${actualSigner}) does not match project owner (${expectedOwner})`,
+        };
+    }
+
+    // Verify amount matches within tolerance
+    const expected = BigInt(expectedAmount);
+    const diff = actualAmount > expected ? actualAmount - expected : expected - actualAmount;
+    const toleranceAmount = (expected * BigInt(tolerance)) / BigInt(10000);
+
+    if (diff > toleranceAmount) {
+        return {
+            valid: false,
+            actualAmount,
+            actualSigner,
+            error: `Withdrawal amount mismatch. Expected: ${expected}, Actual: ${actualAmount}`,
+        };
+    }
+
+    return {
+        valid: true,
+        actualAmount,
+        actualSigner,
+        error: null,
+    };
+}
+
 export default {
     formatTokenAmount,
     formatTokenDisplay,
     toRawTokenAmount,
     getApiBaseUrl,
     isValidSolanaAddress,
+    validateNumericId,
     sanitizeErrorMessage,
     sleep,
     retryWithBackoff,
@@ -279,4 +418,7 @@ export default {
     verifyTransaction,
     transactionInvokedProgram,
     extractTransactionLogs,
+    extractWithdrawalAmountFromLogs,
+    extractTransactionSigner,
+    verifyWithdrawalTransaction,
 };

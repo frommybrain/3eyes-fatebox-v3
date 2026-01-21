@@ -39,7 +39,7 @@ import {
 } from '../lib/evCalculator.js';
 import logger, { EventTypes, Severity, ActorTypes } from '../lib/logger.js';
 import { getRandomBadgeId } from '../config/badges.js';
-import { verifyTransaction, transactionInvokedProgram } from '../lib/utils.js';
+import { verifyTransaction, transactionInvokedProgram, sanitizeErrorMessage } from '../lib/utils.js';
 
 const router = express.Router();
 
@@ -321,7 +321,7 @@ router.post('/build-initialize-project-tx', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to build initialize project transaction',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -477,7 +477,7 @@ router.post('/confirm-project-init', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to confirm project initialization',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -609,7 +609,7 @@ router.post('/build-fund-vault-tx', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to build fund vault transaction',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -689,7 +689,7 @@ router.post('/confirm-vault-funding', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to confirm vault funding',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -793,7 +793,7 @@ router.get('/project/:projectId', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to fetch project',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -858,7 +858,7 @@ router.post('/derive-pdas', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to derive PDAs',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
             stack: error.stack,
         });
     }
@@ -1071,7 +1071,7 @@ router.post('/build-create-box-tx', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to build create box transaction',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -1225,7 +1225,7 @@ router.post('/confirm-box-creation', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to confirm box creation',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -1453,7 +1453,7 @@ router.post('/build-create-boxes-batch-tx', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to build batch create box transaction',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -1598,7 +1598,7 @@ router.post('/confirm-boxes-batch', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to confirm batch box creation',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -1768,7 +1768,7 @@ router.post('/build-commit-box-tx', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to build commit box transaction',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -1909,7 +1909,7 @@ router.post('/confirm-commit', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to confirm commit',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -2503,7 +2503,7 @@ router.post('/build-reveal-box-tx', async (req, res) => {
             success: false,
             error: errorMessage,
             errorCode,
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
             isRetryable,
             retryAfterSeconds,
             refundEligible: isOracleFailure,
@@ -2724,7 +2724,7 @@ router.post('/confirm-reveal', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to confirm box reveal',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -2938,7 +2938,7 @@ router.post('/build-settle-box-tx', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to build settle box transaction',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -3079,7 +3079,7 @@ router.post('/confirm-settle', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to confirm box settlement',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -3173,7 +3173,7 @@ router.get('/box/:projectId/:boxId', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to fetch box',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -3269,7 +3269,7 @@ router.post('/build-update-project-tx', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to build update project transaction',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -3357,7 +3357,7 @@ router.post('/mark-reveal-failed', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to mark reveal failed',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -3553,7 +3553,7 @@ router.post('/build-refund-box-tx', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to build refund transaction',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -3699,7 +3699,7 @@ router.post('/confirm-refund', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to confirm refund',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });

@@ -146,14 +146,21 @@ router.get('/', requireSuperAdmin, async (req, res) => {
             query = query.lte('created_at', endDate);
         }
 
-        // Text search in error_message and metadata
+        // Text search in error_message - sanitize input to prevent injection
         if (search) {
-            query = query.or(`error_message.ilike.%${search}%,metadata.cs.{"search":"${search}"}`);
+            // Escape special PostgREST characters
+            const sanitizedSearch = search
+                .replace(/[%_\\]/g, '\\$&')  // Escape SQL wildcards
+                .replace(/['"]/g, '')         // Remove quotes
+                .substring(0, 100);           // Limit length
+            query = query.ilike('error_message', `%${sanitizedSearch}%`);
         }
 
-        // Apply sorting
+        // Apply sorting - whitelist allowed columns to prevent injection
+        const ALLOWED_SORT_COLUMNS = ['created_at', 'severity', 'event_type', 'event_category', 'actor_wallet'];
+        const safeSortBy = ALLOWED_SORT_COLUMNS.includes(sortBy) ? sortBy : 'created_at';
         const ascending = sortOrder.toLowerCase() === 'asc';
-        query = query.order(sortBy, { ascending });
+        query = query.order(safeSortBy, { ascending });
 
         // Apply pagination
         query = query.range(offset, offset + parseInt(limit) - 1);

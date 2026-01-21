@@ -17,7 +17,7 @@ import {
     DEFAULT_PAYOUT_MULTIPLIERS,
 } from '../lib/evCalculator.js';
 import logger from '../lib/logger.js';
-import { verifyTransaction, transactionInvokedProgram } from '../lib/utils.js';
+import { verifyTransaction, transactionInvokedProgram, verifyWithdrawalTransaction, validateNumericId, sanitizeErrorMessage } from '../lib/utils.js';
 
 const router = express.Router();
 
@@ -113,7 +113,7 @@ router.get('/:projectId/balance', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to get vault balance',
-            details: error.message
+            details: sanitizeErrorMessage(error.message)
         });
     }
 });
@@ -164,7 +164,7 @@ router.get('/:projectId/info', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to get vault info',
-            details: error.message
+            details: sanitizeErrorMessage(error.message)
         });
     }
 });
@@ -204,7 +204,7 @@ router.post('/fund', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to fund vault',
-            details: error.message
+            details: sanitizeErrorMessage(error.message)
         });
     }
 });
@@ -219,13 +219,22 @@ router.get('/balance/:projectId', async (req, res) => {
     try {
         const { projectId } = req.params;
 
-        console.log(`\n💰 Fetching vault balance for project ${projectId}...`);
+        // Validate project ID
+        const idValidation = validateNumericId(projectId);
+        if (!idValidation.valid) {
+            return res.status(400).json({
+                success: false,
+                error: idValidation.error,
+            });
+        }
+
+        console.log(`\n💰 Fetching vault balance for project ${idValidation.value}...`);
 
         // Fetch project from database
         const { data: project, error: dbError } = await supabase
             .from('projects')
             .select('*')
-            .eq('project_numeric_id', parseInt(projectId))
+            .eq('project_numeric_id', idValidation.value)
             .single();
 
         if (dbError || !project) {
@@ -291,7 +300,7 @@ router.get('/balance/:projectId', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to fetch vault balance',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -328,13 +337,22 @@ router.get('/withdrawal-info/:projectId', async (req, res) => {
         const { projectId } = req.params;
         const { ownerWallet } = req.query;
 
-        console.log(`\n💰 Calculating withdrawal info for project ${projectId}...`);
+        // Validate project ID
+        const idValidation = validateNumericId(projectId);
+        if (!idValidation.valid) {
+            return res.status(400).json({
+                success: false,
+                error: idValidation.error,
+            });
+        }
+
+        console.log(`\n💰 Calculating withdrawal info for project ${idValidation.value}...`);
 
         // Fetch project from database
         const { data: project, error: projectError } = await supabase
             .from('projects')
             .select('*')
-            .eq('project_numeric_id', parseInt(projectId))
+            .eq('project_numeric_id', idValidation.value)
             .single();
 
         if (projectError || !project) {
@@ -344,8 +362,16 @@ router.get('/withdrawal-info/:projectId', async (req, res) => {
             });
         }
 
-        // Verify owner if wallet provided
-        if (ownerWallet && project.owner_wallet !== ownerWallet) {
+        // SECURITY: Always require owner wallet for withdrawal info
+        // This prevents information disclosure about vault balances
+        if (!ownerWallet) {
+            return res.status(400).json({
+                success: false,
+                error: 'ownerWallet query parameter is required',
+            });
+        }
+
+        if (project.owner_wallet !== ownerWallet) {
             return res.status(403).json({
                 success: false,
                 error: 'Not project owner',
@@ -516,7 +542,7 @@ router.get('/withdrawal-info/:projectId', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to calculate withdrawal info',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -708,7 +734,7 @@ router.post('/build-withdraw-tx', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to build withdrawal transaction',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -786,6 +812,30 @@ router.post('/confirm-withdraw', async (req, res) => {
             });
         }
 
+        // CRITICAL SECURITY: Verify the withdrawal transaction matches expected parameters
+        // - Verify the signer is the project owner
+        // - Verify the withdrawal amount matches what was claimed
+        const withdrawalVerification = verifyWithdrawalTransaction(
+            verification.transaction,
+            project.owner_wallet,
+            withdrawalAmount,
+            100 // 1% tolerance for rounding
+        );
+
+        if (!withdrawalVerification.valid) {
+            console.error(`❌ Withdrawal verification failed: ${withdrawalVerification.error}`);
+            return res.status(400).json({
+                success: false,
+                error: 'Withdrawal verification failed',
+                details: withdrawalVerification.error,
+            });
+        }
+
+        console.log('   ✓ Withdrawal amount and signer verified');
+
+        // Use the actual amount from the transaction (more reliable than user-provided)
+        const verifiedWithdrawalAmount = withdrawalVerification.actualAmount;
+
         // Get current vault balance for history
         // connection already obtained above for transaction verification
         let vaultBalanceBefore = BigInt(0);
@@ -821,16 +871,17 @@ router.post('/confirm-withdraw', async (req, res) => {
             DEFAULT_PAYOUT_MULTIPLIERS
         );
 
-        // Insert withdrawal history
+        // Insert withdrawal history - use verified amount from transaction, not user-provided
+        const actualWithdrawalAmount = verifiedWithdrawalAmount.toString();
         const { error: historyError } = await supabase
             .from('withdrawal_history')
             .insert({
                 project_id: project.id,
                 owner_wallet: project.owner_wallet,
-                withdrawal_amount: withdrawalAmount,
+                withdrawal_amount: actualWithdrawalAmount,
                 withdrawal_type: withdrawalType || 'partial',
-                fee_percentage: feePercentage || 2.5,
-                fee_amount_in_project_token: Math.ceil(Number(withdrawalAmount) * (feePercentage || 2.5) / 100),
+                fee_percentage: feePercentage || 0, // No platform fee on vault withdrawals
+                fee_amount_in_project_token: 0, // No platform fee on vault withdrawals
                 fee_amount_in_platform_token: feeAmount || 0,
                 project_token_price_usd: projectTokenPriceUSD || null,
                 platform_token_price_usd: platformTokenPriceUSD || null,
@@ -847,8 +898,8 @@ router.post('/confirm-withdraw', async (req, res) => {
             console.error('Error inserting withdrawal history:', historyError);
         }
 
-        // Update project totals
-        const newTotalWithdrawn = BigInt(project.total_withdrawn || 0) + BigInt(withdrawalAmount);
+        // Update project totals - use verified amount
+        const newTotalWithdrawn = BigInt(project.total_withdrawn || 0) + verifiedWithdrawalAmount;
 
         const updateData = {
             total_withdrawn: newTotalWithdrawn.toString(),
@@ -903,7 +954,7 @@ router.post('/confirm-withdraw', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to confirm withdrawal',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -995,7 +1046,7 @@ router.get('/withdrawal-history/:projectId', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to fetch withdrawal history',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -1027,7 +1078,7 @@ router.get('/test-jupiter', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to test Jupiter connection',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });

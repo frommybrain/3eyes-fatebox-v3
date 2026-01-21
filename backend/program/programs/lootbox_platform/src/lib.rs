@@ -440,6 +440,8 @@ pub mod lootbox_platform {
         box_instance.reward_tier = 0;
         box_instance.randomness_account = Pubkey::default(); // Placeholder until commit
         box_instance.randomness_committed = false; // Will be true after commit_box
+        box_instance.committed_slot = 0; // Set during commit_box
+        box_instance.snapshot_game_preset = 0; // Set during commit_box
 
         // Update project stats
         project_config.total_boxes_created = box_id;
@@ -517,6 +519,14 @@ pub mod lootbox_platform {
         box_instance.committed_at = clock.unix_timestamp;
         box_instance.luck = current_luck; // Freeze luck at commit time
 
+        // SECURITY: Store current slot for randomness validation
+        // Randomness must have been generated AFTER this slot to be valid
+        box_instance.committed_slot = clock.slot;
+
+        // SECURITY: Snapshot game preset at commit time to prevent mid-game odds manipulation
+        // This ensures admin can't change odds after user commits
+        box_instance.snapshot_game_preset = project_config.game_preset;
+
         msg!("Box opened - randomness committed!");
         msg!("Box ID: {}", box_id);
         msg!("Owner: {}", ctx.accounts.owner.key());
@@ -524,7 +534,8 @@ pub mod lootbox_platform {
         msg!("Luck interval: {} (project: {}, platform: {})", effective_interval, project_config.luck_time_interval, platform_config.luck_time_interval);
         msg!("Luck frozen at: {}/{}", current_luck, platform_config.max_luck);
         msg!("Randomness account: {}", randomness_account);
-        msg!("Committed at: {}", clock.unix_timestamp);
+        msg!("Committed at slot: {}", clock.slot);
+        msg!("Game preset snapshot: {}", project_config.game_preset);
         msg!("User has {} seconds to reveal!", REVEAL_WINDOW_SECONDS);
 
         Ok(())
@@ -592,6 +603,18 @@ pub mod lootbox_platform {
             ctx.accounts.randomness_account.try_borrow_data()?
         ).map_err(|_| LootboxError::RandomnessNotReady)?;
 
+        // SECURITY: Validate that randomness was generated AFTER the commit slot
+        // This prevents users from pre-generating favorable randomness
+        // The seed_slot is when the randomness request was created
+        let seed_slot = randomness_data.seed_slot;
+        require!(
+            seed_slot >= box_instance.committed_slot,
+            LootboxError::RandomnessGeneratedBeforeCommit
+        );
+
+        msg!("Randomness slot validation: seed_slot={} >= committed_slot={}",
+            seed_slot, box_instance.committed_slot);
+
         // Get the revealed random value (32 bytes) using SDK method
         // This validates that randomness has been revealed and returns the value
         // Pass the current slot as u64 for the SDK to validate reveal timing
@@ -625,13 +648,14 @@ pub mod lootbox_platform {
         msg!("Switchboard randomness: u64={}, basis_points={}", random_u64, random_basis_points);
 
         // Calculate reward based on luck and randomness using config values
-        // Use project's game_preset (0 = default, 1-3 = presets)
+        // SECURITY: Use the SNAPSHOTTED game preset from commit time, not current project config
+        // This prevents admin from changing odds after user commits
         let (reward_amount, is_jackpot, reward_tier) = calculate_reward_from_config(
             current_luck,
             random_basis_points,
             project_config.box_price,
             platform_config,
-            project_config.game_preset,
+            box_instance.snapshot_game_preset, // Use snapshot, not project_config.game_preset
         )?;
 
         // Update box state
@@ -1877,10 +1901,15 @@ pub struct BoxInstance {
     pub reward_tier: u8,              // 1 byte (0=Dud, 1=Rebate, 2=Break-even, 3=Profit, 4=Jackpot)
     pub randomness_account: Pubkey,   // 32 bytes - Switchboard VRF randomness account
     pub randomness_committed: bool,   // 1 byte - Whether randomness has been committed
+    // SECURITY: Store slot at commit time to validate randomness wasn't pre-generated
+    pub committed_slot: u64,          // 8 bytes - Slot when randomness was committed
+    // SECURITY: Snapshot game preset at commit time to prevent mid-game odds manipulation
+    pub snapshot_game_preset: u8,     // 1 byte - Game preset frozen at commit time
 }
 
 impl BoxInstance {
-    pub const LEN: usize = 8 + 8 + 32 + 8 + 8 + 1 + 1 + 1 + 8 + 1 + 8 + 1 + 32 + 1; // 118 bytes
+    // Updated: 118 + 8 (committed_slot) + 1 (snapshot_game_preset) = 127 bytes
+    pub const LEN: usize = 8 + 8 + 32 + 8 + 8 + 1 + 1 + 1 + 8 + 1 + 8 + 1 + 32 + 1 + 8 + 1;
 }
 
 // ============================================================================
@@ -1987,4 +2016,7 @@ pub enum LootboxError {
 
     #[msg("Withdrawal exceeds available balance (reserves needed for pending boxes)")]
     WithdrawalExceedsAvailable,
+
+    #[msg("Randomness was generated before commit slot (potential manipulation detected)")]
+    RandomnessGeneratedBeforeCommit,
 }

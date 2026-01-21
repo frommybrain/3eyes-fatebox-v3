@@ -3,6 +3,7 @@
 
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
+import { sanitizeErrorMessage } from '../lib/utils.js';
 
 const router = express.Router();
 
@@ -504,7 +505,7 @@ router.put('/:wallet', async (req, res) => {
             return res.status(500).json({
                 success: false,
                 error: 'Failed to update profile',
-                details: error.message
+                details: sanitizeErrorMessage(error.message)
             });
         }
 

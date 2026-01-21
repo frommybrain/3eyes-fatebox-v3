@@ -1841,6 +1841,11 @@
       "code": 6032,
       "name": "WithdrawalExceedsAvailable",
       "msg": "Withdrawal exceeds available balance (reserves needed for pending boxes)"
+    },
+    {
+      "code": 6033,
+      "name": "RandomnessGeneratedBeforeCommit",
+      "msg": "Randomness was generated before commit slot (potential manipulation detected)"
     }
   ],
   "types": [
@@ -1904,6 +1909,14 @@
           {
             "name": "randomness_committed",
             "type": "bool"
+          },
+          {
+            "name": "committed_slot",
+            "type": "u64"
+          },
+          {
+            "name": "snapshot_game_preset",
+            "type": "u8"
           }
         ]
       }

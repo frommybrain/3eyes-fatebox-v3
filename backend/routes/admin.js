@@ -11,6 +11,7 @@ import { getNetworkConfig, getPlatformConfig, clearConfigCache } from '../lib/ge
 import { createClient } from '@supabase/supabase-js';
 import logger, { EventTypes, Severity, ActorTypes } from '../lib/logger.js';
 import { requireSuperAdmin } from '../middleware/auth.js';
+import { sanitizeErrorMessage } from '../lib/utils.js';
 
 const router = express.Router();
 
@@ -260,7 +261,7 @@ router.post('/update-platform-config', requireSuperAdmin, async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to update platform config',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -309,7 +310,7 @@ router.get('/platform-config', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to fetch platform config',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -355,7 +356,7 @@ router.post('/toggle-pause', requireSuperAdmin, async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to toggle pause',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -412,7 +413,7 @@ router.get('/treasury/:tokenMint', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to fetch treasury balance',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -512,7 +513,7 @@ router.get('/treasury-balances', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to fetch treasury balances',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -725,7 +726,7 @@ router.post('/withdraw-treasury', requireSuperAdmin, async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to withdraw from treasury',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });
@@ -762,7 +763,7 @@ router.get('/treasury-logs', async (req, res) => {
             return res.status(500).json({
                 success: false,
                 error: 'Failed to fetch treasury logs',
-                details: error.message,
+                details: sanitizeErrorMessage(error.message),
             });
         }
 
@@ -819,7 +820,7 @@ router.get('/treasury-logs', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to fetch treasury logs',
-            details: error.message,
+            details: sanitizeErrorMessage(error.message),
         });
     }
 });

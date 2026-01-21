@@ -12,6 +12,7 @@ import {
     deriveProjectConfigPDA,
     deriveVaultAuthorityPDA
 } from '../lib/pdaHelpers.js';
+import { sanitizeErrorMessage } from '../lib/utils.js';
 
 const router = express.Router();
 
@@ -128,7 +129,7 @@ router.post('/create', async (req, res) => {
             return res.status(500).json({
                 success: false,
                 error: 'Failed to create project in database',
-                details: insertError.message
+                details: sanitizeErrorMessage(insertError.message)
             });
         }
 
@@ -264,7 +265,7 @@ router.post('/create', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Internal server error',
-            details: error.message
+            details: sanitizeErrorMessage(error.message)
         });
     }
 });
@@ -307,7 +308,7 @@ router.get('/by-numeric-id/:numericId', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Internal server error',
-            details: error.message
+            details: sanitizeErrorMessage(error.message)
         });
     }
 });
@@ -343,7 +344,7 @@ router.get('/:projectId', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Internal server error',
-            details: error.message
+            details: sanitizeErrorMessage(error.message)
         });
     }
 });
@@ -417,7 +418,7 @@ router.get('/', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Internal server error',
-            details: error.message
+            details: sanitizeErrorMessage(error.message)
         });
     }
 });
@@ -491,7 +492,7 @@ router.get('/boxes/by-owner/:walletAddress', async (req, res) => {
             return res.status(500).json({
                 success: false,
                 error: 'Failed to fetch boxes',
-                details: error.message
+                details: sanitizeErrorMessage(error.message)
             });
         }
 
@@ -525,7 +526,7 @@ router.get('/boxes/by-owner/:walletAddress', async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Internal server error',
-            details: error.message
+            details: sanitizeErrorMessage(error.message)
         });
     }
 });

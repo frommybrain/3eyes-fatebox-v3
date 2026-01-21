@@ -1847,6 +1847,11 @@ export type LootboxPlatform = {
       "code": 6032,
       "name": "withdrawalExceedsAvailable",
       "msg": "Withdrawal exceeds available balance (reserves needed for pending boxes)"
+    },
+    {
+      "code": 6033,
+      "name": "randomnessGeneratedBeforeCommit",
+      "msg": "Randomness was generated before commit slot (potential manipulation detected)"
     }
   ],
   "types": [
@@ -1910,6 +1915,14 @@ export type LootboxPlatform = {
           {
             "name": "randomnessCommitted",
             "type": "bool"
+          },
+          {
+            "name": "committedSlot",
+            "type": "u64"
+          },
+          {
+            "name": "snapshotGamePreset",
+            "type": "u8"
           }
         ]
       }

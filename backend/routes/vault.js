@@ -646,6 +646,7 @@ router.post('/build-withdraw-tx', async (req, res) => {
         const paymentTokenMint = new PublicKey(project.payment_token_mint);
 
         // Derive PDAs
+        const [platformConfigPDA] = derivePlatformConfigPDA(programId);
         const [vaultAuthority] = deriveVaultAuthorityPDA(
             programId,
             project.project_numeric_id,
@@ -687,6 +688,7 @@ router.post('/build-withdraw-tx', async (req, res) => {
             )
             .accounts({
                 owner: ownerPubkey,
+                platformConfig: platformConfigPDA,
                 projectConfig: new PublicKey(project.vault_pda),
                 vaultAuthority: vaultAuthority,
                 vaultTokenAccount: vaultTokenAccount,

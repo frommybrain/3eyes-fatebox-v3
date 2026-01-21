@@ -782,6 +782,9 @@ pub mod lootbox_platform {
         amount: u64,
         pending_reserve: u64,
     ) -> Result<()> {
+        // SECURITY: Check platform is not paused - prevents draining in case of vulnerability
+        require!(!ctx.accounts.platform_config.paused, LootboxError::PlatformPaused);
+
         let project_config = &ctx.accounts.project_config;
 
         // Verify ownership
@@ -1627,6 +1630,13 @@ pub struct RefundBox<'info> {
 #[instruction(project_id: u64)]
 pub struct WithdrawEarnings<'info> {
     pub owner: Signer<'info>,
+
+    /// Platform config - for pause check
+    #[account(
+        seeds = [b"platform_config"],
+        bump
+    )]
+    pub platform_config: Account<'info, PlatformConfig>,
 
     #[account(
         seeds = [b"project", project_id.to_le_bytes().as_ref()],

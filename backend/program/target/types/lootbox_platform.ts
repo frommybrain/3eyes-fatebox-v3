@@ -1450,6 +1450,36 @@ export type LootboxPlatform = {
           "signer": true
         },
         {
+          "name": "platformConfig",
+          "docs": [
+            "Platform config - for pause check"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "projectConfig",
           "pda": {
             "seeds": [

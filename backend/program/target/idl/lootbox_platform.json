@@ -1444,6 +1444,36 @@
           "signer": true
         },
         {
+          "name": "platform_config",
+          "docs": [
+            "Platform config - for pause check"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  108,
+                  97,
+                  116,
+                  102,
+                  111,
+                  114,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "project_config",
           "pda": {
             "seeds": [

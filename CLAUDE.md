@@ -1,6 +1,6 @@
 # 3Eyes FateBox v3 - Master Project Specification
 
-**Last Updated:** January 18, 2026 (Updated: Game Presets System)
+**Last Updated:** January 21, 2026 (Updated: Security Fixes & Audit)
 **Version:** 3.0 (Development)
 **Network:** Devnet (Solana)
 
@@ -311,6 +311,94 @@ pub struct BoxInstance {
 | 6017 | VaultNotEmpty | Must empty vault to close |
 | 6018 | RevealWindowExpired | 1 hour reveal window passed |
 | 6019 | InvalidCommissionRate | Commission > 50% (5000 bps) |
+
+### Instruction Flow Details
+
+#### Box Lifecycle (On-Chain)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           BOX STATE MACHINE                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+  create_box                 commit_box                reveal_box               settle_box
+      │                          │                         │                        │
+      ▼                          ▼                         ▼                        ▼
+┌──────────┐    hold time   ┌──────────┐   VRF ready  ┌──────────┐   claim     ┌──────────┐
+│ PENDING  │ ──────────────▶│ COMMITTED│ ────────────▶│ REVEALED │ ──────────▶│ SETTLED  │
+│          │    (luck++)    │          │              │          │             │          │
+│ luck=0   │                │ luck=N   │              │reward=X  │             │ paid=X   │
+│ opened=F │                │ opened=T │              │ tier=T   │             │ settled=T│
+└──────────┘                └──────────┘              └──────────┘             └──────────┘
+                                 │                                                  ▲
+                                 │     ◀── 1 hour window ──▶                       │
+                                 │                                                  │
+                                 │         reveal fails                             │
+                                 └──────────────────────────────────────────────────┤
+                                           (mark refund eligible)                   │
+                                                    │                               │
+                                                    ▼                               │
+                                            ┌──────────────┐     refund_box         │
+                                            │   REFUND     │ ──────────────────────▶│
+                                            │   ELIGIBLE   │   (box_price - comm)   │
+                                            └──────────────┘                        │
+```
+
+#### create_box
+- Transfers `box_price` from buyer to vault (95%)
+- Transfers `commission` to treasury (5%)
+- Creates BoxInstance PDA with `owner`, `project_id`, timestamps
+- Increments `project_config.total_boxes_created` and `total_revenue`
+
+#### commit_box (Open Box)
+- Creates Switchboard randomness account
+- Freezes luck at current time: `luck = min(base_luck + (hold_time / interval), max_luck)`
+- Stores `randomness_account` pubkey and `committed_at` timestamp
+- Sets `randomness_committed = true`
+- User has 1 hour to reveal
+
+#### reveal_box
+- Reads VRF result from randomness account
+- Calculates `random_percentage` (0-100 from VRF bytes)
+- Determines tier based on luck and tier probabilities
+- Calculates `reward_amount = box_price * payout_multiplier`
+- Sets `revealed = true`, stores `reward_tier`
+
+#### settle_box
+- **Security:** State updated BEFORE CPI (reentrancy prevention)
+- Transfers `reward_amount` from vault to owner
+- Sets `settled = true`
+- Updates `project_config.total_paid_out`
+
+#### refund_box
+- Only for boxes marked as refund-eligible (system errors)
+- Refunds `box_price - commission` (commission already in treasury)
+- Sets `reward_tier = 5` (Refunded)
+
+### Key Security Patterns
+
+```rust
+// 1. All arithmetic uses checked operations
+total_revenue = total_revenue.checked_add(amount).ok_or(LootboxError::ArithmeticOverflow)?;
+
+// 2. Ownership verified via Anchor constraints
+#[account(
+    constraint = box_instance.owner == owner.key() @ LootboxError::NotBoxOwner
+)]
+
+// 3. State changes before CPI (settle_box)
+box_instance.settled = true;  // BEFORE transfer
+token::transfer(cpi_ctx, amount)?;  // AFTER state change
+
+// 4. PDA seeds ensure deterministic account addresses
+#[account(
+    seeds = [b"project", project_id.to_le_bytes().as_ref()],
+    bump
+)]
+
+// 5. Token account ownership validation
+constraint = token_account.owner == expected_owner.key()
+```
 
 ---
 
@@ -1993,23 +2081,147 @@ Creators receive payouts in their **project's payment token only**:
 
 ## Security Considerations
 
-### Strengths
+**Last Security Audit:** January 21, 2026
 
-| Feature | Implementation | Benefit |
-|---------|----------------|---------|
-| PDA-controlled vaults | Vault authority is program-derived | Developers cannot steal funds |
-| VRF randomness | Switchboard oracle-signed | Cannot predict/manipulate outcomes |
-| On-chain verification | confirm-reveal reads blockchain | Cannot fake rewards |
-| Fresh blockhash | Every transaction | Prevents replay attacks |
-| Reveal window | 1 hour limit | Prevents timing attacks |
+### On-Chain Security (Anchor Program)
 
-### Known Gaps
+#### Reentrancy Prevention
+The `settle_box` instruction follows the **Checks-Effects-Interactions** pattern:
+```rust
+// SECURITY: Mark as settled BEFORE CPI to prevent reentrancy
+box_instance.settled = true;
+project_config.total_boxes_settled = project_config.total_boxes_settled
+    .checked_add(1)
+    .ok_or(LootboxError::ArithmeticOverflow)?;
+project_config.total_paid_out = project_config.total_paid_out
+    .checked_add(box_instance.reward_amount)
+    .ok_or(LootboxError::ArithmeticOverflow)?;
 
-| Issue | Risk | Recommendation |
-|-------|------|----------------|
-| RLS too permissive | Any user can UPDATE | Add owner_wallet checks |
-| No backend wallet auth | Claim any owner_wallet | Require signed messages |
-| No rate limiting | API spam | Add express-rate-limit |
+// CPI transfer happens AFTER state changes
+token::transfer(cpi_ctx, box_instance.reward_amount)?;
+```
+
+#### Refund Calculation Security
+Refunds deduct the platform commission to prevent fund drainage attacks:
+```rust
+// Calculate commission that was already taken
+let commission_bps = platform_config.platform_commission_bps as u64;
+let commission_amount = project_config.box_price
+    .checked_mul(commission_bps)
+    .ok_or(LootboxError::ArithmeticOverflow)?
+    .checked_div(10000)
+    .ok_or(LootboxError::ArithmeticOverflow)?;
+
+// Refund = box_price - commission (commission already in treasury)
+let refund_amount = project_config.box_price
+    .checked_sub(commission_amount)
+    .ok_or(LootboxError::ArithmeticOverflow)?;
+```
+
+#### Token Account Ownership Validation
+Admin operations validate token account ownership to prevent unauthorized withdrawals:
+```rust
+#[account(
+    mut,
+    constraint = admin_token_account.mint == token_mint.key() @ LootboxError::InvalidOwnerTokenAccount,
+    constraint = admin_token_account.owner == admin.key() @ LootboxError::InvalidOwnerTokenAccount
+)]
+pub admin_token_account: Account<'info, TokenAccount>,
+```
+
+#### Account Constraints
+All critical accounts have proper Anchor constraints:
+- Box ownership: `constraint = box_instance.owner == owner.key() @ LootboxError::NotBoxOwner`
+- Project ownership: `constraint = project_config.owner == owner.key() @ LootboxError::NotProjectOwner`
+- Platform admin: `constraint = platform_config.admin == admin.key() @ LootboxError::NotAdmin`
+- Arithmetic overflow protection via `checked_*` operations throughout
+
+### Backend Security
+
+#### Rate Limiting
+Three tiers of rate limiting (configured in `backend/server.js`):
+| Limiter | Production | Development | Applied To |
+|---------|------------|-------------|------------|
+| `generalLimiter` | 100 req/15min | 10,000 | All routes |
+| `adminLimiter` | 20 req/hour | 1,000 | `/api/admin/*` |
+| `transactionLimiter` | 30 req/min | 1,000 | `/api/program/*` |
+
+Controlled by `DISABLE_RATE_LIMIT` env var for testing.
+
+#### Wallet Ownership Verification
+Backend verifies wallet ownership before sensitive operations:
+- Transaction building requires wallet signature
+- Owner wallet validated against on-chain state
+- Token account ownership checked before transfers
+
+#### Error Message Sanitization
+All error responses pass through `sanitizeErrorMessage()` to prevent information leakage:
+```javascript
+import { sanitizeErrorMessage } from '../lib/utils.js';
+// ...
+return res.status(500).json({
+    success: false,
+    error: 'Internal server error',
+    details: sanitizeErrorMessage(error.message)
+});
+```
+
+#### RLS Policies (Supabase)
+Row Level Security enforces data access at the database level:
+- `boxes` table: Users can only SELECT/UPDATE their own boxes (by `owner_wallet`)
+- `projects` table: Creators can only UPDATE their own projects (by `owner_wallet`)
+- Service role key used for backend operations that bypass RLS
+
+See migration `023_fix_rls_security.sql` for complete policy definitions.
+
+### Frontend Security
+
+#### Security Headers (next.config.mjs)
+```javascript
+async headers() {
+  return [
+    {
+      source: '/:path*',
+      headers: [
+        { key: 'X-Frame-Options', value: 'DENY' },
+        { key: 'X-Content-Type-Options', value: 'nosniff' },
+        { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        { key: 'X-XSS-Protection', value: '1; mode=block' },
+        { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+      ],
+    },
+  ];
+},
+```
+
+#### Subdomain Validation
+Subdomains are validated to prevent injection attacks:
+```javascript
+// frontend/lib/getNetworkConfig.js
+export function isValidSubdomain(subdomain) {
+    if (!subdomain || typeof subdomain !== 'string') return false;
+    return /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(subdomain);
+}
+```
+
+Applied in:
+- `frontend/lib/getNetworkConfig.js` - URL construction
+- `frontend/proxy.js` - Dev mode subdomain query param
+
+### Security Summary Table
+
+| Feature | Implementation | Location |
+|---------|----------------|----------|
+| Reentrancy prevention | State changes before CPI | `lib.rs:settle_box` |
+| Refund drainage prevention | Deduct commission from refund | `lib.rs:refund_box` |
+| Token ownership validation | Anchor constraints | `lib.rs:WithdrawTreasury` |
+| Rate limiting | express-rate-limit | `backend/server.js` |
+| RLS policies | PostgreSQL policies | `migrations/023_fix_rls_security.sql` |
+| Error sanitization | sanitizeErrorMessage() | `backend/lib/utils.js` |
+| Security headers | Next.js headers config | `frontend/next.config.mjs` |
+| Subdomain validation | Regex validation | `frontend/lib/getNetworkConfig.js` |
+| VRF integrity | Switchboard oracle-signed randomness | `lib.rs:reveal_box` |
+| PDA-controlled vaults | Program-derived addresses | All vault operations |
 
 ---
 

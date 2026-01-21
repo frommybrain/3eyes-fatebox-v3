@@ -146,7 +146,7 @@ function TransactionOverlay({ logs, status, countdown, onClose }) {
                             </span>
                             Processing...
                             {countdown !== null && countdown > 0 && (
-                                <span className="ml-2 text-degen-yellow font-bold">
+                                <span className="ml-2 text-black/80 text-sm">
                                     (timeout: {countdown}s)
                                 </span>
                             )}

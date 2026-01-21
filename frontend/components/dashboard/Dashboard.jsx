@@ -31,6 +31,7 @@ import {
     MyProjectsTabSkeleton,
     MyProfileTabSkeleton,
     DashboardSkeleton,
+    BoxCardSkeleton,
 } from '@/components/ui';
 import { getWinShareHandler, getMyProjectShareHandler } from '@/lib/shareManager';
 import TrophyCabinet from '@/components/profile/TrophyCabinet';
@@ -1583,10 +1584,75 @@ function BoxCard({ box, project, onRefresh }) {
                 const payout = confirmResult.reward?.payoutAmount
                     ? (confirmResult.reward.payoutAmount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
                     : '0';
-                endTransaction(true, `Result: ${tierName}! Payout: ${payout} ${project.payment_token_symbol}`);
 
-                // Show win popup for winning results (tier > 1, not dud)
-                if (confirmResult.reward?.tier > 1) {
+                // Auto-settle: If there's a reward (tier > 1), automatically claim it
+                if (confirmResult.reward?.tier > 1 && confirmResult.reward?.payoutAmount > 0) {
+                    addLog(`Result: ${tierName}! Auto-claiming ${payout} ${project.payment_token_symbol}...`);
+
+                    // Continue with settle - don't end transaction yet
+                    try {
+                        // Build settle transaction
+                        addLog('Building claim transaction...');
+                        const settleResponse = await fetch(`${backendUrl}/api/program/build-settle-box-tx`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                projectId: project.project_numeric_id,
+                                boxId: box.box_number,
+                                ownerWallet: walletAddress,
+                            }),
+                        });
+
+                        const settleResult = await settleResponse.json();
+                        if (!settleResult.success) {
+                            throw new Error(settleResult.details || settleResult.error);
+                        }
+
+                        // Deserialize and send settle transaction
+                        const settleTransaction = Transaction.from(Buffer.from(settleResult.transaction, 'base64'));
+                        const { blockhash: settleBh, lastValidBlockHeight: settleLvbh } = await connection.getLatestBlockhash('confirmed');
+                        settleTransaction.recentBlockhash = settleBh;
+                        settleTransaction.lastValidBlockHeight = settleLvbh;
+
+                        addLog('Requesting wallet signature...');
+                        const settleSignature = await sendTransaction(settleTransaction, connection, {
+                            skipPreflight: true,
+                        });
+                        addLog(`Claim TX: ${settleSignature.slice(0, 8)}...`);
+
+                        addLog('Waiting for confirmation...');
+                        await connection.confirmTransaction(settleSignature, 'confirmed');
+
+                        // Update optimistic state with settled
+                        startBoxTransition(() => {
+                            setOptimisticBox({ settled_at: new Date().toISOString() });
+                        });
+
+                        // Confirm settle with backend
+                        await fetch(`${backendUrl}/api/program/confirm-settle`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                projectId: project.project_numeric_id,
+                                boxId: box.box_number,
+                                signature: settleSignature,
+                            }),
+                        });
+
+                        endTransaction(true, `${tierName}! Claimed ${payout} ${project.payment_token_symbol}!`);
+                        toast.success(`${tierName}! Claimed ${payout} ${project.payment_token_symbol}!`);
+                    } catch (settleErr) {
+                        // Settle failed but reveal succeeded - show the result and let user manually claim
+                        console.error('Auto-settle failed:', settleErr);
+                        const errorLower = (settleErr.message || '').toLowerCase();
+                        if (errorLower.includes('user rejected') || errorLower.includes('rejected the request')) {
+                            endTransaction(true, `${tierName}! Click Claim to collect ${payout} ${project.payment_token_symbol}`);
+                        } else {
+                            endTransaction(true, `${tierName}! Auto-claim failed - click Claim button to collect`);
+                        }
+                    }
+
+                    // Show win popup for winning results
                     setWinData({
                         tier: confirmResult.reward.tier,
                         amount: payout,
@@ -1595,6 +1661,9 @@ function BoxCard({ box, project, onRefresh }) {
                         badgeUrl: getBadgeUrl(confirmResult.reward.tier, confirmResult.reward.badgeImageId),
                     });
                     setShowWinModal(true);
+                } else {
+                    // No reward or dud - just end the reveal transaction
+                    endTransaction(true, `Result: ${tierName}!`);
                 }
             } else {
                 endTransaction(true, 'Revealed!');
@@ -1991,6 +2060,11 @@ function BoxCard({ box, project, onRefresh }) {
     const revealProgress = revealCountdown !== null && revealCountdown > 0
         ? ((10 - revealCountdown) / 10) * 100
         : 100;
+
+    // Show skeleton during processing for a cleaner UX
+    if (isProcessing) {
+        return <BoxCardSkeleton />;
+    }
 
     return (
         <div

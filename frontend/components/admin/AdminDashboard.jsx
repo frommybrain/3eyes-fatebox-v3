@@ -187,7 +187,10 @@ export default function AdminDashboard() {
             const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
             const response = await fetch(`${backendUrl}/api/admin/toggle-pause`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Wallet-Address': publicKey.toString(),
+                },
                 body: JSON.stringify({ paused: newPausedState }),
             });
 
@@ -195,8 +198,14 @@ export default function AdminDashboard() {
 
             if (result.success) {
                 toast.success(`Platform ${newPausedState ? 'paused' : 'unpaused'} successfully!`);
-                // Refresh config to show new state
-                await loadOnChainConfig();
+                // Refresh config to show new state (don't fail if this errors)
+                try {
+                    await loadOnChainConfig();
+                } catch (refreshError) {
+                    console.warn('Failed to refresh config after pause toggle:', refreshError);
+                    // Still succeeded - manually update local state
+                    setOnChainConfig(prev => prev ? { ...prev, paused: newPausedState } : prev);
+                }
             } else {
                 toast.error('Failed to toggle pause: ' + result.error);
             }

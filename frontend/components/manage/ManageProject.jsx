@@ -219,14 +219,20 @@ export default function ManageProject({ projectId }) {
             });
             await connection.confirmTransaction(signature, 'confirmed');
 
-            // Step 3: Update database
-            const { error: dbError } = await supabase
-                .from('projects')
-                .update({ luck_interval_seconds: luckIntervalSeconds || null })
-                .eq('id', projectId);
+            // Step 3: Update database via backend (bypasses RLS)
+            const confirmResponse = await fetch(`${backendUrl}/api/program/confirm-project-update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    signature,
+                    updates: { luckIntervalSeconds: luckIntervalSeconds || null },
+                }),
+            });
 
-            if (dbError) {
-                console.warn('DB update failed:', dbError);
+            const confirmResult = await confirmResponse.json();
+            if (!confirmResult.success) {
+                console.warn('DB update failed:', confirmResult.error);
             }
 
             toast.success('Luck interval updated successfully!');
@@ -281,14 +287,20 @@ export default function ManageProject({ projectId }) {
             });
             await connection.confirmTransaction(signature, 'confirmed');
 
-            // Step 3: Update database
-            const { error: dbError } = await supabase
-                .from('projects')
-                .update({ box_price: priceInSmallestUnit })
-                .eq('id', projectId);
+            // Step 3: Update database via backend (bypasses RLS)
+            const confirmResponse = await fetch(`${backendUrl}/api/program/confirm-project-update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    signature,
+                    updates: { boxPrice: priceInSmallestUnit },
+                }),
+            });
 
-            if (dbError) {
-                console.warn('DB update failed:', dbError);
+            const confirmResult = await confirmResponse.json();
+            if (!confirmResult.success) {
+                console.warn('DB update failed:', confirmResult.error);
             }
 
             toast.success('Box price updated successfully!');

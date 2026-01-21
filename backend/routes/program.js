@@ -3277,6 +3277,83 @@ router.post('/build-update-project-tx', async (req, res) => {
 });
 
 /**
+ * POST /api/program/confirm-project-update
+ * Update database after project settings have been updated on-chain
+ *
+ * Body:
+ * - projectId: number - Numeric project ID
+ * - signature: string - Transaction signature
+ * - updates: object - Fields that were updated { boxPrice?, luckIntervalSeconds? }
+ */
+router.post('/confirm-project-update', async (req, res) => {
+    try {
+        const { projectId, signature, updates } = req.body;
+
+        if (!projectId || !signature || !updates) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields: projectId, signature, updates'
+            });
+        }
+
+        console.log(`\n✅ Confirming project ${projectId} update...`);
+        console.log(`   Transaction: ${signature}`);
+        console.log(`   Updates:`, updates);
+
+        // Build the database update object
+        const dbUpdates = {};
+        if (updates.boxPrice !== undefined) {
+            dbUpdates.box_price = updates.boxPrice;
+        }
+        if (updates.luckIntervalSeconds !== undefined) {
+            dbUpdates.luck_interval_seconds = updates.luckIntervalSeconds || null;
+        }
+
+        if (Object.keys(dbUpdates).length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'No valid updates provided'
+            });
+        }
+
+        // Update database using project_numeric_id
+        const { error: dbError } = await supabase
+            .from('projects')
+            .update(dbUpdates)
+            .eq('project_numeric_id', projectId);
+
+        if (dbError) {
+            console.error('Database update failed:', dbError);
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to update database',
+                details: dbError.message,
+            });
+        }
+
+        console.log(`✅ Database updated successfully`);
+
+        const config = await getNetworkConfig();
+
+        return res.json({
+            success: true,
+            projectId,
+            signature,
+            updates: dbUpdates,
+            explorerUrl: `https://explorer.solana.com/tx/${signature}?cluster=${config.network}`,
+        });
+
+    } catch (error) {
+        console.error('❌ Error confirming project update:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Failed to confirm project update',
+            details: sanitizeErrorMessage(error.message),
+        });
+    }
+});
+
+/**
  * POST /api/program/mark-reveal-failed
  * Mark a box as failed to reveal due to system issues (oracle unavailable, etc.)
  * This makes the box eligible for a refund after the reveal window expires.

@@ -274,7 +274,7 @@ export default function ProjectPage({ subdomain }) {
                 toast.info(
                     <span>
                         View your boxes now in your{' '}
-                        <a href="/dashboard" className="underline font-medium hover:text-white">
+                        <a href="https://degenbox.fun/dashboard" className="underline font-medium hover:text-white">
                             dashboard
                         </a>
                     </span>,
@@ -329,7 +329,7 @@ export default function ProjectPage({ subdomain }) {
                     toast.info(
                         <span>
                             View your {purchasedCount} boxes in your{' '}
-                            <a href="/dashboard" className="underline font-medium hover:text-white">
+                            <a href="https://degenbox.fun/dashboard" className="underline font-medium hover:text-white">
                                 dashboard
                             </a>
                         </span>,

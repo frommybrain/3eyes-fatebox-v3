@@ -33,6 +33,7 @@ import {
     DashboardSkeleton,
     BoxCardSkeleton,
     OpenBoxConfirmModal,
+    DegenTooltip,
 } from '@/components/ui';
 import { getWinShareHandler, getMyProjectShareHandler } from '@/lib/shareManager';
 import TrophyCabinet from '@/components/profile/TrophyCabinet';
@@ -203,18 +204,25 @@ export default function Dashboard() {
                         <DegenTabsTrigger value="boxes">
                             My Boxes
                         </DegenTabsTrigger>
-                        <DegenTabsTrigger
-                            value="projects"
-                            disabled={!isAdmin}
-                            className={!isAdmin ? 'relative' : ''}
-                            label="My Projects"
+                        <DegenTooltip
+                            content="We are currently working with projects on an as-per basis to onboard them to deploy their own community lootbox. If you are interested in running your own lootbox, please reach out to @3eyes_iii on X.com"
+                            position="bottom"
+                            maxWidth={320}
+                            disabled={isAdmin}
                         >
-                            {!isAdmin && (
-                                <span className="absolute -top-2 -right-3 px-1.5 py-0.5 text-[10px] font-bold uppercase bg-degen-yellow text-degen-black rounded-sm whitespace-nowrap">
-                                    Coming Soon
-                                </span>
-                            )}
-                        </DegenTabsTrigger>
+                            <DegenTabsTrigger
+                                value="projects"
+                                disabled={!isAdmin}
+                                className={!isAdmin ? 'relative' : ''}
+                                label="My Projects"
+                            >
+                                {!isAdmin && (
+                                    <span className="absolute -top-2 -right-3 px-1.5 py-0.5 text-[10px] font-bold uppercase bg-degen-yellow text-degen-black rounded-sm whitespace-nowrap">
+                                        Coming Soon
+                                    </span>
+                                )}
+                            </DegenTabsTrigger>
+                        </DegenTooltip>
                         <DegenTabsTrigger value="profile">
                             Profile
                         </DegenTabsTrigger>

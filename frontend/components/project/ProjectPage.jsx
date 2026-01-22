@@ -35,6 +35,7 @@ export default function ProjectPage({ subdomain }) {
     // Loading state - tracks when project data is ready
     const [canvasReady, setCanvasReady] = useState(false);
     const [projectLoadAttempted, setProjectLoadAttempted] = useState(false);
+    const [isMobile, setIsMobile] = useState(false);
 
     // Batch purchase state
     const [quantity, setQuantity] = useState(1);
@@ -110,6 +111,14 @@ export default function ProjectPage({ subdomain }) {
             console.error('Failed to fetch balances:', error);
         }
     }, [connected, publicKey, connection, currentProject?.payment_token_mint]);
+
+    // Detect mobile on mount (matches lg: breakpoint at 1024px)
+    useEffect(() => {
+        const checkMobile = () => setIsMobile(window.innerWidth < 1024);
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+    }, []);
 
     // Load network config and project data on mount
     useEffect(() => {
@@ -434,8 +443,10 @@ export default function ProjectPage({ subdomain }) {
     // 1. Wallet is connected (or connecting) AND
     // 2. We're still loading data OR canvas isn't ready
     // Don't show overlay if user hasn't connected wallet yet
+    // On mobile, don't wait for canvas since it's not rendered
     const isWalletActive = connected || connecting;
-    const isStillLoading = isInitialLoading || (isReadyForPurchase && !canvasReady);
+    const needsCanvasReady = !isMobile && isReadyForPurchase && !canvasReady;
+    const isStillLoading = isInitialLoading || needsCanvasReady;
     const showLoadingOverlay = isWalletActive && isStillLoading && !isProjectNotFound && !isProjectPaused;
 
     // Network badge (show if devnet)

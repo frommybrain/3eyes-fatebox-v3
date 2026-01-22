@@ -13,6 +13,7 @@ export { TransactionProvider, useTransaction } from './TransactionOverlay';
 export { default as DegenModal, WinModal, BadgeModal, ProjectCreatedModal, OpenBoxConfirmModal } from './DegenModal';
 export { default as DegenAccordion } from './DegenAccordion';
 export { default as XLogo } from './XLogo';
+export { default as DegenTooltip } from './DegenTooltip';
 export {
     default as DegenSkeleton,
     SkeletonBox,

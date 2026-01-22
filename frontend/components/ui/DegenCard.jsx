@@ -62,7 +62,7 @@ function CardDropdown({ items = [], onSelect }) {
             {isOpen && (
                 <>
                     <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-                    <div className="absolute right-0 top-full mt-1 z-20 min-w-[140px] bg-degen-white border border-degen-black shadow-sm">
+                    <div className="absolute right-0 top-full mt-1 z-20 min-w-[160px] bg-degen-white border border-degen-black shadow-sm">
                         {items.map((item, index) => (
                             <button
                                 key={index}

@@ -110,7 +110,7 @@ export default function AdminDashboard() {
     useEffect(() => {
         if (config && isAdmin) {
             setConfigForm({
-                launchFeeAmount: config.launchFeeAmount ? config.launchFeeAmount / 1e9 : 100,
+                launchFeeAmount: config.launchFeeAmount ? config.launchFeeAmount / 1e6 : 100,
                 threeEyesMint: config.threeEyesMint?.toString() || '',
                 lootboxProgramId: config.lootboxProgramId?.toString() || config.programId?.toString() || '',
                 // Note: vaultFundAmount removed - now calculated dynamically based on box price
@@ -397,7 +397,7 @@ export default function AdminDashboard() {
         setSaving(true);
         try {
             const updates = {
-                launch_fee_amount: Math.floor(configForm.launchFeeAmount * 1e9),
+                launch_fee_amount: Math.floor(configForm.launchFeeAmount * 1e6),
                 // Note: vault_fund_amount removed - now calculated dynamically based on box price
                 // Note: withdrawal_fee_percentage removed - we use box commission instead (on-chain config)
             };
@@ -784,7 +784,7 @@ export default function AdminDashboard() {
                                 </div>
                                 <div>
                                     <p className="text-degen-text-muted text-xs uppercase tracking-wider">Launch Fee</p>
-                                    <p className="text-degen-black font-medium">{config.launchFeeAmount / 1e9} $3EYES</p>
+                                    <p className="text-degen-black font-medium">{config.launchFeeAmount / 1e6} $3EYES</p>
                                 </div>
                             </div>
                         </div>

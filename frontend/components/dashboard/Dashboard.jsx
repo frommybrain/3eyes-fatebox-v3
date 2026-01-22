@@ -813,7 +813,7 @@ function ProjectBoxesGroup({ projectGroup, onRefresh }) {
     const revealedBoxes = filterCounts.wins + filterCounts.lost + filterCounts.refund;
 
     return (
-        <DegenCard variant="default" padding="none" className="overflow-hidden">
+        <DegenCard variant="default" padding="none" >
             {/* Project Header */}
             <div className="p-3 border-b border-degen-black flex items-center justify-between">
                 <div className="flex items-center gap-4">
@@ -844,7 +844,7 @@ function ProjectBoxesGroup({ projectGroup, onRefresh }) {
                 <div className="text-right hidden md:block">
                     <p className="text-degen-black font-medium">{boxes.length} box{boxes.length !== 1 ? 'es' : ''}</p>
                     <p className="text-degen-text-muted text-sm">
-                        {pendingBoxes} pending, {revealedBoxes} revealed
+                        {/* {pendingBoxes} pending,*/}{revealedBoxes} revealed
                     </p>
                 </div>
             </div>
@@ -2177,9 +2177,9 @@ function BoxCard({ box, project, onRefresh }) {
             {isPending && (
                 <div className="absolute top-1 left-1 group">
                     <div className="text-xs font-bold text-degen-black bg-transparent px-1.5 py-0.5 cursor-default flex items-center gap-1">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none">
                             <path d="M17.28 9.05a5.5 5.5 0 1 0-10.56 0A5.5 5.5 0 1 0 12 17.66a5.5 5.5 0 1 0 5.28-8.6Z"/>
-                            <path d="M12 17.66L12 22"/>
+                            <path d="M11 17.66h2v5h-2z"/>
                         </svg>
                         {currentLuck}
                     </div>

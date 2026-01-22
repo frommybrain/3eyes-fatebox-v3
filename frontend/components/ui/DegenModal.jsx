@@ -3,6 +3,7 @@
 import { useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import DegenButton from './DegenButton';
+import DegenTooltip from './DegenTooltip';
 
 const variants = {
     default: {
@@ -88,6 +89,7 @@ export default function DegenModal({
         sm: 'max-w-sm',
         md: 'max-w-md',
         lg: 'max-w-lg',
+        xl: 'max-w-xl',
     };
 
     const handleBackdropClick = (e) => {
@@ -397,28 +399,45 @@ export function OpenBoxConfirmModal({
             variant="default"
             showClose={!isProcessing}
             closeOnBackdrop={!isProcessing}
-            size="md"
+            size="xl"
         >
-            <div className="py-2">
-                <p className="text-degen-black text-lg font-medium mb-4">
-                    Ready to open Box #{boxNumber}?
-                </p>
+            <div >
 
-                <div className="bg-degen-bg border border-degen-black p-4 mb-4">
-                    <p className="text-degen-text-muted text-sm uppercase tracking-wider mb-3">
-                        What happens next:
+                <Image
+                    src="/images/degenBox_two_thumbs_up.jpeg"
+                    alt="Open Box"
+                    width={800}
+                    height={600}
+                    className="w-full h-auto"
+                />
+
+                <div className="bg-white border border-degen-black p-4 mb-2">
+                    <p className="text-degen-black text-base font-medium mb-0">
+                        You&apos;re about to open Box #{boxNumber}
                     </p>
-                    <ul className="space-y-2 text-sm text-degen-black">
+                    <p className="text-degen-text-black text-sm tracking-wider mb-4">
+                        Here&apos;s what to expect:
+                    </p>
+                    <ul className="space-y-2 text-sm text-degen-black text-left">
                         <li className="flex items-start gap-2">
                             <span className="text-degen-blue font-bold">1.</span>
-                            <span>Your luck score will be <strong>frozen</strong> at {currentLuck || '?'}/{maxLuck || 60}</span>
+                            <span className="inline-flex items-center gap-1">
+                                A small amount of SOL is taken to cover gas fees
+                                <DegenTooltip content="Any unused gas will be returned upon reveal" position="top" maxWidth={200}>
+                                    <span className="w-4 h-4 rounded-full bg-degen-blue text-white text-xs flex items-center justify-center cursor-help">?</span>
+                                </DegenTooltip>
+                            </span>
                         </li>
                         <li className="flex items-start gap-2">
                             <span className="text-degen-blue font-bold">2.</span>
-                            <span>Wait <strong>~10 seconds</strong> for the oracle to generate randomness</span>
+                            <span>Your luck score will be <strong>frozen</strong> at {currentLuck || '?'}/{maxLuck || 60}</span>
                         </li>
                         <li className="flex items-start gap-2">
                             <span className="text-degen-blue font-bold">3.</span>
+                            <span>Wait <strong>~10 seconds</strong> for the oracle to generate randomness</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                            <span className="text-degen-blue font-bold">4.</span>
                             <span>Click <strong>Reveal</strong> to see your result</span>
                         </li>
                         <li className="flex items-start gap-2">
@@ -428,11 +447,11 @@ export function OpenBoxConfirmModal({
                     </ul>
                 </div>
 
-                <div className="bg-degen-yellow/20 border border-degen-yellow p-3 mb-4">
+                {/*<div className="bg-degen-yellow/20 border border-degen-yellow p-3 mb-4">
                     <p className="text-degen-black text-sm">
-                        <strong>Important:</strong> You must reveal within <strong>1 hour</strong> of opening, or the box expires as a Dud.
+                        <strong>Important:</strong> You must reveal within <strong>1 hour</strong> of opening, or the box expires.
                     </p>
-                </div>
+                </div>*/}
 
                 <div className="flex gap-2">
                     <DegenButton
@@ -455,9 +474,7 @@ export function OpenBoxConfirmModal({
                     </DegenButton>
                 </div>
 
-                <p className="text-degen-text-muted text-xs text-center mt-3">
-                    Good luck!
-                </p>
+
             </div>
         </DegenModal>
     );

@@ -52,5 +52,13 @@ backend/test-buyer-wallet.json
 
 # Image generation (temporary)
 backend/imageGen/
+
 # Program keypair - NEVER commit this
 backend/program/target/deploy/*-keypair.json
+
+# Personal docs (don't need on-chain or in version control)
+docs/
+
+# Development documentation (reference only, not needed in deployed code)
+documentation/
+database/

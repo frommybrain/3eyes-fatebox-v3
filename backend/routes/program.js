@@ -1097,6 +1097,7 @@ router.post('/build-create-box-tx', async (req, res) => {
                 vaultTokenAccount: vaultTokenAccount,
                 treasuryTokenAccount: treasuryTokenAccount,
                 treasury: treasuryPDA,
+                paymentTokenMint: paymentTokenMintPubkey,
                 tokenProgram: paymentTokenProgram, // Token or Token-2022
                 systemProgram: SystemProgram.programId,
             })
@@ -1472,6 +1473,7 @@ router.post('/build-create-boxes-batch-tx', async (req, res) => {
                         vaultTokenAccount: vaultTokenAccount,
                         treasuryTokenAccount: treasuryTokenAccount,
                         treasury: treasuryPDA,
+                        paymentTokenMint: paymentTokenMintPubkey,
                         tokenProgram: paymentTokenProgram,
                         systemProgram: SystemProgram.programId,
                     })

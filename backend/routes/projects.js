@@ -4,13 +4,19 @@
 
 import express from 'express';
 import { PublicKey } from '@solana/web3.js';
-import { getAssociatedTokenAddress } from '@solana/spl-token';
+import {
+    getAssociatedTokenAddressSync,
+    TOKEN_PROGRAM_ID,
+    TOKEN_2022_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+} from '@solana/spl-token';
 import { createClient } from '@supabase/supabase-js';
 import { getNetworkConfig } from '../lib/getNetworkConfig.js';
 import { getAnchorProgram } from '../lib/anchorClient.js';
 import {
     deriveProjectConfigPDA,
-    deriveVaultAuthorityPDA
+    deriveVaultAuthorityPDA,
+    getTokenProgramForMint
 } from '../lib/pdaHelpers.js';
 import { sanitizeErrorMessage } from '../lib/utils.js';
 
@@ -50,6 +56,8 @@ router.post('/create', async (req, res) => {
             subdomain,
             description,
             payment_token_mint,
+            payment_token_symbol,
+            payment_token_decimals,
             box_price,
             initialize_onchain = true
         } = req.body;
@@ -121,6 +129,9 @@ router.post('/create', async (req, res) => {
                 vault_pda: null,
                 vault_authority_pda: null,
                 vault_token_account: null,
+                payment_token_mint,
+                payment_token_symbol: payment_token_symbol || null,
+                payment_token_decimals: payment_token_decimals || null,
             })
             .select()
             .single();
@@ -154,7 +165,7 @@ router.post('/create', async (req, res) => {
 
         // Step 2: Derive PDAs using numeric project ID
         console.log(`\n🔑 Step 2: Deriving PDAs...`);
-        const { program } = await getAnchorProgram();
+        const { program, connection } = await getAnchorProgram();
 
         const [projectConfigPDA, projectConfigBump] = deriveProjectConfigPDA(program, numericProjectId);
         const [vaultAuthorityPDA, vaultAuthorityBump] = deriveVaultAuthorityPDA(
@@ -163,10 +174,16 @@ router.post('/create', async (req, res) => {
             paymentTokenPubkey
         );
 
-        const vaultTokenAccount = await getAssociatedTokenAddress(
+        // Detect token program (Token vs Token-2022) for correct ATA derivation
+        const paymentTokenProgram = await getTokenProgramForMint(connection, paymentTokenPubkey);
+        console.log(`   Token program: ${paymentTokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'}`);
+
+        const vaultTokenAccount = getAssociatedTokenAddressSync(
             paymentTokenPubkey,
             vaultAuthorityPDA,
-            true // allowOwnerOffCurve
+            true, // allowOwnerOffCurve
+            paymentTokenProgram,
+            ASSOCIATED_TOKEN_PROGRAM_ID
         );
 
         console.log(`✅ PDAs derived:`);

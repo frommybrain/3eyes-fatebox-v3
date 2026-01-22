@@ -605,7 +605,10 @@ router.get('/treasury-balances', async (req, res) => {
 
             if (accountInfo) {
                 const balanceBN = new BN(accountInfo.data.subarray(64, 72), 'le');
-                const decimals = project.payment_token_decimals || 9;
+                // Get decimals from mint account (not database) for accuracy
+                const { getMint } = await import('@solana/spl-token');
+                const mintInfo = await getMint(connection, tokenMintPubkey, 'confirmed', tokenProgram);
+                const decimals = mintInfo.decimals;
                 balances.push({
                     tokenMint: project.payment_token_mint,
                     symbol: project.payment_token_symbol || 'Unknown',

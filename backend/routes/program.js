@@ -2185,12 +2185,16 @@ router.post('/build-reveal-box-tx', async (req, res) => {
         const paymentTokenMintPubkey = new PublicKey(project.payment_token_mint);
         const randomnessAccountPubkey = new PublicKey(box.randomness_account);
 
+        // Detect token program (Token vs Token-2022)
+        const paymentTokenProgram = await getTokenProgramForMint(connection, paymentTokenMintPubkey);
+        console.log(`   Token program: ${paymentTokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'}`);
+
         // Derive PDAs
         const [platformConfigPDA] = derivePlatformConfigPDA(programId);
         const [projectConfigPDA] = deriveProjectConfigPDAStandalone(new PublicKey(config.programId), projectId);
         const [boxInstancePDA] = deriveBoxInstancePDA(programId, projectId, boxId);
         const [vaultAuthorityPDA] = deriveVaultAuthorityPDA(programId, projectId, paymentTokenMintPubkey);
-        const vaultTokenAccount = await deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMintPubkey);
+        const vaultTokenAccount = deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMintPubkey, paymentTokenProgram);
 
         console.log(`   Platform Config PDA: ${platformConfigPDA.toString()}`);
         console.log(`   Project Config PDA: ${projectConfigPDA.toString()}`);

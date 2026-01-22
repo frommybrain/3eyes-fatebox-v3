@@ -2583,6 +2583,68 @@ solana program close <BUFFER_ADDRESS> --keypair /tmp/deploy-keypair.json --url m
 - The `.env` file should be in `.gitignore`
 - Consider using a hardware wallet for mainnet upgrade authority in production
 
+### CRITICAL: CreateBox Stack Overflow Issue (Jan 2026)
+
+**Status:** UNRESOLVED - Program cannot be rebuilt with current toolchain
+
+**Problem:**
+When rebuilding the program with the current Anchor toolchain (0.31.x), the `CreateBox` instruction exceeds the Solana stack limit:
+
+```
+Error: Function CreateBox Stack offset of 4104 exceeded max offset of 4096 by 8 bytes
+```
+
+This causes `Access violation in stack frame` errors at runtime, crashing all box purchases.
+
+**Root Cause:**
+The `CreateBox` accounts struct has too many accounts, causing the generated `try_accounts` function to use more than 4KB of stack space. This is a latent issue that wasn't caught because:
+1. The currently deployed mainnet binary was built with an older toolchain
+2. The error appears during build but the build still "completes"
+3. The resulting binary crashes at runtime with cryptic memory errors
+
+**What Triggers This:**
+- ANY rebuild of the program, even without code changes
+- Adding new accounts to ANY instruction struct may push it over the limit
+- Upgrading Anchor or Solana toolchain versions
+
+**Current Workaround:**
+The mainnet program uses a pre-built `.so` binary stored in git. To deploy:
+1. Do NOT run `anchor build`
+2. Use `git checkout <working-commit> -- backend/program/target/deploy/lootbox_platform.so`
+3. Deploy the restored binary directly
+
+**Attempted Fix (Failed - Jan 2026):**
+Adding `close = owner` and `system_program` to SettleBox/RefundBox for Box PDA rent reclaim. Even though these changes didn't touch CreateBox, rebuilding the program triggered the stack overflow.
+
+**Proper Fix Required:**
+To make any future program changes, the stack overflow must be fixed first:
+
+1. **Option A: Split CreateBox into multiple instructions**
+   - Separate ATA creation from box creation
+   - Reduces accounts per instruction
+
+2. **Option B: Use Box/Unbox pattern**
+   - Store large structs on heap instead of stack
+   - Requires careful Anchor integration
+
+3. **Option C: Reduce account count**
+   - Remove optional accounts
+   - Derive more PDAs on-chain instead of passing them
+
+4. **Option D: Use zero-copy accounts**
+   - `#[account(zero_copy)]` for large account structs
+   - Reduces stack usage for account deserialization
+
+**Files Affected:**
+- `backend/program/programs/lootbox_platform/src/lib.rs` - CreateBox struct (~line 1377)
+- `backend/program/target/deploy/lootbox_platform.so` - Must preserve working binary
+
+**Testing Any Fix:**
+1. Build program: `anchor build`
+2. Check for stack errors in output
+3. If clean, test on devnet FIRST
+4. Never deploy untested builds to mainnet
+
 ### Program Verification (Solscan)
 
 The program is verified on Solscan using `solana-verify`. This proves the on-chain bytecode matches the public source code.

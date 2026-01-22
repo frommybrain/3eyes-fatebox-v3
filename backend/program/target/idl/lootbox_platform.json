@@ -357,32 +357,10 @@
           "name": "treasury_token_account",
           "docs": [
             "Treasury token account for receiving platform commission",
-            "Must match project's payment token and be owned by treasury PDA"
+            "Must match project's payment token. Owner verified in instruction body",
+            "(treasury PDA derived on-chain to reduce stack usage)"
           ],
           "writable": true
-        },
-        {
-          "name": "treasury",
-          "docs": [
-            "Treasury PDA (for verification)"
-          ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  114,
-                  101,
-                  97,
-                  115,
-                  117,
-                  114,
-                  121
-                ]
-              }
-            ]
-          }
         },
         {
           "name": "payment_token_mint",
@@ -726,9 +704,6 @@
         },
         {
           "name": "box_instance",
-          "docs": [
-            "Box instance PDA - closed after refund, rent returned to owner"
-          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -798,10 +773,6 @@
         },
         {
           "name": "token_program"
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
@@ -1009,9 +980,6 @@
         },
         {
           "name": "box_instance",
-          "docs": [
-            "Box instance PDA - closed after settle, rent returned to owner"
-          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -1081,10 +1049,6 @@
         },
         {
           "name": "token_program"
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [

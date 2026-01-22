@@ -363,32 +363,10 @@ export type LootboxPlatform = {
           "name": "treasuryTokenAccount",
           "docs": [
             "Treasury token account for receiving platform commission",
-            "Must match project's payment token and be owned by treasury PDA"
+            "Must match project's payment token. Owner verified in instruction body",
+            "(treasury PDA derived on-chain to reduce stack usage)"
           ],
           "writable": true
-        },
-        {
-          "name": "treasury",
-          "docs": [
-            "Treasury PDA (for verification)"
-          ],
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  114,
-                  101,
-                  97,
-                  115,
-                  117,
-                  114,
-                  121
-                ]
-              }
-            ]
-          }
         },
         {
           "name": "paymentTokenMint",
@@ -732,9 +710,6 @@ export type LootboxPlatform = {
         },
         {
           "name": "boxInstance",
-          "docs": [
-            "Box instance PDA - closed after refund, rent returned to owner"
-          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -804,10 +779,6 @@ export type LootboxPlatform = {
         },
         {
           "name": "tokenProgram"
-        },
-        {
-          "name": "systemProgram",
-          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
@@ -1015,9 +986,6 @@ export type LootboxPlatform = {
         },
         {
           "name": "boxInstance",
-          "docs": [
-            "Box instance PDA - closed after settle, rent returned to owner"
-          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -1087,10 +1055,6 @@ export type LootboxPlatform = {
         },
         {
           "name": "tokenProgram"
-        },
-        {
-          "name": "systemProgram",
-          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [

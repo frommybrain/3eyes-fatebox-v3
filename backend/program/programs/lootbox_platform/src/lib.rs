@@ -379,6 +379,14 @@ pub mod lootbox_platform {
         // Check platform is not paused
         require!(!ctx.accounts.platform_config.paused, LootboxError::PlatformPaused);
 
+        // Verify treasury_token_account is owned by treasury PDA
+        // (Derived on-chain to reduce account count and stack usage)
+        let (treasury_pda, _bump) = Pubkey::find_program_address(&[b"treasury"], ctx.program_id);
+        require!(
+            ctx.accounts.treasury_token_account.owner == treasury_pda,
+            LootboxError::InvalidTreasuryTokenAccount
+        );
+
         let project_config = &mut ctx.accounts.project_config;
         let box_instance = &mut ctx.accounts.box_instance;
         let platform_config = &ctx.accounts.platform_config;
@@ -1431,21 +1439,13 @@ pub struct CreateBox<'info> {
     pub vault_token_account: InterfaceAccount<'info, TokenAccount>,
 
     /// Treasury token account for receiving platform commission
-    /// Must match project's payment token and be owned by treasury PDA
+    /// Must match project's payment token. Owner verified in instruction body
+    /// (treasury PDA derived on-chain to reduce stack usage)
     #[account(
         mut,
-        constraint = treasury_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidTreasuryTokenAccount,
-        constraint = treasury_token_account.owner == treasury.key() @ LootboxError::InvalidTreasuryTokenAccount
+        constraint = treasury_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidTreasuryTokenAccount
     )]
     pub treasury_token_account: InterfaceAccount<'info, TokenAccount>,
-
-    /// Treasury PDA (for verification)
-    /// CHECK: Verified by seeds
-    #[account(
-        seeds = [b"treasury"],
-        bump = platform_config.treasury_bump
-    )]
-    pub treasury: UncheckedAccount<'info>,
 
     /// Payment token mint - needed for transfer_checked decimals
     #[account(
@@ -1547,13 +1547,11 @@ pub struct SettleBox<'info> {
     )]
     pub project_config: Account<'info, ProjectConfig>,
 
-    /// Box instance PDA - closed after settle, rent returned to owner
     #[account(
         mut,
         seeds = [b"box", project_id.to_le_bytes().as_ref(), box_id.to_le_bytes().as_ref()],
         bump,
-        constraint = box_instance.owner == owner.key() @ LootboxError::NotBoxOwner,
-        close = owner
+        constraint = box_instance.owner == owner.key() @ LootboxError::NotBoxOwner
     )]
     pub box_instance: Account<'info, BoxInstance>,
 
@@ -1587,7 +1585,6 @@ pub struct SettleBox<'info> {
     pub owner_token_account: InterfaceAccount<'info, TokenAccount>,
 
     pub token_program: Interface<'info, TokenInterface>,
-    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -1607,13 +1604,11 @@ pub struct RefundBox<'info> {
     )]
     pub project_config: Account<'info, ProjectConfig>,
 
-    /// Box instance PDA - closed after refund, rent returned to owner
     #[account(
         mut,
         seeds = [b"box", project_id.to_le_bytes().as_ref(), box_id.to_le_bytes().as_ref()],
         bump,
-        constraint = box_instance.owner == owner.key() @ LootboxError::NotBoxOwner,
-        close = owner
+        constraint = box_instance.owner == owner.key() @ LootboxError::NotBoxOwner
     )]
     pub box_instance: Account<'info, BoxInstance>,
 
@@ -1647,7 +1642,6 @@ pub struct RefundBox<'info> {
     pub owner_token_account: InterfaceAccount<'info, TokenAccount>,
 
     pub token_program: Interface<'info, TokenInterface>,
-    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]

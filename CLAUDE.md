@@ -1981,7 +1981,26 @@ All treasury operations are logged to the `treasury_processing_log` table with:
 
 **Testing Status:**
 - Devnet: Withdrawal tested successfully with `--withdraw-only --test-multiplier 0.2`
-- Mainnet: **NOT TESTED** - Jupiter swaps require real liquidity
+- Mainnet: **TESTED & WORKING** (Jan 2026) - Full flow executed successfully:
+  - Withdraw: 10,010.5 3EYES from treasury → admin wallet
+  - Swap: 10,010.5 3EYES → 0.006942 SOL via Jupiter/Pump.fun AMM
+  - Buyback: 0.006248 SOL (90%) → 8,799.3 3EYES
+
+### CLI Script vs Admin Dashboard Button
+
+**Important:** There are TWO separate mechanisms for treasury operations:
+
+| Feature | CLI Script | Admin Dashboard Button |
+|---------|------------|------------------------|
+| **File** | `backend/scripts/process-treasury-fees.js` | Calls `/api/admin/withdraw-treasury` |
+| **What it does** | Full flow: Withdraw → Swap to SOL → 90% buyback / 10% dev | Simple withdraw only (treasury → admin wallet) |
+| **Use case** | Batch processing of accumulated fees | Quick single-token withdrawals |
+| **Jupiter integration** | Yes (mainnet only) | No |
+| **Database logging** | Yes (treasury_processing_log) | No |
+
+**Recommended workflow:**
+1. Use **Admin Dashboard** for quick withdrawals or devnet testing
+2. Use **CLI script** for mainnet batch processing with Jupiter swaps and buyback
 
 ### API Endpoints
 
@@ -2319,6 +2338,38 @@ solana account <PDA_ADDRESS> --url devnet
 3. Report to Switchboard Discord
 
 **Note:** This is a Switchboard infrastructure issue, not a code bug. Mainnet oracles are generally more reliable.
+
+### Phantom "This dApp could be malicious" Warning
+
+**Error:** Phantom wallet shows security warning: "This dApp could be malicious. Proceed with caution if you trust this app."
+
+**Cause:** Phantom's Lighthouse security system flags transactions with multiple signers if the signing order isn't correct. The Switchboard VRF randomness keypair requires a second signer beyond the user's wallet.
+
+**Fix:** Sign in the correct order - Phantom wallet FIRST, then additional signers afterward:
+
+```javascript
+// CORRECT ORDER (avoids warning):
+// 1. Phantom wallet signs first
+const walletSignedTx = await signTransaction(transaction);
+
+// 2. Additional signers sign afterward
+walletSignedTx.partialSign(randomnessKeypair);
+
+// 3. Send fully signed transaction
+const signature = await connection.sendRawTransaction(walletSignedTx.serialize());
+```
+
+```javascript
+// WRONG (causes warning):
+// Using sendTransaction with signers array - signs in wrong order
+const signature = await sendTransaction(transaction, connection, {
+    signers: [randomnessKeypair], // This signs BEFORE wallet
+});
+```
+
+**Reference:** [Phantom Docs - Signing with Multiple Signers](https://docs.phantom.app/solana/signing-a-transaction#signing-and-sending-a-transaction-with-multiple-signers)
+
+**Key Implementation File:** `frontend/components/dashboard/Dashboard.jsx` - `handleCommit()` function
 
 ### Transaction Simulation Fails
 **Debug:** Check simulation logs for the actual error:

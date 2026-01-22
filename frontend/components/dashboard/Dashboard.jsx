@@ -1334,7 +1334,7 @@ function BoxCard({ box, project, onRefresh }) {
 
     // Handle commit box (Open Box - step 1)
     const handleCommit = async () => {
-        if (!publicKey || !sendTransaction) return;
+        if (!publicKey || !signTransaction) return;
 
         setIsProcessing(true);
         setProcessingStep('commit');
@@ -1378,12 +1378,19 @@ function BoxCard({ box, project, onRefresh }) {
             // Step 3: Deserialize transaction
             const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
 
-            // Step 4: Use wallet adapter's sendTransaction with signers array
-            // This uses signAndSendTransaction internally which may avoid Phantom warnings
-            // The wallet adapter handles partial signing when signers are provided
+            // Step 4: Sign in the correct order to avoid Phantom's Lighthouse security warnings
+            // Per Phantom support: Wallet MUST sign first, then additional signers sign afterward
+            // See: https://docs.phantom.app/solana/signing-a-transaction#signing-and-sending-a-transaction-with-multiple-signers
             addLog('Requesting wallet signature...');
-            const signature = await sendTransaction(transaction, connection, {
-                signers: [randomnessKeypair], // Additional signers passed to wallet adapter
+
+            // 4a: Phantom wallet signs first
+            const walletSignedTx = await signTransaction(transaction);
+
+            // 4b: Additional signers (randomness keypair) sign afterward
+            walletSignedTx.partialSign(randomnessKeypair);
+
+            // 4c: Send the fully signed transaction
+            const signature = await connection.sendRawTransaction(walletSignedTx.serialize(), {
                 skipPreflight: true,
                 preflightCommitment: 'confirmed',
             });

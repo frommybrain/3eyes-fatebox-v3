@@ -1334,7 +1334,7 @@ function BoxCard({ box, project, onRefresh }) {
 
     // Handle commit box (Open Box - step 1)
     const handleCommit = async () => {
-        if (!publicKey || !signTransaction) return;
+        if (!publicKey || !sendTransaction) return;
 
         setIsProcessing(true);
         setProcessingStep('commit');
@@ -1378,29 +1378,18 @@ function BoxCard({ box, project, onRefresh }) {
             // Step 3: Deserialize transaction
             const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
 
-            // Get fresh blockhash
-            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-            transaction.recentBlockhash = blockhash;
-            transaction.lastValidBlockHeight = lastValidBlockHeight;
-            transaction.feePayer = publicKey;
-
-            // Step 4: Partially sign with client-generated randomness keypair
-            addLog('Signing with randomness keypair...');
-            transaction.partialSign(randomnessKeypair);
-
-            // Step 5: Sign with user's wallet
+            // Step 4: Use wallet adapter's sendTransaction with signers array
+            // This uses signAndSendTransaction internally which may avoid Phantom warnings
+            // The wallet adapter handles partial signing when signers are provided
             addLog('Requesting wallet signature...');
-            const signedTransaction = await signTransaction(transaction);
-
-            // Step 5: Send the signed transaction
-            addLog('Submitting to Solana...');
-            const signature = await connection.sendRawTransaction(signedTransaction.serialize(), {
+            const signature = await sendTransaction(transaction, connection, {
+                signers: [randomnessKeypair], // Additional signers passed to wallet adapter
                 skipPreflight: true,
                 preflightCommitment: 'confirmed',
             });
             addLog(`TX: ${signature.slice(0, 8)}...`);
 
-            // Step 6: Wait for confirmation
+            // Step 5: Wait for confirmation
             addLog('Waiting for confirmation...');
             await connection.confirmTransaction(signature, 'confirmed');
 

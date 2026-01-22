@@ -1349,7 +1349,14 @@ function BoxCard({ box, project, onRefresh }) {
                 setOptimisticBox({ randomness_committed: true, committed_at: new Date().toISOString() });
             });
 
-            // Step 1: Build commit transaction
+            // Step 1: Generate randomness keypair CLIENT-SIDE (prevents Phantom security warning)
+            // Phantom flags transactions where backend sends secret keys as potentially malicious
+            addLog('Generating randomness keypair...');
+            const { Keypair } = await import('@solana/web3.js');
+            const randomnessKeypair = Keypair.generate();
+            const randomnessPublicKey = randomnessKeypair.publicKey.toString();
+
+            // Step 2: Build commit transaction with client-generated public key
             addLog('Building transaction...');
             const buildResponse = await fetch(`${backendUrl}/api/program/build-commit-box-tx`, {
                 method: 'POST',
@@ -1358,6 +1365,7 @@ function BoxCard({ box, project, onRefresh }) {
                     projectId: project.project_numeric_id,
                     boxId: box.box_number,
                     ownerWallet: walletAddress,
+                    randomnessPublicKey, // Send client-generated public key
                 }),
             });
 
@@ -1367,14 +1375,8 @@ function BoxCard({ box, project, onRefresh }) {
             }
             addLog('Transaction built');
 
-            // Step 2: Deserialize transaction
+            // Step 3: Deserialize transaction
             const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
-
-            // Step 3: Add randomness keypair as signer (base64 encoded from backend)
-            addLog('Creating randomness account...');
-            const { Keypair } = await import('@solana/web3.js');
-            const secretKeyBytes = Buffer.from(buildResult.randomnessKeypair, 'base64');
-            const randomnessKeypair = Keypair.fromSecretKey(secretKeyBytes);
 
             // Get fresh blockhash
             const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
@@ -1382,10 +1384,11 @@ function BoxCard({ box, project, onRefresh }) {
             transaction.lastValidBlockHeight = lastValidBlockHeight;
             transaction.feePayer = publicKey;
 
-            // Partially sign with randomness keypair first
+            // Step 4: Partially sign with client-generated randomness keypair
+            addLog('Signing with randomness keypair...');
             transaction.partialSign(randomnessKeypair);
 
-            // Step 4: Sign with user's wallet
+            // Step 5: Sign with user's wallet
             addLog('Requesting wallet signature...');
             const signedTransaction = await signTransaction(transaction);
 

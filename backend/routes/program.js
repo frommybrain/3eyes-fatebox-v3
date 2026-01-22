@@ -34,6 +34,7 @@ import { getNetworkConfig } from '../lib/getNetworkConfig.js';
 import { createClient } from '@supabase/supabase-js';
 import {
     createRandomnessAccount,
+    createRandomnessAccountWithClientKeypair,
     createCommitInstruction,
     createRevealInstruction,
     createCloseInstruction,
@@ -1684,25 +1685,29 @@ router.post('/confirm-boxes-batch', async (req, res) => {
  * This commits randomness and freezes luck at the current time.
  * User then has 1 hour to call reveal.
  *
+ * SECURITY: The randomness keypair is generated CLIENT-SIDE to avoid Phantom
+ * wallet security warnings. The client sends only the PUBLIC KEY here, and
+ * signs with the keypair locally before submitting the transaction.
+ *
  * Body:
  * - projectId: number - Numeric project ID
  * - boxId: number - Box ID to open
  * - ownerWallet: string - Box owner's wallet address
+ * - randomnessPublicKey: string - Client-generated randomness account public key
  *
  * Returns:
- * - transaction: Serialized transaction for owner to sign
- * - randomnessKeypair: Serialized keypair that must be included as signer
+ * - transaction: Serialized transaction for owner to sign (requires randomness keypair signature)
  * - randomnessAccount: Public key of the randomness account
  */
 router.post('/build-commit-box-tx', async (req, res) => {
     try {
-        const { projectId, boxId, ownerWallet } = req.body;
+        const { projectId, boxId, ownerWallet, randomnessPublicKey } = req.body;
 
         // Validate input
-        if (!projectId || boxId === undefined || !ownerWallet) {
+        if (!projectId || boxId === undefined || !ownerWallet || !randomnessPublicKey) {
             return res.status(400).json({
                 success: false,
-                error: 'Missing required fields: projectId, boxId, ownerWallet'
+                error: 'Missing required fields: projectId, boxId, ownerWallet, randomnessPublicKey'
             });
         }
 
@@ -1768,9 +1773,14 @@ router.post('/build-commit-box-tx', async (req, res) => {
         // ========================================
         console.log(`\n🎰 Setting up Switchboard VRF randomness...`);
 
-        // Create Switchboard randomness account - pass owner as payer
-        const { keypair: rngKeypair, randomness, createInstruction: createRandomnessIx, publicKey: randomnessAccountPubkey } =
-            await createRandomnessAccount(provider, config.network, ownerPubkey);
+        // Parse client-provided randomness public key
+        const randomnessPubkey = new PublicKey(randomnessPublicKey);
+        console.log(`   Client-provided randomness pubkey: ${randomnessPubkey.toString()}`);
+
+        // Create Switchboard randomness account using CLIENT-PROVIDED keypair
+        // This avoids Phantom security warnings (no secret key transmission)
+        const { randomness, createInstruction: createRandomnessIx, publicKey: randomnessAccountPubkey } =
+            await createRandomnessAccountWithClientKeypair(provider, config.network, ownerPubkey, randomnessPubkey);
 
         console.log(`   Randomness account: ${randomnessAccountPubkey.toString()}`);
 
@@ -1819,17 +1829,17 @@ router.post('/build-commit-box-tx', async (req, res) => {
             verifySignatures: false,
         }).toString('base64');
 
-        // Serialize the randomness keypair so frontend can include it as signer
-        const serializedRandomnessKeypair = serializeKeypair(rngKeypair);
+        // NOTE: No longer sending randomnessKeypair - client generates and holds it locally
+        // This prevents Phantom wallet security warnings about secret key transmission
 
         console.log(`\n✅ Commit transaction built successfully!`);
         console.log(`   Total instructions: ${transaction.instructions.length}`);
         console.log(`   User has 1 HOUR to reveal after this commits`);
+        console.log(`   Client must sign with their locally-held randomness keypair`);
 
         return res.json({
             success: true,
             transaction: serializedTransaction,
-            randomnessKeypair: serializedRandomnessKeypair,
             randomnessAccount: randomnessAccountPubkey.toString(),
             boxId,
             projectId,

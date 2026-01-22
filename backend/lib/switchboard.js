@@ -89,6 +89,55 @@ export async function createRandomnessAccount(provider, network = 'devnet', paye
 }
 
 /**
+ * Create a Switchboard randomness account using a CLIENT-PROVIDED keypair
+ * This avoids Phantom security warnings by not transmitting secret keys
+ *
+ * The client generates a keypair locally and sends only the PUBLIC KEY to the backend.
+ * The backend builds the transaction, and the client signs with both their wallet
+ * and the locally-held randomness keypair.
+ *
+ * @param {Object} provider - Anchor provider
+ * @param {string} network - Network name
+ * @param {PublicKey} payer - The payer for the randomness account creation (buyer's wallet)
+ * @param {PublicKey} randomnessPublicKey - Client-generated randomness account public key
+ * @returns {Promise<Object>} { randomness, createInstruction, publicKey }
+ */
+export async function createRandomnessAccountWithClientKeypair(provider, network = 'devnet', payer, randomnessPublicKey) {
+    console.log(`\n[Switchboard] Creating randomness account with CLIENT-PROVIDED keypair...`);
+    console.log(`   Payer: ${payer ? payer.toString() : 'provider wallet (default)'}`);
+    console.log(`   Client-provided randomness pubkey: ${randomnessPublicKey.toString()}`);
+
+    const { queue } = getSwitchboardConstants(network);
+    const sbProgram = await getSwitchboardProgram(provider, network);
+
+    // Create a "fake" keypair object that only has the public key
+    // The Randomness.create() function only uses the public key for the instruction
+    // The actual signing happens on the client side
+    const fakeKeypair = {
+        publicKey: randomnessPublicKey,
+        secretKey: new Uint8Array(64), // Dummy - will be signed by client
+    };
+
+    // Create the randomness account and get the instruction
+    // Pass payer as the 4th argument so buyer pays, not backend wallet
+    const [randomness, createInstruction] = await Randomness.create(
+        sbProgram,
+        fakeKeypair,
+        queue,
+        payer  // Buyer pays for account creation
+    );
+
+    console.log(`   Randomness account: ${randomness.pubkey.toString()}`);
+    console.log(`   Queue: ${queue.toString()}`);
+
+    return {
+        randomness,
+        createInstruction,
+        publicKey: randomness.pubkey,
+    };
+}
+
+/**
  * Create a commit instruction for requesting randomness
  * Pass authority explicitly to avoid needing to fetch account data
  * (account may not exist yet if we're batching create + commit in one tx)

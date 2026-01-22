@@ -1491,16 +1491,8 @@ export default function AdminDashboard() {
                                                                     {token.tokenMint?.slice(0, 8)}...{token.tokenMint?.slice(-8)}
                                                                 </p>
                                                             </div>
-                                                            {parseFloat(token.balance) > 0 && (
-                                                                <DegenButton
-                                                                    onClick={() => handleWithdrawToken(token.tokenMint, token.symbol)}
-                                                                    variant="primary"
-                                                                    size="sm"
-                                                                    disabled={withdrawingToken === token.tokenMint}
-                                                                >
-                                                                    {withdrawingToken === token.tokenMint ? 'Withdrawing...' : 'Withdraw'}
-                                                                </DegenButton>
-                                                            )}
+                                                            {/* Withdraw button removed - use CLI script instead:
+                                                               node backend/scripts/process-treasury-fees.js */}
                                                         </div>
                                                     </div>
                                                     {token.treasuryTokenAccount && (

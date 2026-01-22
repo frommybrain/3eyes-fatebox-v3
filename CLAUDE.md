@@ -1767,15 +1767,36 @@ transaction.add(closeIx);
 **Cost Breakdown per Box (with rent reclaim):**
 | Component | Cost |
 |-----------|------|
+| Box PDA Rent | ~0.00146 SOL (temporary) |
 | Randomness Account Rent | ~0.006 SOL (temporary) |
 | Oracle Fee | ~0.002 SOL |
 | Transaction Fees | ~0.00001 SOL |
-| **Rent Reclaimed** | **+0.006 SOL** |
+| **Rent Reclaimed (Box PDA)** | **+0.00146 SOL** |
+| **Rent Reclaimed (Randomness)** | **+0.006 SOL** |
 | **Net Cost** | **~0.002 SOL** |
 
 **Database Tracking:**
-- `boxes.randomness_closed` (boolean) - tracks if rent was reclaimed
+- `boxes.randomness_closed` (boolean) - tracks if randomness account rent was reclaimed
 - Migration: `019_add_randomness_closed_column.sql`
+
+### Box PDA Rent Reclaim
+
+As of Jan 2026, the Box PDA is automatically closed when a box is settled or refunded. The rent (~0.00146 SOL) is returned to the box owner.
+
+**Implementation:**
+- `SettleBox` accounts struct has `close = owner` constraint on `box_instance`
+- `RefundBox` accounts struct has `close = owner` constraint on `box_instance`
+- `systemProgram` is required in both instructions for the close operation
+
+**Trade-off:** Closing the Box PDA means we lose the on-chain record after settlement. However:
+1. The Switchboard VRF proof was already closed after reveal (no on-chain proof anyway)
+2. Full box history is preserved in the database with all transaction signatures
+3. Transaction history on Solscan serves as permanent audit trail
+4. Users save ~0.0015 SOL per box
+
+**Files Modified:**
+- `backend/program/programs/lootbox_platform/src/lib.rs` - Added `close = owner` and `system_program` to SettleBox and RefundBox
+- `backend/routes/program.js` - Added `systemProgram` to settle and refund transaction builders
 
 ### Important Notes
 

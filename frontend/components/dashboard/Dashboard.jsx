@@ -1067,6 +1067,7 @@ function BoxCard({ box, project, onRefresh }) {
     const [expiryCountdown, setExpiryCountdown] = useState(null); // seconds until commit expires
     const [commitCooldown, setCommitCooldown] = useState(null); // seconds until "Open Box" enabled after purchase
     const [refundCooldown, setRefundCooldown] = useState(null); // seconds until refund enabled (grace period)
+    const [currentLuck, setCurrentLuck] = useState(config?.baseLuck || 5); // Real-time luck display
     const [, startBoxTransition] = useTransition();
 
     // Win popup state
@@ -1127,6 +1128,28 @@ function BoxCard({ box, project, onRefresh }) {
         const interval = setInterval(updateCooldown, 1000);
         return () => clearInterval(interval);
     }, [isPending, box.created_at]);
+
+    // Real-time luck update for pending boxes
+    useEffect(() => {
+        if (!isPending || !box.created_at || !config) return;
+
+        const updateLuck = () => {
+            const createdTime = parseAsUTC(box.created_at);
+            if (!createdTime) return;
+
+            const holdTimeSeconds = Math.floor((Date.now() - createdTime) / 1000);
+            const luckInterval = project?.luck_interval_seconds || config?.luckIntervalSeconds || 3600;
+            const baseLuck = config?.baseLuck || 5;
+            const maxLuck = config?.maxLuck || 60;
+
+            const bonusLuck = Math.floor(holdTimeSeconds / luckInterval);
+            setCurrentLuck(Math.min(baseLuck + bonusLuck, maxLuck));
+        };
+
+        updateLuck();
+        const interval = setInterval(updateLuck, 1000);
+        return () => clearInterval(interval);
+    }, [isPending, box.created_at, config, project?.luck_interval_seconds]);
 
     // Countdown timers for committed boxes
     useEffect(() => {
@@ -2134,6 +2157,23 @@ function BoxCard({ box, project, onRefresh }) {
                 ${isRevealed && !hasReward && !isRefunded && !isRefundEligible ? 'bg-degen-container border-degen-black hover:bg-degen-white' : ''}
             `}
         >
+            {/* Top left: Luck display for pending boxes */}
+            {isPending && (
+                <div className="absolute top-1 left-1 group">
+                    <div className="text-xs font-bold text-degen-yellow bg-degen-black px-1.5 py-0.5 cursor-default">
+                        {currentLuck}L
+                    </div>
+                    {/* Tooltip on hover */}
+                    <div className="absolute left-0 top-full mt-1 z-20 w-32 bg-degen-white border border-degen-black shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                        <div className="px-2 py-1.5 text-xs text-degen-black">
+                            <strong>Current Luck</strong>
+                            <div className="mt-0.5">{currentLuck} / {config?.maxLuck || 60}</div>
+                            <div className="text-degen-text-muted mt-1">Hold longer for better odds!</div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Top right icons: Pie clock (for committed, not refund-eligible) + Proof Menu Dropdown */}
             <div className="absolute top-1 right-1 flex items-center gap-1">
                 {/* Pie clock for committed boxes - hide if refund-eligible */}

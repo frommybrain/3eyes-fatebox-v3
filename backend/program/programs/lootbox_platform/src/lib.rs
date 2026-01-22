@@ -1547,11 +1547,13 @@ pub struct SettleBox<'info> {
     )]
     pub project_config: Account<'info, ProjectConfig>,
 
+    /// Box instance PDA - closed after settle, rent returned to owner
     #[account(
         mut,
         seeds = [b"box", project_id.to_le_bytes().as_ref(), box_id.to_le_bytes().as_ref()],
         bump,
-        constraint = box_instance.owner == owner.key() @ LootboxError::NotBoxOwner
+        constraint = box_instance.owner == owner.key() @ LootboxError::NotBoxOwner,
+        close = owner
     )]
     pub box_instance: Account<'info, BoxInstance>,
 
@@ -1585,6 +1587,7 @@ pub struct SettleBox<'info> {
     pub owner_token_account: InterfaceAccount<'info, TokenAccount>,
 
     pub token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -1604,11 +1607,13 @@ pub struct RefundBox<'info> {
     )]
     pub project_config: Account<'info, ProjectConfig>,
 
+    /// Box instance PDA - closed after refund, rent returned to owner
     #[account(
         mut,
         seeds = [b"box", project_id.to_le_bytes().as_ref(), box_id.to_le_bytes().as_ref()],
         bump,
-        constraint = box_instance.owner == owner.key() @ LootboxError::NotBoxOwner
+        constraint = box_instance.owner == owner.key() @ LootboxError::NotBoxOwner,
+        close = owner
     )]
     pub box_instance: Account<'info, BoxInstance>,
 
@@ -1642,6 +1647,7 @@ pub struct RefundBox<'info> {
     pub owner_token_account: InterfaceAccount<'info, TokenAccount>,
 
     pub token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]

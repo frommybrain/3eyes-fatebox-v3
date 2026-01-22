@@ -732,6 +732,9 @@ export type LootboxPlatform = {
         },
         {
           "name": "boxInstance",
+          "docs": [
+            "Box instance PDA - closed after refund, rent returned to owner"
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -801,6 +804,10 @@ export type LootboxPlatform = {
         },
         {
           "name": "tokenProgram"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
@@ -1008,6 +1015,9 @@ export type LootboxPlatform = {
         },
         {
           "name": "boxInstance",
+          "docs": [
+            "Box instance PDA - closed after settle, rent returned to owner"
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -1077,6 +1087,10 @@ export type LootboxPlatform = {
         },
         {
           "name": "tokenProgram"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [

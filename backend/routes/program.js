@@ -2978,6 +2978,7 @@ router.post('/build-settle-box-tx', async (req, res) => {
                 vaultTokenAccount: vaultTokenAccount,
                 ownerTokenAccount: ownerTokenAccount,
                 tokenProgram: paymentTokenProgram, // Token or Token-2022
+                systemProgram: anchor.web3.SystemProgram.programId, // Required for closing box PDA
             })
             .transaction();
 
@@ -3690,10 +3691,14 @@ router.post('/build-refund-box-tx', async (req, res) => {
         const projectIdBN = new BN(projectId);
         const boxIdBN = new BN(boxId);
 
+        // Derive platform config PDA for refund instruction
+        const [platformConfigPDA] = derivePlatformConfigPDA(programId);
+
         const refundTx = await program.methods
             .refundBox(projectIdBN, boxIdBN)
             .accounts({
                 owner: ownerPubkey,
+                platformConfig: platformConfigPDA,
                 projectConfig: projectConfigPDA,
                 boxInstance: new PublicKey(box.box_pda),
                 vaultAuthority: vaultAuthorityPDA,
@@ -3701,6 +3706,7 @@ router.post('/build-refund-box-tx', async (req, res) => {
                 vaultTokenAccount: vaultTokenAccount,
                 ownerTokenAccount: ownerTokenAccount,
                 tokenProgram: paymentTokenProgram, // Token or Token-2022
+                systemProgram: anchor.web3.SystemProgram.programId, // Required for closing box PDA
             })
             .transaction();
 

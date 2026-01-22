@@ -3,9 +3,15 @@
  * Process Treasury Fees
  *
  * This script processes accumulated treasury fees:
- * 1. Withdraws tokens from treasury to admin wallet
- * 2. Swaps tokens to SOL via Jupiter
- * 3. 90% of SOL used to buy $3EYES (stays in admin wallet for now)
+ *
+ * For $3EYES tokens:
+ * 1. Keep 90% in treasury (no point buying back what we already have)
+ * 2. Withdraw only 10%, swap to SOL, send to dev wallet
+ *
+ * For other tokens:
+ * 1. Withdraw 100% from treasury
+ * 2. Swap to SOL via Jupiter
+ * 3. 90% of SOL used to buy $3EYES (stays in admin wallet)
  * 4. 10% of SOL sent to dev wallet
  *
  * Usage:
@@ -356,8 +362,17 @@ async function main() {
         const uiFullBalance = Number(fullBalance) / Math.pow(10, decimals);
         console.log(`   Full Balance: ${uiFullBalance.toLocaleString()} ${payment_token_symbol || 'tokens'}`);
 
-        // Apply test multiplier if set
-        if (TEST_MULTIPLIER < 1.0) {
+        // Check if this is the $3EYES token - special handling
+        const isThreeEyesToken = threeEyesMint && payment_token_mint === threeEyesMint;
+
+        if (isThreeEyesToken) {
+            console.log(`   🎯 This is $3EYES - special handling: keep 90% in treasury, withdraw only 10% for dev`);
+            // For 3EYES: only withdraw 10% (no point buying back what we already have)
+            balance = BigInt(Math.floor(Number(balance) * 0.1));
+            const uiBalance = Number(balance) / Math.pow(10, decimals);
+            console.log(`   Processing: ${uiBalance.toLocaleString()} ${payment_token_symbol} (10% of balance for dev)`);
+        } else if (TEST_MULTIPLIER < 1.0) {
+            // Apply test multiplier if set (only for non-3EYES tokens)
             balance = BigInt(Math.floor(Number(balance) * TEST_MULTIPLIER));
             const uiBalance = Number(balance) / Math.pow(10, decimals);
             console.log(`   Processing: ${uiBalance.toLocaleString()} ${payment_token_symbol} (${TEST_MULTIPLIER * 100}% of balance)`);
@@ -392,10 +407,14 @@ async function main() {
             console.log('\n   [DRY RUN] Would process:');
             console.log(`   - Withdraw ${uiBalance} ${payment_token_symbol} from treasury`);
             console.log(`   - Swap to ~${estimatedSol.toFixed(6)} SOL via Jupiter`);
-            if (threeEyesMint) {
-                console.log(`   - Use ${BUYBACK_PERCENTAGE}% (~${(estimatedSol * BUYBACK_PERCENTAGE / 100).toFixed(6)} SOL) for $3EYES buyback -> treasury`);
+            if (isThreeEyesToken) {
+                console.log(`   - 100% (~${estimatedSol.toFixed(6)} SOL) to dev wallet (no buyback needed - this IS $3EYES)`);
+            } else {
+                if (threeEyesMint) {
+                    console.log(`   - Use ${BUYBACK_PERCENTAGE}% (~${(estimatedSol * BUYBACK_PERCENTAGE / 100).toFixed(6)} SOL) for $3EYES buyback -> treasury`);
+                }
+                console.log(`   - Send ${DEV_PERCENTAGE}% (~${(estimatedSol * DEV_PERCENTAGE / 100).toFixed(6)} SOL) to dev wallet`);
             }
-            console.log(`   - Send ${DEV_PERCENTAGE}% (~${(estimatedSol * DEV_PERCENTAGE / 100).toFixed(6)} SOL) to dev wallet`);
             totalProcessed++;
             continue;
         }
@@ -569,12 +588,18 @@ async function main() {
         // === STEP 3: Distribute SOL (buyback + dev) ===
         console.log('\n   Step 3: Distributing SOL...');
 
-        const buybackAmount = (outAmountLamports * BigInt(BUYBACK_PERCENTAGE)) / BigInt(100);
-        const devAmount = outAmountLamports - buybackAmount;
+        // For 3EYES: 100% to dev (no buyback needed - this IS 3EYES)
+        // For other tokens: 90% buyback, 10% dev
+        const buybackAmount = isThreeEyesToken ? BigInt(0) : (outAmountLamports * BigInt(BUYBACK_PERCENTAGE)) / BigInt(100);
+        const devAmount = isThreeEyesToken ? outAmountLamports : outAmountLamports - buybackAmount;
 
-        console.log(`   Buyback: ${Number(buybackAmount) / LAMPORTS_PER_SOL} SOL (${BUYBACK_PERCENTAGE}%)`);
-        console.log(`   Dev: ${Number(devAmount) / LAMPORTS_PER_SOL} SOL (${DEV_PERCENTAGE}%)`);
-
+        if (isThreeEyesToken) {
+            console.log(`   🎯 3EYES token - skipping buyback (no need to buy what we already have)`);
+            console.log(`   Dev: ${Number(devAmount) / LAMPORTS_PER_SOL} SOL (100%)`);
+        } else {
+            console.log(`   Buyback: ${Number(buybackAmount) / LAMPORTS_PER_SOL} SOL (${BUYBACK_PERCENTAGE}%)`);
+            console.log(`   Dev: ${Number(devAmount) / LAMPORTS_PER_SOL} SOL (${DEV_PERCENTAGE}%)`);
+        }
         // Determine dev wallet (override or default to admin)
         const devWallet = DEV_WALLET_OVERRIDE
             ? new PublicKey(DEV_WALLET_OVERRIDE)

@@ -42,9 +42,15 @@ export default function LoadingOverlay({ isLoading, minDuration = 500 }) {
         }
     }, [isLoading, hasStarted, loadProgress]);
 
-    // Complete loading when done
+    // Complete loading when done - quickly fill to 100%
     useEffect(() => {
-        if (!isLoading && hasStarted && loadProgress > 0 && loadProgress < 100) {
+        if (!isLoading && hasStarted && loadProgress < 100) {
+            // If progress hasn't started yet, jump to 100 immediately
+            if (loadProgress === 0) {
+                setLoadProgress(100);
+                return;
+            }
+            // Otherwise animate to 100
             const interval = setInterval(() => {
                 setLoadProgress(prev => Math.min(100, prev + 5));
             }, 20);

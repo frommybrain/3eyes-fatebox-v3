@@ -35,7 +35,8 @@ export default function ProjectPage({ subdomain }) {
     // Loading state - tracks when project data is ready
     const [canvasReady, setCanvasReady] = useState(false);
     const [projectLoadAttempted, setProjectLoadAttempted] = useState(false);
-    const [isMobile, setIsMobile] = useState(false);
+    // Start as null to indicate "not yet determined" - prevents flash of wrong state
+    const [isMobile, setIsMobile] = useState(null);
 
     // Batch purchase state
     const [quantity, setQuantity] = useState(1);
@@ -443,10 +444,12 @@ export default function ProjectPage({ subdomain }) {
     // 1. Wallet is connected (or connecting) AND
     // 2. We're still loading data OR canvas isn't ready
     // Don't show overlay if user hasn't connected wallet yet
-    // On mobile, don't wait for canvas since it's not rendered
+    // On mobile (isMobile === true), don't wait for canvas since it's not rendered
+    // While isMobile is null (not yet determined), treat as loading
     const isWalletActive = connected || connecting;
-    const needsCanvasReady = !isMobile && isReadyForPurchase && !canvasReady;
-    const isStillLoading = isInitialLoading || needsCanvasReady;
+    const mobileCheckComplete = isMobile !== null;
+    const needsCanvasReady = isMobile === false && isReadyForPurchase && !canvasReady;
+    const isStillLoading = isInitialLoading || !mobileCheckComplete || needsCanvasReady;
     const showLoadingOverlay = isWalletActive && isStillLoading && !isProjectNotFound && !isProjectPaused;
 
     // Network badge (show if devnet)
@@ -470,6 +473,29 @@ export default function ProjectPage({ subdomain }) {
     // =========================================================================
 
     const renderCardContent = () => {
+        // Show skeleton while still determining initial state (mobile check, loading data)
+        // This prevents flash of "connect wallet" before we know the actual state
+        if (isInitialLoading || !mobileCheckComplete) {
+            return (
+                <>
+                    <SkeletonText width="180px" height="1.75rem" className="mx-auto mb-6" />
+                    <div className="border-t border-b border-degen-black py-4 mb-4 -mx-6 px-6">
+                        <SkeletonText width="60px" height="0.75rem" className="mx-auto mb-2" />
+                        <SkeletonText width="120px" height="1.75rem" className="mx-auto" />
+                    </div>
+                    <div className="border-t border-b border-degen-black py-4 mb-4 -mx-6 px-6">
+                        <SkeletonText width="60px" height="0.75rem" className="mx-auto mb-3" />
+                        <div className="flex items-center justify-center gap-4">
+                            <SkeletonBox className="w-10 h-10 rounded-full" />
+                            <SkeletonText width="48px" height="2rem" />
+                            <SkeletonBox className="w-10 h-10 rounded-full" />
+                        </div>
+                    </div>
+                    <SkeletonButton fullWidth size="xl" />
+                </>
+            );
+        }
+
         // If wallet not connected, show connect wallet prompt
         if (needsWalletConnection) {
             return (
@@ -487,8 +513,8 @@ export default function ProjectPage({ subdomain }) {
             );
         }
 
-        // Loading skeleton - only show when wallet is connected and loading
-        if (isInitialLoading) {
+        // Loading skeleton - show when wallet is connected but still waiting for canvas (desktop only)
+        if (needsCanvasReady) {
             return (
                 <>
                     <SkeletonText width="180px" height="1.75rem" className="mx-auto mb-6" />

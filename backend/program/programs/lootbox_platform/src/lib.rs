@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Token, TokenAccount, Mint, Transfer};
+use anchor_spl::token_interface::{self, TokenInterface, TokenAccount, Mint, TransferChecked};
 use switchboard_on_demand::accounts::RandomnessAccountData;
 
 // Program ID from keypair: GTpP39xwT47iTUwbC5HZ7TjCiNon2owkLWg84uUyboat
@@ -328,14 +328,15 @@ pub mod lootbox_platform {
         require!(luck_time_interval >= 0, LootboxError::InvalidLuckInterval);
 
         // Transfer launch fee from owner to platform fee account
-        let cpi_accounts = Transfer {
+        let cpi_accounts = TransferChecked {
             from: ctx.accounts.owner_fee_token_account.to_account_info(),
             to: ctx.accounts.platform_fee_token_account.to_account_info(),
             authority: ctx.accounts.owner.to_account_info(),
+            mint: ctx.accounts.fee_token_mint.to_account_info(),
         };
         let cpi_program = ctx.accounts.token_program.to_account_info();
         let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
-        token::transfer(cpi_ctx, launch_fee_amount)?;
+        token_interface::transfer_checked(cpi_ctx, launch_fee_amount, ctx.accounts.fee_token_mint.decimals)?;
 
         msg!("Launch fee paid: {} tokens", launch_fee_amount);
 
@@ -404,24 +405,27 @@ pub mod lootbox_platform {
             .ok_or(LootboxError::ArithmeticOverflow)?;
 
         // Transfer creator's portion to vault
-        let cpi_accounts = Transfer {
+        let decimals = ctx.accounts.payment_token_mint.decimals;
+        let cpi_accounts = TransferChecked {
             from: ctx.accounts.buyer_token_account.to_account_info(),
             to: ctx.accounts.vault_token_account.to_account_info(),
             authority: ctx.accounts.buyer.to_account_info(),
+            mint: ctx.accounts.payment_token_mint.to_account_info(),
         };
         let cpi_program = ctx.accounts.token_program.to_account_info();
         let cpi_ctx = CpiContext::new(cpi_program.clone(), cpi_accounts);
-        token::transfer(cpi_ctx, creator_amount)?;
+        token_interface::transfer_checked(cpi_ctx, creator_amount, decimals)?;
 
         // Transfer commission to treasury (if commission > 0)
         if commission_amount > 0 {
-            let cpi_accounts_treasury = Transfer {
+            let cpi_accounts_treasury = TransferChecked {
                 from: ctx.accounts.buyer_token_account.to_account_info(),
                 to: ctx.accounts.treasury_token_account.to_account_info(),
                 authority: ctx.accounts.buyer.to_account_info(),
+                mint: ctx.accounts.payment_token_mint.to_account_info(),
             };
             let cpi_ctx_treasury = CpiContext::new(cpi_program, cpi_accounts_treasury);
-            token::transfer(cpi_ctx_treasury, commission_amount)?;
+            token_interface::transfer_checked(cpi_ctx_treasury, commission_amount, decimals)?;
             msg!("Platform commission: {} tokens to treasury", commission_amount);
         }
 
@@ -746,14 +750,16 @@ pub mod lootbox_platform {
                 .checked_add(box_instance.reward_amount)
                 .ok_or(LootboxError::ArithmeticOverflow)?;
 
-            let cpi_accounts = Transfer {
+            let decimals = ctx.accounts.payment_token_mint.decimals;
+            let cpi_accounts = TransferChecked {
                 from: ctx.accounts.vault_token_account.to_account_info(),
                 to: ctx.accounts.owner_token_account.to_account_info(),
                 authority: ctx.accounts.vault_authority.to_account_info(),
+                mint: ctx.accounts.payment_token_mint.to_account_info(),
             };
             let cpi_program = ctx.accounts.token_program.to_account_info();
             let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
-            token::transfer(cpi_ctx, box_instance.reward_amount)?;
+            token_interface::transfer_checked(cpi_ctx, box_instance.reward_amount, decimals)?;
         } else {
             // No reward to transfer, but still mark as settled
             box_instance.settled = true;
@@ -825,14 +831,16 @@ pub mod lootbox_platform {
         ];
         let signer = &[&seeds[..]];
 
-        let cpi_accounts = Transfer {
+        let decimals = ctx.accounts.payment_token_mint.decimals;
+        let cpi_accounts = TransferChecked {
             from: ctx.accounts.vault_token_account.to_account_info(),
             to: ctx.accounts.owner_token_account.to_account_info(),
             authority: ctx.accounts.vault_authority.to_account_info(),
+            mint: ctx.accounts.payment_token_mint.to_account_info(),
         };
         let cpi_program = ctx.accounts.token_program.to_account_info();
         let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
-        token::transfer(cpi_ctx, amount)?;
+        token_interface::transfer_checked(cpi_ctx, amount, decimals)?;
 
         msg!("Earnings withdrawn!");
         msg!("Amount: {}", amount);
@@ -933,14 +941,16 @@ pub mod lootbox_platform {
         ];
         let signer = &[&seeds[..]];
 
-        let cpi_accounts = Transfer {
+        let decimals = ctx.accounts.payment_token_mint.decimals;
+        let cpi_accounts = TransferChecked {
             from: ctx.accounts.vault_token_account.to_account_info(),
             to: ctx.accounts.owner_token_account.to_account_info(),
             authority: ctx.accounts.vault_authority.to_account_info(),
+            mint: ctx.accounts.payment_token_mint.to_account_info(),
         };
         let cpi_program = ctx.accounts.token_program.to_account_info();
         let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
-        token::transfer(cpi_ctx, refund_amount)?;
+        token_interface::transfer_checked(cpi_ctx, refund_amount, decimals)?;
 
         // Mark as settled with refund (reward_amount = box_price for refund)
         box_instance.settled = true;
@@ -1047,14 +1057,16 @@ pub mod lootbox_platform {
         ];
         let signer = &[&seeds[..]];
 
-        let cpi_accounts = Transfer {
+        let decimals = ctx.accounts.token_mint.decimals;
+        let cpi_accounts = TransferChecked {
             from: ctx.accounts.treasury_token_account.to_account_info(),
             to: ctx.accounts.admin_token_account.to_account_info(),
             authority: ctx.accounts.treasury.to_account_info(),
+            mint: ctx.accounts.token_mint.to_account_info(),
         };
         let cpi_program = ctx.accounts.token_program.to_account_info();
         let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
-        token::transfer(cpi_ctx, amount)?;
+        token_interface::transfer_checked(cpi_ctx, amount, decimals)?;
 
         msg!("Treasury withdrawal complete!");
         msg!("Amount: {}", amount);
@@ -1336,7 +1348,7 @@ pub struct InitializeProject<'info> {
     )]
     pub vault_authority: AccountInfo<'info>,
 
-    pub payment_token_mint: Account<'info, Mint>,
+    pub payment_token_mint: InterfaceAccount<'info, Mint>,
 
     // Launch fee token accounts (t3EYES1)
     /// Owner's fee token account (pays launch fee) - must be owned by owner and match fee mint
@@ -1345,20 +1357,20 @@ pub struct InitializeProject<'info> {
         constraint = owner_fee_token_account.mint == fee_token_mint.key() @ LootboxError::InvalidFeeTokenAccount,
         constraint = owner_fee_token_account.owner == owner.key() @ LootboxError::InvalidFeeTokenAccount
     )]
-    pub owner_fee_token_account: Account<'info, TokenAccount>,
+    pub owner_fee_token_account: InterfaceAccount<'info, TokenAccount>,
 
     /// Platform fee collection account (receives launch fee) - must match fee mint
     #[account(
         mut,
         constraint = platform_fee_token_account.mint == fee_token_mint.key() @ LootboxError::InvalidFeeTokenAccount
     )]
-    pub platform_fee_token_account: Account<'info, TokenAccount>,
+    pub platform_fee_token_account: InterfaceAccount<'info, TokenAccount>,
 
     /// Fee token mint (e.g., $3EYES)
-    pub fee_token_mint: Account<'info, Mint>,
+    pub fee_token_mint: InterfaceAccount<'info, Mint>,
 
     pub system_program: Program<'info, System>,
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
     pub rent: Sysvar<'info, Rent>,
 }
 
@@ -1401,7 +1413,7 @@ pub struct CreateBox<'info> {
         constraint = buyer_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidBuyerTokenAccount,
         constraint = buyer_token_account.owner == buyer.key() @ LootboxError::InvalidBuyerTokenAccount
     )]
-    pub buyer_token_account: Account<'info, TokenAccount>,
+    pub buyer_token_account: InterfaceAccount<'info, TokenAccount>,
 
     /// CHECK: Vault authority PDA - used to verify vault token account ownership
     #[account(
@@ -1416,7 +1428,7 @@ pub struct CreateBox<'info> {
         constraint = vault_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidVaultTokenAccount,
         constraint = vault_token_account.owner == vault_authority.key() @ LootboxError::InvalidVaultTokenAccount
     )]
-    pub vault_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: InterfaceAccount<'info, TokenAccount>,
 
     /// Treasury token account for receiving platform commission
     /// Must match project's payment token and be owned by treasury PDA
@@ -1425,7 +1437,7 @@ pub struct CreateBox<'info> {
         constraint = treasury_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidTreasuryTokenAccount,
         constraint = treasury_token_account.owner == treasury.key() @ LootboxError::InvalidTreasuryTokenAccount
     )]
-    pub treasury_token_account: Account<'info, TokenAccount>,
+    pub treasury_token_account: InterfaceAccount<'info, TokenAccount>,
 
     /// Treasury PDA (for verification)
     /// CHECK: Verified by seeds
@@ -1435,7 +1447,13 @@ pub struct CreateBox<'info> {
     )]
     pub treasury: UncheckedAccount<'info>,
 
-    pub token_program: Program<'info, Token>,
+    /// Payment token mint - needed for transfer_checked decimals
+    #[account(
+        constraint = payment_token_mint.key() == project_config.payment_token_mint @ LootboxError::InvalidVaultTokenAccount
+    )]
+    pub payment_token_mint: InterfaceAccount<'info, Mint>,
+
+    pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
 }
 
@@ -1504,7 +1522,7 @@ pub struct RevealBox<'info> {
         constraint = vault_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidVaultTokenAccount,
         constraint = vault_token_account.owner == vault_authority.key() @ LootboxError::InvalidVaultTokenAccount
     )]
-    pub vault_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: InterfaceAccount<'info, TokenAccount>,
 
     /// CHECK: Switchboard VRF randomness account - verified against box_instance.randomness_account
     /// Also verified that the account is owned by Switchboard On-Demand program (mainnet or devnet)
@@ -1548,7 +1566,7 @@ pub struct SettleBox<'info> {
     #[account(
         constraint = payment_token_mint.key() == project_config.payment_token_mint @ LootboxError::InvalidVaultTokenAccount
     )]
-    pub payment_token_mint: Account<'info, Mint>,
+    pub payment_token_mint: InterfaceAccount<'info, Mint>,
 
     /// Vault token account - must match project's payment token and be owned by vault authority
     #[account(
@@ -1556,7 +1574,7 @@ pub struct SettleBox<'info> {
         constraint = vault_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidVaultTokenAccount,
         constraint = vault_token_account.owner == vault_authority.key() @ LootboxError::InvalidVaultTokenAccount
     )]
-    pub vault_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: InterfaceAccount<'info, TokenAccount>,
 
     /// Owner's token account - must match project's payment token and be owned by signer
     #[account(
@@ -1564,9 +1582,9 @@ pub struct SettleBox<'info> {
         constraint = owner_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidOwnerTokenAccount,
         constraint = owner_token_account.owner == owner.key() @ LootboxError::InvalidOwnerTokenAccount
     )]
-    pub owner_token_account: Account<'info, TokenAccount>,
+    pub owner_token_account: InterfaceAccount<'info, TokenAccount>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
 }
 
 #[derive(Accounts)]
@@ -1605,7 +1623,7 @@ pub struct RefundBox<'info> {
     #[account(
         constraint = payment_token_mint.key() == project_config.payment_token_mint @ LootboxError::InvalidVaultTokenAccount
     )]
-    pub payment_token_mint: Account<'info, Mint>,
+    pub payment_token_mint: InterfaceAccount<'info, Mint>,
 
     /// Vault token account - must match project's payment token and be owned by vault authority
     #[account(
@@ -1613,7 +1631,7 @@ pub struct RefundBox<'info> {
         constraint = vault_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidVaultTokenAccount,
         constraint = vault_token_account.owner == vault_authority.key() @ LootboxError::InvalidVaultTokenAccount
     )]
-    pub vault_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: InterfaceAccount<'info, TokenAccount>,
 
     /// Owner's token account - must match project's payment token and be owned by signer
     #[account(
@@ -1621,9 +1639,9 @@ pub struct RefundBox<'info> {
         constraint = owner_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidOwnerTokenAccount,
         constraint = owner_token_account.owner == owner.key() @ LootboxError::InvalidOwnerTokenAccount
     )]
-    pub owner_token_account: Account<'info, TokenAccount>,
+    pub owner_token_account: InterfaceAccount<'info, TokenAccount>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
 }
 
 #[derive(Accounts)]
@@ -1656,7 +1674,7 @@ pub struct WithdrawEarnings<'info> {
     #[account(
         constraint = payment_token_mint.key() == project_config.payment_token_mint @ LootboxError::InvalidVaultTokenAccount
     )]
-    pub payment_token_mint: Account<'info, Mint>,
+    pub payment_token_mint: InterfaceAccount<'info, Mint>,
 
     /// Vault token account - must match project's payment token and be owned by vault authority
     #[account(
@@ -1664,7 +1682,7 @@ pub struct WithdrawEarnings<'info> {
         constraint = vault_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidVaultTokenAccount,
         constraint = vault_token_account.owner == vault_authority.key() @ LootboxError::InvalidVaultTokenAccount
     )]
-    pub vault_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: InterfaceAccount<'info, TokenAccount>,
 
     /// Owner's token account - must match project's payment token and be owned by signer
     #[account(
@@ -1672,9 +1690,9 @@ pub struct WithdrawEarnings<'info> {
         constraint = owner_token_account.mint == project_config.payment_token_mint @ LootboxError::InvalidOwnerTokenAccount,
         constraint = owner_token_account.owner == owner.key() @ LootboxError::InvalidOwnerTokenAccount
     )]
-    pub owner_token_account: Account<'info, TokenAccount>,
+    pub owner_token_account: InterfaceAccount<'info, TokenAccount>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
 }
 
 #[derive(Accounts)]
@@ -1710,7 +1728,7 @@ pub struct CloseProject<'info> {
     #[account(
         constraint = vault_token_account.amount == 0 @ LootboxError::VaultNotEmpty
     )]
-    pub vault_token_account: Account<'info, TokenAccount>,
+    pub vault_token_account: InterfaceAccount<'info, TokenAccount>,
 }
 
 #[derive(Accounts)]
@@ -1733,7 +1751,7 @@ pub struct WithdrawTreasury<'info> {
     pub treasury: UncheckedAccount<'info>,
 
     /// The token mint being withdrawn
-    pub token_mint: Account<'info, Mint>,
+    pub token_mint: InterfaceAccount<'info, Mint>,
 
     /// Treasury's token account for this mint (source)
     #[account(
@@ -1741,7 +1759,7 @@ pub struct WithdrawTreasury<'info> {
         constraint = treasury_token_account.owner == treasury.key() @ LootboxError::InvalidTreasuryTokenAccount,
         constraint = treasury_token_account.mint == token_mint.key() @ LootboxError::InvalidTreasuryTokenAccount
     )]
-    pub treasury_token_account: Account<'info, TokenAccount>,
+    pub treasury_token_account: InterfaceAccount<'info, TokenAccount>,
 
     /// Admin's token account (destination)
     /// SECURITY: Must be owned by the admin to prevent redirecting withdrawals
@@ -1750,9 +1768,9 @@ pub struct WithdrawTreasury<'info> {
         constraint = admin_token_account.mint == token_mint.key() @ LootboxError::InvalidOwnerTokenAccount,
         constraint = admin_token_account.owner == admin.key() @ LootboxError::InvalidOwnerTokenAccount
     )]
-    pub admin_token_account: Account<'info, TokenAccount>,
+    pub admin_token_account: InterfaceAccount<'info, TokenAccount>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
 }
 
 #[derive(Accounts)]

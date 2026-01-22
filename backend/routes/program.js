@@ -10,7 +10,9 @@ import {
     getAssociatedTokenAddress,
     getAssociatedTokenAddressSync,
     createAssociatedTokenAccountInstruction,
-    createAssociatedTokenAccountIdempotentInstruction
+    createAssociatedTokenAccountIdempotentInstruction,
+    createTransferCheckedInstruction,
+    getMint
 } from '@solana/spl-token';
 import * as anchor from '@coral-xyz/anchor';
 import BN from 'bn.js';
@@ -111,7 +113,7 @@ router.post('/build-initialize-project-tx', async (req, res) => {
             throw new Error('Failed to fetch admin config');
         }
 
-        console.log(`\n💰 Launch fee: ${adminConfig.launch_fee_amount / 1e9} ${adminConfig.three_eyes_mint.substring(0, 8)}...`);
+        console.log(`\n💰 Launch fee: ${adminConfig.launch_fee_amount / 1e6} ${adminConfig.three_eyes_mint.substring(0, 8)}...`); // 3EYES uses 6 decimals
 
         // Calculate dynamic vault fund amount based on box price
         // Uses worst-case (99th percentile) reserve calculation for ~100 boxes at max luck
@@ -294,12 +296,15 @@ router.post('/build-initialize-project-tx', async (req, res) => {
         combinedTransaction.add(...initProjectTx.instructions);
 
         // Step 3: Transfer payment tokens to vault for funding
-        const { createTransferInstruction } = await import('@solana/spl-token');
-        const fundVaultIx = createTransferInstruction(
+        // Must use TransferChecked for Token-2022 compatibility
+        const mintInfo = await getMint(connection, paymentTokenMintPubkey, 'confirmed', paymentTokenProgram);
+        const fundVaultIx = createTransferCheckedInstruction(
             ownerPaymentTokenAccount, // source
+            paymentTokenMintPubkey, // mint
             vaultTokenAccount, // destination
             ownerPubkey, // owner of source
             vaultFundAmount, // amount
+            mintInfo.decimals, // decimals
             [], // multiSigners
             paymentTokenProgram // Token or Token-2022
         );
@@ -339,11 +344,12 @@ router.post('/build-initialize-project-tx', async (req, res) => {
             },
             vaultFunding: {
                 amount: vaultFundAmount.toString(),
-                formatted: Number(vaultFundAmount) / 1e9,
+                formatted: Number(vaultFundAmount) / Math.pow(10, mintInfo.decimals),
+                decimals: mintInfo.decimals,
             },
             launchFee: {
                 amount: adminConfig.launch_fee_amount.toString(),
-                formatted: Number(adminConfig.launch_fee_amount) / 1e9,
+                formatted: Number(adminConfig.launch_fee_amount) / 1e6, // 3EYES uses 6 decimals
             },
             network: config.network,
         });
@@ -576,14 +582,21 @@ router.post('/build-fund-vault-tx', async (req, res) => {
         const ownerPubkey = new PublicKey(ownerWallet);
         const paymentTokenMintPubkey = new PublicKey(project.payment_token_mint);
 
-        // Derive PDAs
-        const [vaultAuthorityPDA] = deriveVaultAuthorityPDA(programId, projectId, paymentTokenMintPubkey);
-        const vaultTokenAccount = await deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMintPubkey);
+        // Detect token program (Token vs Token-2022)
+        const paymentTokenProgram = await getTokenProgramForMint(connection, paymentTokenMintPubkey);
+        console.log(`   Token program: ${paymentTokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'}`);
 
-        // Get owner's token account
-        const ownerTokenAccount = await getAssociatedTokenAddress(
+        // Derive PDAs with correct token program
+        const [vaultAuthorityPDA] = deriveVaultAuthorityPDA(programId, projectId, paymentTokenMintPubkey);
+        const vaultTokenAccount = deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMintPubkey, paymentTokenProgram);
+
+        // Get owner's token account with correct token program
+        const ownerTokenAccount = getAssociatedTokenAddressSync(
             paymentTokenMintPubkey,
-            ownerPubkey
+            ownerPubkey,
+            false,
+            paymentTokenProgram,
+            ASSOCIATED_TOKEN_PROGRAM_ID
         );
 
         console.log(`   Vault token account: ${vaultTokenAccount.toString()}`);
@@ -597,19 +610,25 @@ router.post('/build-fund-vault-tx', async (req, res) => {
             ownerPubkey, // payer
             vaultTokenAccount, // ata
             vaultAuthorityPDA, // owner
-            paymentTokenMintPubkey // mint
+            paymentTokenMintPubkey, // mint
+            paymentTokenProgram, // Token or Token-2022
+            ASSOCIATED_TOKEN_PROGRAM_ID
         );
         transaction.add(createVaultAtaIx);
         console.log(`   Added: Create vault ATA instruction (idempotent)`);
 
         // Add SPL token transfer instruction
-        // Using @solana/spl-token's createTransferInstruction
-        const { createTransferInstruction } = await import('@solana/spl-token');
-        const transferIx = createTransferInstruction(
+        // Must use TransferChecked for Token-2022 compatibility
+        const mintInfo = await getMint(connection, paymentTokenMintPubkey, 'confirmed', paymentTokenProgram);
+        const transferIx = createTransferCheckedInstruction(
             ownerTokenAccount, // source
+            paymentTokenMintPubkey, // mint
             vaultTokenAccount, // destination
             ownerPubkey, // owner of source
             BigInt(fundAmount.toString()), // amount
+            mintInfo.decimals, // decimals
+            [], // multiSigners
+            paymentTokenProgram // Token or Token-2022
         );
         transaction.add(transferIx);
 

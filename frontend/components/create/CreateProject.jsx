@@ -335,7 +335,8 @@ export default function CreateProject() {
     }
 
     const isDevnet = config?.network === 'devnet';
-    const launchFee = config?.launchFeeAmount ? config.launchFeeAmount / 1e9 : 100;
+    // 3EYES token uses 6 decimals
+    const launchFee = config?.launchFeeAmount ? config.launchFeeAmount / 1e6 : 100;
 
     // Dynamic vault funding: ~30x box price (calculated by backend based on EV analysis)
     const boxPriceNum = parseFloat(formData.boxPrice) || 0;

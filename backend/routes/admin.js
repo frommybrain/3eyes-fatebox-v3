@@ -480,10 +480,13 @@ router.get('/treasury/:tokenMint', async (req, res) => {
         // Derive treasury PDA and token account
         const [treasuryPDA] = deriveTreasuryPDA(programId);
         const tokenMintPubkey = new PublicKey(tokenMint);
-        const treasuryTokenAccount = await deriveTreasuryTokenAccount(treasuryPDA, tokenMintPubkey);
+        // Detect token program (Token vs Token-2022)
+        const tokenProgram = await getTokenProgramForMint(connection, tokenMintPubkey);
+        const treasuryTokenAccount = deriveTreasuryTokenAccount(treasuryPDA, tokenMintPubkey, tokenProgram);
 
         console.log(`   Treasury PDA: ${treasuryPDA.toString()}`);
         console.log(`   Treasury Token Account: ${treasuryTokenAccount.toString()}`);
+        console.log(`   Token Program: ${tokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'}`);
 
         // Fetch token account info
         const accountInfo = await connection.getAccountInfo(treasuryTokenAccount);
@@ -556,21 +559,28 @@ router.get('/treasury-balances', async (req, res) => {
         const threeEyesMint = networkConfig.threeEyesMint?.toString();
         if (threeEyesMint) {
             const threeEyesMintPubkey = new PublicKey(threeEyesMint);
-            const threeEyesTreasuryAccount = await deriveTreasuryTokenAccount(treasuryPDA, threeEyesMintPubkey);
+            // Detect token program for 3EYES (Token vs Token-2022)
+            const threeEyesTokenProgram = await getTokenProgramForMint(connection, threeEyesMintPubkey);
+            const threeEyesTreasuryAccount = deriveTreasuryTokenAccount(treasuryPDA, threeEyesMintPubkey, threeEyesTokenProgram);
             const threeEyesAccountInfo = await connection.getAccountInfo(threeEyesTreasuryAccount);
+
+            // Get decimals from mint account
+            const { getMint } = await import('@solana/spl-token');
+            const mintInfo = await getMint(connection, threeEyesMintPubkey, 'confirmed', threeEyesTokenProgram);
+            const threeEyesDecimals = mintInfo.decimals;
 
             let threeEyesBalance = '0';
             let threeEyesBalanceFormatted = 0;
             if (threeEyesAccountInfo) {
                 const balanceBN = new BN(threeEyesAccountInfo.data.subarray(64, 72), 'le');
                 threeEyesBalance = balanceBN.toString();
-                threeEyesBalanceFormatted = Number(threeEyesBalance) / Math.pow(10, 9);
+                threeEyesBalanceFormatted = Number(threeEyesBalance) / Math.pow(10, threeEyesDecimals);
             }
 
             balances.push({
                 tokenMint: threeEyesMint,
                 symbol: '$3EYES',
-                decimals: 9,
+                decimals: threeEyesDecimals,
                 treasuryTokenAccount: threeEyesTreasuryAccount.toString(),
                 balance: threeEyesBalance,
                 balanceFormatted: threeEyesBalanceFormatted,
@@ -586,7 +596,9 @@ router.get('/treasury-balances', async (req, res) => {
             }
 
             const tokenMintPubkey = new PublicKey(project.payment_token_mint);
-            const treasuryTokenAccount = await deriveTreasuryTokenAccount(treasuryPDA, tokenMintPubkey);
+            // Detect token program (Token vs Token-2022)
+            const tokenProgram = await getTokenProgramForMint(connection, tokenMintPubkey);
+            const treasuryTokenAccount = deriveTreasuryTokenAccount(treasuryPDA, tokenMintPubkey, tokenProgram);
 
             // Fetch token account info
             const accountInfo = await connection.getAccountInfo(treasuryTokenAccount);

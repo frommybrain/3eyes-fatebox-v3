@@ -119,7 +119,7 @@ export default function ProfileStats({ stats, className = '' }) {
                                 </div>
 
                                 {/* Project Stats Row */}
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                                <div className="grid grid-cols-3 gap-2 mb-3">
                                     <div className="text-center p-2 bg-degen-white border border-degen-black">
                                         <p className="text-degen-text-muted text-xs uppercase">Boxes</p>
                                         <p className="text-degen-black font-medium">{project.totalBoxes}</p>
@@ -131,12 +131,6 @@ export default function ProfileStats({ stats, className = '' }) {
                                     <div className={`text-center p-2 border border-degen-black ${project.jackpotCount > 0 ? 'bg-degen-yellow' : 'bg-degen-white'}`}>
                                         <p className="text-degen-text-muted text-xs uppercase">Jackpots</p>
                                         <p className="text-degen-black font-medium">{project.jackpotCount}</p>
-                                    </div>
-                                    <div className={`text-center p-2 border border-degen-black ${parseFloat(project.netProfit?.formatted || 0) >= 0 ? 'bg-degen-green/20' : 'bg-red-100'}`}>
-                                        <p className="text-degen-text-muted text-xs uppercase">Net P/L</p>
-                                        <p className={`font-medium ${parseFloat(project.netProfit?.formatted || 0) >= 0 ? 'text-degen-green' : 'text-red-600'}`}>
-                                            {parseFloat(project.netProfit?.formatted || 0) >= 0 ? '+' : ''}{project.netProfit?.formatted || '0'} {project.tokenSymbol}
-                                        </p>
                                     </div>
                                 </div>
 

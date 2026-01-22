@@ -3,149 +3,193 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
+import { DegenTooltip } from '@/components/ui';
+import SiteFooter from '@/components/ui/SiteFooter';
 
 export default function AboutPage() {
     return (
-        <div className="min-h-screen bg-degen-bg">
-            {/* Header */}
-            <header className="fixed top-0 left-0 w-full h-14 flex items-center justify-between px-4 md:px-8 bg-white border-b border-degen-black z-50">
-                <Link href="/" className="flex items-center hover:opacity-80 transition-opacity">
-                    <Image
-                        src="/images/degenboxlogo.svg"
-                        alt="DegenBox"
-                        width={150}
-                        height={35}
-                        className="h-[35px] w-auto"
-                    />
-                </Link>
-                <Link
-                    href="/"
-                    className="px-4 py-2 text-degen-black/80 hover:text-degen-black hover:bg-degen-black/5 transition-colors font-medium text-sm uppercase tracking-wider"
-                >
-                    Back to Home
-                </Link>
-            </header>
+        <div className="min-h-screen bg-[#e7e7e7]">
 
-            {/* Main Content */}
-            <main className="pt-24 pb-16 px-4 md:px-8 max-w-4xl mx-auto">
-                <h1 className="text-degen-black text-4xl md:text-5xl font-medium uppercase tracking-wider mb-8">
-                    What is DegenBox?
-                </h1>
+            {/* Safety Card Style Layout */}
+            <main className="pt-20 pb-16 mb-16 px-2 md:px-3">
+                <div className="mx-auto">
+                    {/* Card Container - mimics folded safety card look */}
+                    <div className="bg-white border border-degen-black shadow-[2px_2px_0_0_#1a1a1a]">
 
-                <div className="space-y-8 text-degen-black">
-                    {/* Intro */}
-                    <section className="bg-white border border-degen-black p-6 md:p-8">
-                        <h2 className="text-2xl font-medium uppercase tracking-wider mb-4">
-                            The On-Chain Lootbox Platform
-                        </h2>
-                        <p className="text-lg leading-relaxed text-degen-text-muted">
-                            DegenBox is a provably fair, on-chain lootbox platform built on Solana.
-                            We enable token communities to create engaging lootbox experiences where
-                            users can purchase mystery boxes using their favorite tokens and win prizes
-                            based on transparent, verifiable odds.
-                        </p>
-                    </section>
+                        {/* Card Header */}
+                        <div className="border-b border-degen-black p-4 md:p-6 text-center bg-degen-yellow">
+                            <p className="text-xs uppercase tracking-[0.3em] text-degen-black/70 mb-1">Safety Information</p>
+                            <h1 className="text-xl md:text-2xl uppercase tracking-wider text-degen-black">
+                                How to DegenBox
+                            </h1>
+                        </div>
 
-                    {/* How It Works */}
-                    <section className="bg-white border border-degen-black p-6 md:p-8">
-                        <h2 className="text-2xl font-medium uppercase tracking-wider mb-6">
-                            How It Works
-                        </h2>
-                        <div className="space-y-6">
-                            <div className="flex gap-4">
-                                <div className="flex-shrink-0 w-10 h-10 bg-degen-yellow border border-degen-black flex items-center justify-center font-bold text-lg">
-                                    1
-                                </div>
-                                <div>
-                                    <h3 className="font-medium text-lg mb-1">Buy a Box</h3>
-                                    <p className="text-degen-text-muted">
-                                        Purchase lootboxes using the project&apos;s token. Each box has a set price
-                                        determined by the project creator.
+                        {/* Step Grid - 4 columns on desktop, 2 on medium, 1 on mobile */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 divide-y md:divide-y-0 divide-degen-black">
+
+                            {/* Step 1 */}
+                            <div className="p-6 md:p-8 md:border-r md:border-degen-black">
+                                <div className="text-center">
+                                    <div className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-degen-black text-white font-bold text-sm mb-4">
+                                        1
+                                    </div>
+
+                                    <div className="w-full aspect-square relative mb-4">
+                                        <Image
+                                            src="/images/degenbox_about1.jpeg"
+                                            alt="Buy a Box"
+                                            fill
+                                            className="object-cover"
+                                        />
+                                    </div>
+
+                                    <h2 className="font-bold uppercase tracking-wider text-degen-black mb-2 inline-flex items-center gap-1.5">
+                                        Buy a Box
+                                        <DegenTooltip
+                                            content="A small amount of SOL is required to cover transaction costs. Any unused balance will be returned upon opening."
+                                            position="top"
+                                            maxWidth={240}
+                                        >
+                                            <span className="w-4 h-4 rounded-full bg-degen-text-muted text-white text-xs flex items-center justify-center cursor-help">
+                                                ?
+                                            </span>
+                                        </DegenTooltip>
+                                    </h2>
+
+                                    <p className="text-sm text-degen-text-muted">
+                                        Purchase your box using the project token. Multiple boxes may be acquired.
                                     </p>
                                 </div>
                             </div>
-                            <div className="flex gap-4">
-                                <div className="flex-shrink-0 w-10 h-10 bg-degen-yellow border border-degen-black flex items-center justify-center font-bold text-lg">
-                                    2
-                                </div>
-                                <div>
-                                    <h3 className="font-medium text-lg mb-1">Build Your Luck</h3>
-                                    <p className="text-degen-text-muted">
-                                        Your luck increases over time while holding unopened boxes. Higher luck
-                                        means better odds of winning bigger prizes.
+
+                            {/* Step 2 */}
+                            <div className="p-6 md:p-8 lg:border-r lg:border-degen-black">
+                                <div className="text-center">
+                                    <div className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-degen-black text-white font-bold text-sm mb-4">
+                                        2
+                                    </div>
+
+                                    <div className="w-full aspect-square relative mb-4">
+                                        <Image
+                                            src="/images/degenbox_about2.jpeg"
+                                            alt="Build Your Luck"
+                                            fill
+                                            className="object-cover"
+                                        />
+                                    </div>
+
+                                    <h2 className="font-bold uppercase tracking-wider text-degen-black mb-2 inline-flex items-center gap-1.5">
+                                        Build Your Luck
+                                        <DegenTooltip
+                                            content="Luck Score timing is determined by the project. Maximum Luck is 60. Luck directly influences the contents of your container."
+                                            position="top"
+                                            maxWidth={240}
+                                        >
+                                            <span className="w-4 h-4 rounded-full bg-degen-text-muted text-white text-xs flex items-center justify-center cursor-help">
+                                                ?
+                                            </span>
+                                        </DegenTooltip>
+                                    </h2>
+
+                                    <p className="text-sm text-degen-text-muted">
+                                        Your box is assigned a Luck Score that increases over time until it is opened.
                                     </p>
                                 </div>
                             </div>
-                            <div className="flex gap-4">
-                                <div className="flex-shrink-0 w-10 h-10 bg-degen-yellow border border-degen-black flex items-center justify-center font-bold text-lg">
-                                    3
+
+                            {/* Step 3 */}
+                            <div className="p-6 md:p-8 md:border-r md:border-degen-black md:border-t lg:border-t-0">
+                                <div className="text-center">
+                                    <div className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-degen-black text-white font-bold text-sm mb-4">
+                                        3
+                                    </div>
+
+                                    <div className="w-full aspect-square relative mb-4">
+                                        <Image
+                                            src="/images/degenbox_about3.jpeg"
+                                            alt="Open and Win"
+                                            fill
+                                            className="object-cover"
+                                        />
+                                    </div>
+
+                                    <h2 className="font-bold uppercase tracking-wider text-degen-black mb-2 inline-flex items-center gap-1.5">
+                                        Open &amp; Win
+                                        <DegenTooltip
+                                            content="Two transactions are required to open and reveal a container. The reveal must be completed within 1 hour of opening, or the container will expire."
+                                            position="top"
+                                            maxWidth={240}
+                                        >
+                                            <span className="w-4 h-4 rounded-full bg-degen-text-muted text-white text-xs flex items-center justify-center cursor-help">
+                                                ?
+                                            </span>
+                                        </DegenTooltip>
+                                    </h2>
+
+                                    <p className="text-sm text-degen-text-muted">
+                                        Open your box when you feel most fortunate. Please remain attentive during the reveal. This process may take up to 45 seconds.
+                                    </p>
                                 </div>
-                                <div>
-                                    <h3 className="font-medium text-lg mb-1">Open & Win</h3>
-                                    <p className="text-degen-text-muted">
-                                        Open your box to reveal your prize. Outcomes include rebates, break-even,
-                                        profit multipliers, and jackpots - all determined by on-chain randomness.
+                            </div>
+
+                            {/* Step 4 */}
+                            <div className="p-6 md:p-8 md:border-t lg:border-t-0">
+                                <div className="text-center">
+                                    <div className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-degen-black text-white font-bold text-sm mb-4">
+                                        4
+                                    </div>
+
+                                    <div className="w-full aspect-square relative mb-4">
+                                        <Image
+                                            src="/images/degenbox_about4.jpeg"
+                                            alt="Get Paid"
+                                            fill
+                                            className="object-cover"
+                                        />
+                                    </div>
+
+                                    <h2 className="font-bold uppercase tracking-wider text-degen-black mb-2">
+                                        Get Paid
+                                    </h2>
+
+                                    <p className="text-sm text-degen-text-muted">
+                                        Payouts are issued directly to your wallet upon reveal. Any unused SOL from transactions will be returned.
                                     </p>
                                 </div>
                             </div>
                         </div>
-                    </section>
 
-                    {/* Provably Fair */}
-                    <section className="bg-white border border-degen-black p-6 md:p-8">
-                        <h2 className="text-2xl font-medium uppercase tracking-wider mb-4">
-                            Provably Fair
-                        </h2>
-                        <p className="text-degen-text-muted leading-relaxed mb-4">
-                            Every lootbox outcome is determined by on-chain randomness using Solana&apos;s
-                            slot hashes. The odds are transparent and stored on-chain, meaning anyone
-                            can verify that the game is fair.
-                        </p>
-                        <ul className="list-disc list-inside text-degen-text-muted space-y-2">
-                            <li>All prize distributions are publicly visible on-chain</li>
-                            <li>Randomness is derived from unpredictable blockchain data</li>
-                            <li>Smart contract code determines outcomes - no human intervention</li>
-                        </ul>
-                    </section>
+                        {/* Card Footer */}
+                        <div className="border-t border-degen-black p-4 md:p-6 bg-gray-50">
+                            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                                <p className="text-xs text-degen-text-muted uppercase tracking-wider text-center md:text-left">
+                                    In case of massive gains, please remain calm
+                                </p>
+                                <div className="flex gap-3">
+                                    <Link
+                                        href="https://3eyes.degenbox.fun"
+                                        className="px-4 py-2 bg-degen-yellow text-degen-black font-medium text-sm uppercase tracking-wider border border-degen-black hover:bg-degen-black hover:text-degen-yellow transition-colors"
+                                    >
+                                        Try a Box
+                                    </Link>
+                                    <a
+                                        href="https://jup.ag/?sell=So11111111111111111111111111111111111111112&buy=G63pAYWkZd71Jdy83bbdvs6HMQxaYVWy5jsS1hK3pump"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="px-4 py-2 bg-red-500 text-white font-medium text-sm uppercase tracking-wider border border-red-500 hover:bg-red-600 transition-colors"
+                                    >
+                                        Buy $3EYES
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
 
-                    {/* For Token Communities */}
-                    <section className="bg-white border border-degen-black p-6 md:p-8">
-                        <h2 className="text-2xl font-medium uppercase tracking-wider mb-4">
-                            For Token Communities
-                        </h2>
-                        <p className="text-degen-text-muted leading-relaxed mb-4">
-                            Project creators can launch their own branded lootbox experiences on DegenBox.
-                            Create engagement, add utility to your token, and give your community a fun
-                            way to interact with your project.
-                        </p>
-                        <Link
-                            href="/dashboard/create"
-                            className="inline-block px-6 py-3 bg-degen-yellow text-degen-black font-medium uppercase tracking-wider border border-degen-black hover:bg-degen-black hover:text-degen-yellow transition-colors"
-                        >
-                            Create Your Project
-                        </Link>
-                    </section>
-
-                    {/* $3EYES Token */}
-                    <section className="bg-degen-yellow border border-degen-black p-6 md:p-8">
-                        <h2 className="text-2xl font-medium uppercase tracking-wider mb-4">
-                            The $3EYES Token
-                        </h2>
-                        <p className="text-degen-black leading-relaxed mb-4">
-                            $3EYES is the native token of the DegenBox ecosystem. Platform fees are used
-                            for $3EYES buybacks, creating sustainable tokenomics that benefit holders.
-                        </p>
-                        <a
-                            href="https://pump.fun/coin/G63pAYWkZd71Jdy83bbdvs6HMQxaYVWy5jsS1hK3pump"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-block px-6 py-3 bg-degen-black text-degen-yellow font-medium uppercase tracking-wider hover:bg-white hover:text-degen-black transition-colors"
-                        >
-                            Buy $3EYES
-                        </a>
-                    </section>
+                    </div>
                 </div>
             </main>
+
+            {/* Site footer with marquee and navigation */}
+            <SiteFooter />
         </div>
     );
 }

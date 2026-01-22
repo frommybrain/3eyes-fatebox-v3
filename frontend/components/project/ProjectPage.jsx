@@ -705,11 +705,28 @@ export default function ProjectPage({ subdomain }) {
                     }
                 </DegenButton>
 
-                {/* Insufficient balance hint */}
+                {/* Insufficient balance warning */}
                 {connected && !hasEnoughTokens && tokenBalance !== null && (
                     <p className="text-degen-text-muted text-xs text-center mt-3">
                         You need {formattedTotalPrice} {tokenSymbol} to buy {quantity} box{quantity > 1 ? 'es' : ''}
                     </p>
+                )}
+
+                {/* Buy token link - always visible when connected */}
+                {connected && displayProject?.payment_token_mint && (
+                    <div className="text-center mt-2">
+                        <a
+                            href={`https://jup.ag/?sell=So11111111111111111111111111111111111111112&buy=${displayProject.payment_token_mint}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-degen-primary hover:underline"
+                        >
+                            Buy more ${tokenSymbol}
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                        </a>
+                    </div>
                 )}
             </>
         );

@@ -12,11 +12,12 @@ import Image from 'next/image';
  */
 export default function LoadingOverlay({ isLoading, minDuration = 500 }) {
     // Track if we've ever started showing (only show if isLoading was true)
-    const [hasStarted, setHasStarted] = useState(false);
-    const [visible, setVisible] = useState(false);
+    // Initialize to true if isLoading is already true to prevent flash of content
+    const [hasStarted, setHasStarted] = useState(isLoading);
+    const [visible, setVisible] = useState(isLoading);
     const [fadeOut, setFadeOut] = useState(false);
     const [loadProgress, setLoadProgress] = useState(0);
-    const startTimeRef = useRef(null);
+    const startTimeRef = useRef(isLoading ? Date.now() : null);
 
     // Start showing overlay when isLoading becomes true
     useEffect(() => {

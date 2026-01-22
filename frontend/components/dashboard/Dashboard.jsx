@@ -97,27 +97,28 @@ export default function Dashboard() {
     }, [publicKey, connected, config, loadProjectsByOwner]);
 
     // Check for new badges on dashboard load
-    useEffect(() => {
-        async function checkBadges() {
-            if (!publicKey || !connected) return;
+    // DISABLED: Badge system temporarily disabled
+    // useEffect(() => {
+    //     async function checkBadges() {
+    //         if (!publicKey || !connected) return;
 
-            try {
-                const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
-                const response = await fetch(`${backendUrl}/api/users/${publicKey.toString()}/badges?check=true`);
-                const data = await response.json();
+    //         try {
+    //             const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+    //             const response = await fetch(`${backendUrl}/api/users/${publicKey.toString()}/badges?check=true`);
+    //             const data = await response.json();
 
-                if (data.success && data.newBadges && data.newBadges.length > 0) {
-                    setNewBadges(data.newBadges);
-                    setCurrentBadgeIndex(0);
-                    setShowBadgeModal(true);
-                }
-            } catch (error) {
-                console.error('Error checking badges:', error);
-            }
-        }
+    //             if (data.success && data.newBadges && data.newBadges.length > 0) {
+    //                 setNewBadges(data.newBadges);
+    //                 setCurrentBadgeIndex(0);
+    //                 setShowBadgeModal(true);
+    //             }
+    //         } catch (error) {
+    //             console.error('Error checking badges:', error);
+    //         }
+    //     }
 
-        checkBadges();
-    }, [publicKey, connected]);
+    //     checkBadges();
+    // }, [publicKey, connected]);
 
     // Handle badge modal close - show next badge or close
     const handleBadgeModalClose = () => {
@@ -248,12 +249,12 @@ export default function Dashboard() {
                     </DegenTabsContent>
                 </DegenTabs>
 
-                {/* Badge Notification Modal */}
-                <BadgeModal
+                {/* Badge Notification Modal - DISABLED: Badge system temporarily disabled */}
+                {/* <BadgeModal
                     isOpen={showBadgeModal}
                     onClose={handleBadgeModalClose}
                     badge={currentBadge}
-                />
+                /> */}
             </div>
         </div>
     );
@@ -469,8 +470,8 @@ function MyProfileTab({ walletAddress }) {
                     </DegenCard>
                 )}
 
-                {/* Badges Preview */}
-                {badges && badges.length > 0 && (
+                {/* Badges Preview - DISABLED: Badge system temporarily disabled */}
+                {/* {badges && badges.length > 0 && (
                     <DegenCard variant="default" padding="md">
                         <h3 className="text-degen-black text-sm font-medium uppercase tracking-wider mb-3">
                             Badges ({badges.length})
@@ -491,7 +492,7 @@ function MyProfileTab({ walletAddress }) {
                             ))}
                         </div>
                     </DegenCard>
-                )}
+                )} */}
             </div>
 
             {/* Right Panel - Tabbed Content */}
@@ -520,7 +521,8 @@ function MyProfileTab({ walletAddress }) {
                     {/* Stats Tab */}
                     <DegenTabsContent value="stats">
                         <ProfileStats stats={stats} />
-                        <ProfileBadges badges={badges} username={profile?.username} className="mt-4" />
+                        {/* DISABLED: Badge system temporarily disabled */}
+                        {/* <ProfileBadges badges={badges} username={profile?.username} className="mt-4" /> */}
                     </DegenTabsContent>
 
                     {/* Settings Tab */}
@@ -716,7 +718,7 @@ function MyBoxesTab({ walletAddress }) {
             <DegenEmptyState
                 icon=""
                 title="No Boxes Yet"
-                description="You haven't purchased any lootboxes yet"
+                description="You haven't purchased any boxes yet"
             />
         );
     }
@@ -2174,8 +2176,12 @@ function BoxCard({ box, project, onRefresh }) {
             {/* Top left: Luck display for pending boxes */}
             {isPending && (
                 <div className="absolute top-1 left-1 group">
-                    <div className="text-xs font-bold text-degen-yellow bg-degen-black px-1.5 py-0.5 cursor-default">
-                        {currentLuck}L
+                    <div className="text-xs font-bold text-degen-black bg-transparent px-1.5 py-0.5 cursor-default flex items-center gap-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M17.28 9.05a5.5 5.5 0 1 0-10.56 0A5.5 5.5 0 1 0 12 17.66a5.5 5.5 0 1 0 5.28-8.6Z"/>
+                            <path d="M12 17.66L12 22"/>
+                        </svg>
+                        {currentLuck}
                     </div>
                     {/* Tooltip on hover */}
                     <div className="absolute left-0 top-full mt-1 z-20 w-32 bg-degen-white border border-degen-black shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">

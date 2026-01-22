@@ -21,6 +21,7 @@ export default function DegenTooltip({
 }) {
     const [isVisible, setIsVisible] = useState(false);
     const [coords, setCoords] = useState({ top: 0, left: 0 });
+    const [isPositioned, setIsPositioned] = useState(false);
     const triggerRef = useRef(null);
     const tooltipRef = useRef(null);
 
@@ -64,6 +65,9 @@ export default function DegenTooltip({
             }
 
             setCoords({ top, left });
+            setIsPositioned(true);
+        } else {
+            setIsPositioned(false);
         }
     }, [isVisible, position]);
 
@@ -85,11 +89,13 @@ export default function DegenTooltip({
             {isVisible && (
                 <div
                     ref={tooltipRef}
-                    className="fixed z-[9999] px-3 py-2 text-sm bg-degen-black text-white border border-degen-black shadow-lg animate-in fade-in-0 zoom-in-95 duration-150"
+                    className="fixed z-[9999] px-3 py-2 text-sm bg-degen-black text-white border border-degen-black shadow-lg"
                     style={{
                         top: coords.top,
                         left: coords.left,
                         maxWidth: maxWidth,
+                        opacity: isPositioned ? 1 : 0,
+                        transition: 'opacity 150ms ease-out',
                     }}
                 >
                     {content}

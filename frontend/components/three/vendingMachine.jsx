@@ -9,7 +9,7 @@ import { useGLTF, useKTX2, useTexture } from '@react-three/drei'
 export function VendingMachine(props) {
   const { nodes, materials } = useGLTF('/models/vendingMachine.glb')
 
-  {/*const bevMapRaw = useKTX2('/images/ktx2/beverages_Bake1_CyclesBake_COMBINED.ktx2')
+  const bevMapRaw = useKTX2('/images/ktx2/beverages_Bake1_CyclesBake_COMBINED.ktx2')
   const bodyMapRaw = useKTX2('/images/ktx2/vm_body_Bake1_CyclesBake_COMBINED.ktx2')
   const adsMapRaw = useKTX2('/images/ktx2/vm_ads_Bake1_CyclesBake_COMBINED.ktx2')
   const partsMapRaw = useKTX2('/images/ktx2/vm_parts_Bake1_CyclesBake_COMBINED.ktx2')
@@ -18,23 +18,7 @@ export function VendingMachine(props) {
   const bevMap = useMemo(() => { const t = bevMapRaw.clone(); t.flipY = false; t.needsUpdate = true; return t }, [bevMapRaw])
   const bodyMap = useMemo(() => { const t = bodyMapRaw.clone(); t.flipY = false; t.needsUpdate = true; return t }, [bodyMapRaw])
   const adsMap = useMemo(() => { const t = adsMapRaw.clone(); t.flipY = false; t.needsUpdate = true; return t }, [adsMapRaw])
-  const partsMap = useMemo(() => { const t = partsMapRaw.clone(); t.flipY = false; t.needsUpdate = true; return t }, [partsMapRaw]) */}
-
-  const bevMap = useTexture('/images/beverages_Bake1_CyclesBake_COMBINED.png')
-  const bodyMap = useTexture('/images/vm_body_Bake1_CyclesBake_COMBINED.png')
-  const adsMap = useTexture('/images/vm_ads_Bake1_CyclesBake_COMBINED.png')
-  const partsMap = useTexture('/images/vm_parts_Bake1_CyclesBake_COMBINED.png')
-  
-  useEffect(() => {
-    bevMap.flipY = false
-    bodyMap.flipY = false
-    adsMap.flipY = false
-    partsMap.flipY = false
-    bevMap.needsUpdate = true
-    bodyMap.needsUpdate = true
-    adsMap.needsUpdate = true
-    partsMap.needsUpdate = true
-  }, [bevMap, bodyMap, adsMap, partsMap])
+  const partsMap = useMemo(() => { const t = partsMapRaw.clone(); t.flipY = false; t.needsUpdate = true; return t }, [partsMapRaw]) 
   
   return (
     <group {...props} dispose={null}>

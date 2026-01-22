@@ -3,6 +3,7 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
+import SiteFooter from '@/components/ui/SiteFooter';
 
 export default function RoadmapPage() {
     const phases = [
@@ -32,7 +33,7 @@ export default function RoadmapPage() {
         {
             phase: 'Phase 3.1',
             title: 'Public Launch',
-            status: 'in-progress',
+            status: 'completed',
             items: [
                 'Open platform with single $3EYES project',
                 'Launch marketing campaigns',
@@ -150,8 +151,11 @@ export default function RoadmapPage() {
                     ))}
                 </div>
 
-                
+
             </main>
+
+            {/* Site footer with marquee and navigation */}
+            <SiteFooter />
         </div>
     );
 }

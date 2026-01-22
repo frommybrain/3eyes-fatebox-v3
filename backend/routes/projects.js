@@ -499,7 +499,8 @@ router.get('/boxes/by-owner/:walletAddress', async (req, res) => {
                     subdomain,
                     payment_token_symbol,
                     payment_token_decimals,
-                    box_price
+                    box_price,
+                    luck_interval_seconds
                 )
             `)
             .eq('owner_wallet', walletAddress)

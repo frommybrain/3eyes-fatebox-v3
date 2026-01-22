@@ -1701,7 +1701,10 @@ function BoxCard({ box, project, onRefresh }) {
 
                         // Update optimistic state with settled
                         startBoxTransition(() => {
-                            setOptimisticBox({ settled_at: new Date().toISOString() });
+                            setOptimisticBox({
+                                settled_at: new Date().toISOString(),
+                                settle_tx_signature: settleSignature,
+                            });
                         });
 
                         // Confirm settle with backend
@@ -1949,7 +1952,10 @@ function BoxCard({ box, project, onRefresh }) {
 
             // Optimistic UI update - show settled state immediately
             startBoxTransition(() => {
-                setOptimisticBox({ settled_at: new Date().toISOString() });
+                setOptimisticBox({
+                    settled_at: new Date().toISOString(),
+                    settle_tx_signature: signature,
+                });
             });
 
             // Step 5: Confirm with backend

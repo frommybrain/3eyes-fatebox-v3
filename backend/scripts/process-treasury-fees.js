@@ -27,9 +27,9 @@
 
 import 'dotenv/config';
 import { Connection, Keypair, PublicKey, VersionedTransaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { getAssociatedTokenAddress, getAccount, TOKEN_PROGRAM_ID, createAssociatedTokenAccountInstruction, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { getAssociatedTokenAddress, getAccount, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, createAssociatedTokenAccountInstruction, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import BN from 'bn.js';
-import { derivePlatformConfigPDA, deriveTreasuryPDA, deriveTreasuryTokenAccount } from '../lib/pdaHelpers.js';
+import { derivePlatformConfigPDA, deriveTreasuryPDA, deriveTreasuryTokenAccount, getTokenProgramForMint } from '../lib/pdaHelpers.js';
 import { getAnchorProgram } from '../lib/anchorClient.js';
 import { getNetworkConfig } from '../lib/getNetworkConfig.js';
 import { createClient } from '@supabase/supabase-js';
@@ -176,10 +176,11 @@ async function getJupiterSwapTransaction(quoteResponse, userPublicKey) {
     }
 }
 
-async function withdrawFromTreasury(program, connection, adminKeypair, treasuryPDA, tokenMint, amount, adminTokenAccount, treasuryTokenAccount) {
+async function withdrawFromTreasury(program, connection, adminKeypair, treasuryPDA, tokenMint, amount, adminTokenAccount, treasuryTokenAccount, tokenProgram) {
     const [platformConfigPDA] = derivePlatformConfigPDA(program.programId);
 
     console.log(`   Building withdraw_treasury transaction...`);
+    console.log(`   Token program: ${tokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'}`);
 
     // Convert BigInt to BN for Anchor
     const amountBN = new BN(amount.toString());
@@ -193,7 +194,7 @@ async function withdrawFromTreasury(program, connection, adminKeypair, treasuryP
             tokenMint: tokenMint,
             treasuryTokenAccount: treasuryTokenAccount,
             adminTokenAccount: adminTokenAccount,
-            tokenProgram: TOKEN_PROGRAM_ID,
+            tokenProgram: tokenProgram,
         })
         .transaction();
 
@@ -303,13 +304,18 @@ async function main() {
         console.log('----------------------------------------');
         console.log(`Token: ${payment_token_symbol || 'Unknown'} (${payment_token_mint.slice(0, 8)}...)`);
 
-        // Get treasury token account
-        const treasuryTokenAccount = await deriveTreasuryTokenAccount(treasuryPDA, tokenMintPubkey);
+        // Detect token program (Token vs Token-2022)
+        const tokenProgram = await getTokenProgramForMint(connection, tokenMintPubkey);
+        const isToken2022 = tokenProgram.equals(TOKEN_2022_PROGRAM_ID);
+        console.log(`   Token program: ${isToken2022 ? 'Token-2022' : 'Token (legacy)'}`);
+
+        // Get treasury token account with correct token program
+        const treasuryTokenAccount = deriveTreasuryTokenAccount(treasuryPDA, tokenMintPubkey, tokenProgram);
 
         // Check balance
         let balance = BigInt(0);
         try {
-            const accountInfo = await getAccount(connection, treasuryTokenAccount);
+            const accountInfo = await getAccount(connection, treasuryTokenAccount, 'confirmed', tokenProgram);
             balance = accountInfo.amount;
         } catch (e) {
             console.log('   No treasury token account found (0 balance)');
@@ -374,16 +380,19 @@ async function main() {
         // === STEP 1: Withdraw from treasury to admin wallet ===
         console.log('\n   Step 1: Withdrawing from treasury...');
 
-        // Get admin token account address
+        // Get admin token account address with correct token program
         const adminTokenAccount = await getAssociatedTokenAddress(
             tokenMintPubkey,
-            adminKeypair.publicKey
+            adminKeypair.publicKey,
+            false, // allowOwnerOffCurve
+            tokenProgram,
+            ASSOCIATED_TOKEN_PROGRAM_ID
         );
 
         // Check if admin token account exists, create if not
         const adminAccountInfo = await connection.getAccountInfo(adminTokenAccount);
         if (!adminAccountInfo) {
-            console.log('   Creating admin token account...');
+            console.log(`   Creating admin token account (${isToken2022 ? 'Token-2022' : 'Token'})...`);
             try {
                 const { Transaction } = await import('@solana/web3.js');
                 const createAtaTx = new Transaction().add(
@@ -391,7 +400,9 @@ async function main() {
                         adminKeypair.publicKey, // payer
                         adminTokenAccount, // ata
                         adminKeypair.publicKey, // owner
-                        tokenMintPubkey // mint
+                        tokenMintPubkey, // mint
+                        tokenProgram, // token program
+                        ASSOCIATED_TOKEN_PROGRAM_ID // associated token program
                     )
                 );
 
@@ -418,7 +429,8 @@ async function main() {
                 tokenMintPubkey,
                 balance,
                 adminTokenAccount,
-                treasuryTokenAccount
+                treasuryTokenAccount,
+                tokenProgram
             );
 
             const signature = await connection.sendRawTransaction(withdrawTx.serialize(), {

@@ -2515,6 +2515,74 @@ cd backend
 node scripts/init-platform-config.js
 ```
 
+### Program Upgrade Process
+
+When upgrading an existing deployed program, use this process to minimize costs. A program upgrade only costs ~0.02 SOL (transaction fees) instead of ~3.5 SOL for a fresh deploy.
+
+**Prerequisites:**
+- Program must already be deployed
+- You must have the upgrade authority keypair
+- The upgrade authority is stored in `backend/.env` as `DEPLOY_WALLET_JSON`
+
+**Upgrade Authority:**
+- Mainnet/Devnet: `Fop6HTZr57VAHw8t2S8MGwJvxJ9BGWHvLfLrRajKMv6`
+- Keypair is stored as JSON array in `DEPLOY_WALLET_JSON` environment variable
+
+**Step-by-Step Upgrade:**
+
+```bash
+# 1. Build the program
+cd backend/program
+anchor build
+
+# 2. Create temporary keypair file from .env
+# The DEPLOY_WALLET_JSON contains a JSON array like: [241,157,81,...]
+# Copy this value and create a temp file:
+echo '[241,157,81,1,68,85,202,20,...]' > /tmp/deploy-keypair.json
+
+# 3. Verify the keypair matches the expected authority
+solana address -k /tmp/deploy-keypair.json
+# Should output: Fop6HTZr57VAHw8t2S8MGwJvxJ9BGWHvLfLrRajKMv6
+
+# 4. Deploy the upgrade
+solana program deploy target/deploy/lootbox_platform.so \
+  --program-id target/deploy/lootbox_platform-keypair.json \
+  --upgrade-authority /tmp/deploy-keypair.json \
+  --url mainnet-beta \
+  --keypair /tmp/deploy-keypair.json
+
+# 5. IMPORTANT: Delete the temporary keypair file immediately
+rm /tmp/deploy-keypair.json
+```
+
+**Cost Breakdown:**
+| Operation | Cost |
+|-----------|------|
+| Fresh Deploy | ~3.5 SOL (buffer account rent) |
+| Program Upgrade | ~0.02 SOL (transaction fees only) |
+
+**Why Upgrades Are Cheap:**
+- Fresh deploy creates a new buffer account (~3.5 SOL rent)
+- Upgrade reuses the existing program account
+- Only pays for transaction fees and compute
+
+**If Deployment Fails Mid-Way:**
+If the deployment fails (e.g., network issues), you'll see a message with:
+- A 12-word seed phrase to recover the buffer keypair
+- A buffer account address
+
+To recover the SOL from a failed deployment:
+```bash
+# Close the buffer and recover SOL
+solana program close <BUFFER_ADDRESS> --keypair /tmp/deploy-keypair.json --url mainnet-beta
+```
+
+**Security Notes:**
+- NEVER commit the keypair file to git
+- ALWAYS delete `/tmp/deploy-keypair.json` after use
+- The `.env` file should be in `.gitignore`
+- Consider using a hardware wallet for mainnet upgrade authority in production
+
 ### Program Verification (Solscan)
 
 The program is verified on Solscan using `solana-verify`. This proves the on-chain bytecode matches the public source code.

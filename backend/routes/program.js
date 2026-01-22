@@ -3,7 +3,15 @@
 
 import express from 'express';
 import { PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY, Transaction } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createAssociatedTokenAccountIdempotentInstruction } from '@solana/spl-token';
+import {
+    TOKEN_PROGRAM_ID,
+    TOKEN_2022_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+    getAssociatedTokenAddress,
+    getAssociatedTokenAddressSync,
+    createAssociatedTokenAccountInstruction,
+    createAssociatedTokenAccountIdempotentInstruction
+} from '@solana/spl-token';
 import * as anchor from '@coral-xyz/anchor';
 import BN from 'bn.js';
 import {
@@ -17,7 +25,8 @@ import {
     deriveVaultAuthorityPDA,
     deriveVaultTokenAccount,
     deriveTreasuryPDA,
-    deriveTreasuryTokenAccount
+    deriveTreasuryTokenAccount,
+    getTokenProgramForMint
 } from '../lib/pdaHelpers.js';
 import { getNetworkConfig } from '../lib/getNetworkConfig.js';
 import { createClient } from '@supabase/supabase-js';
@@ -120,6 +129,13 @@ router.post('/build-initialize-project-tx', async (req, res) => {
         const ownerPubkey = new PublicKey(ownerWallet);
         const feeTokenMintPubkey = new PublicKey(adminConfig.three_eyes_mint);
 
+        // Detect token programs for both payment token and fee token (Token vs Token-2022)
+        const paymentTokenProgram = await getTokenProgramForMint(connection, paymentTokenMintPubkey);
+        const feeTokenProgram = await getTokenProgramForMint(connection, feeTokenMintPubkey);
+
+        console.log(`   Payment token program: ${paymentTokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'}`);
+        console.log(`   Fee token program: ${feeTokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'}`);
+
         // Find an available project ID (auto-advance if PDA already exists on-chain)
         let currentProjectId = parseInt(projectId);
         let pdas;
@@ -128,7 +144,7 @@ router.post('/build-initialize-project-tx', async (req, res) => {
         const maxAttempts = 20; // Safety limit to prevent infinite loops
 
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
-            pdas = await deriveAllPDAs(programId, currentProjectId, paymentTokenMintPubkey);
+            pdas = await deriveAllPDAs(programId, currentProjectId, paymentTokenMintPubkey, connection);
             projectConfigPDA = pdas.projectConfig.address;
             projectConfigInfo = await connection.getAccountInfo(projectConfigPDA);
 
@@ -183,27 +199,35 @@ router.post('/build-initialize-project-tx', async (req, res) => {
 
         console.log(`   Vault Token Account: ${vaultTokenAccount.toString()}`);
 
-        // Derive fee token ATAs (for launch fee payment)
-        const ownerFeeTokenAccount = await getAssociatedTokenAddress(
+        // Derive fee token ATAs (for launch fee payment) - using correct token program
+        const ownerFeeTokenAccount = getAssociatedTokenAddressSync(
             feeTokenMintPubkey,
-            ownerPubkey
+            ownerPubkey,
+            false,
+            feeTokenProgram,
+            ASSOCIATED_TOKEN_PROGRAM_ID
         );
 
         // Launch fee goes to treasury PDA's token account (not admin wallet)
-        const treasuryFeeTokenAccount = await getAssociatedTokenAddress(
+        const treasuryFeeTokenAccount = getAssociatedTokenAddressSync(
             feeTokenMintPubkey,
             treasuryPDA,
-            true // allowOwnerOffCurve - PDAs can own token accounts
+            true, // allowOwnerOffCurve - PDAs can own token accounts
+            feeTokenProgram,
+            ASSOCIATED_TOKEN_PROGRAM_ID
         );
 
         console.log(`\n💳 Fee token accounts:`);
         console.log(`   Owner fee account: ${ownerFeeTokenAccount.toString()}`);
         console.log(`   Treasury fee account: ${treasuryFeeTokenAccount.toString()}`);
 
-        // Get owner's payment token account (for vault funding)
-        const ownerPaymentTokenAccount = await getAssociatedTokenAddress(
+        // Get owner's payment token account (for vault funding) - using correct token program
+        const ownerPaymentTokenAccount = getAssociatedTokenAddressSync(
             paymentTokenMintPubkey,
-            ownerPubkey
+            ownerPubkey,
+            false,
+            paymentTokenProgram,
+            ASSOCIATED_TOKEN_PROGRAM_ID
         );
 
         console.log(`   Owner payment token account: ${ownerPaymentTokenAccount.toString()}`);
@@ -223,22 +247,27 @@ router.post('/build-initialize-project-tx', async (req, res) => {
             ownerPubkey, // payer
             vaultTokenAccount, // ata
             vaultAuthorityPDA, // owner
-            paymentTokenMintPubkey // mint
+            paymentTokenMintPubkey, // mint
+            paymentTokenProgram, // Token or Token-2022
+            ASSOCIATED_TOKEN_PROGRAM_ID
         );
         combinedTransaction.add(createVaultAtaIx);
-        console.log(`   Added: Create vault ATA instruction (idempotent)`);
+        console.log(`   Added: Create vault ATA instruction (idempotent, ${paymentTokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'})`);
 
         // Step 1b: Create treasury fee token account (idempotent - for launch fee)
         const createTreasuryFeeAtaIx = createAssociatedTokenAccountIdempotentInstruction(
             ownerPubkey, // payer
             treasuryFeeTokenAccount, // ata
             treasuryPDA, // owner (treasury PDA)
-            feeTokenMintPubkey // mint (3EYES token)
+            feeTokenMintPubkey, // mint (3EYES token)
+            feeTokenProgram, // Token or Token-2022
+            ASSOCIATED_TOKEN_PROGRAM_ID
         );
         combinedTransaction.add(createTreasuryFeeAtaIx);
-        console.log(`   Added: Create treasury fee ATA instruction (idempotent)`);
+        console.log(`   Added: Create treasury fee ATA instruction (idempotent, ${feeTokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'})`);
 
         // Step 2: Build the Anchor initialize_project instruction
+        // Note: The token_program in initialize_project is used for the launch fee transfer (fee token)
         const luckIntervalBN = new BN(luckInterval);
         const initProjectTx = await program.methods
             .initializeProject(
@@ -256,7 +285,7 @@ router.post('/build-initialize-project-tx', async (req, res) => {
                 platformFeeTokenAccount: treasuryFeeTokenAccount, // Launch fee goes to treasury PDA
                 feeTokenMint: feeTokenMintPubkey,
                 systemProgram: SystemProgram.programId,
-                tokenProgram: TOKEN_PROGRAM_ID,
+                tokenProgram: feeTokenProgram, // Use fee token's program (Token or Token-2022)
                 rent: SYSVAR_RENT_PUBKEY,
             })
             .transaction();
@@ -271,6 +300,8 @@ router.post('/build-initialize-project-tx', async (req, res) => {
             vaultTokenAccount, // destination
             ownerPubkey, // owner of source
             vaultFundAmount, // amount
+            [], // multiSigners
+            paymentTokenProgram // Token or Token-2022
         );
         combinedTransaction.add(fundVaultIx);
 
@@ -947,20 +978,27 @@ router.post('/build-create-box-tx', async (req, res) => {
         const buyerPubkey = new PublicKey(buyerWallet);
         const paymentTokenMintPubkey = new PublicKey(project.payment_token_mint);
 
+        // Detect token program (Token vs Token-2022)
+        const paymentTokenProgram = await getTokenProgramForMint(connection, paymentTokenMintPubkey);
+        console.log(`   Token program: ${paymentTokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'}`);
+
         // Derive PDAs
         const [platformConfigPDA] = derivePlatformConfigPDA(programId);
         const [boxInstancePDA, boxInstanceBump] = deriveBoxInstancePDA(programId, projectId, nextBoxId);
         const [vaultAuthorityPDA] = deriveVaultAuthorityPDA(programId, projectId, paymentTokenMintPubkey);
-        const vaultTokenAccount = await deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMintPubkey);
+        const vaultTokenAccount = deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMintPubkey, paymentTokenProgram);
 
         // Derive treasury PDAs for commission collection
         const [treasuryPDA] = deriveTreasuryPDA(programId);
-        const treasuryTokenAccount = await deriveTreasuryTokenAccount(treasuryPDA, paymentTokenMintPubkey);
+        const treasuryTokenAccount = deriveTreasuryTokenAccount(treasuryPDA, paymentTokenMintPubkey, paymentTokenProgram);
 
-        // Derive buyer's token account
-        const buyerTokenAccount = await getAssociatedTokenAddress(
+        // Derive buyer's token account with correct program
+        const buyerTokenAccount = getAssociatedTokenAddressSync(
             paymentTokenMintPubkey,
-            buyerPubkey
+            buyerPubkey,
+            false,
+            paymentTokenProgram,
+            ASSOCIATED_TOKEN_PROGRAM_ID
         );
 
         console.log(`   Platform config PDA: ${platformConfigPDA.toString()}`);
@@ -1005,20 +1043,24 @@ router.post('/build-create-box-tx', async (req, res) => {
             buyerPubkey, // payer
             vaultTokenAccount, // ata
             vaultAuthorityPDA, // owner
-            paymentTokenMintPubkey // mint
+            paymentTokenMintPubkey, // mint
+            paymentTokenProgram, // Token or Token-2022
+            ASSOCIATED_TOKEN_PROGRAM_ID
         );
         transaction.add(createVaultIx);
-        console.log(`   Added: Create vault ATA instruction (idempotent)`);
+        console.log(`   Added: Create vault ATA instruction (idempotent, ${paymentTokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'})`);
 
         // 2. Create treasury ATA (idempotent - no-op if exists, avoids RPC cache issues)
         const createTreasuryIx = createAssociatedTokenAccountIdempotentInstruction(
             buyerPubkey, // payer
             treasuryTokenAccount, // ata
             treasuryPDA, // owner
-            paymentTokenMintPubkey // mint
+            paymentTokenMintPubkey, // mint
+            paymentTokenProgram, // Token or Token-2022
+            ASSOCIATED_TOKEN_PROGRAM_ID
         );
         transaction.add(createTreasuryIx);
-        console.log(`   Added: Create treasury ATA instruction (idempotent)`);
+        console.log(`   Added: Create treasury ATA instruction (idempotent, ${paymentTokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'})`);
 
 
         // 3. Create box (no randomness - will be committed when user opens)
@@ -1036,7 +1078,7 @@ router.post('/build-create-box-tx', async (req, res) => {
                 vaultTokenAccount: vaultTokenAccount,
                 treasuryTokenAccount: treasuryTokenAccount,
                 treasury: treasuryPDA,
-                tokenProgram: TOKEN_PROGRAM_ID,
+                tokenProgram: paymentTokenProgram, // Token or Token-2022
                 systemProgram: SystemProgram.programId,
             })
             .transaction();
@@ -1319,13 +1361,17 @@ router.post('/build-create-boxes-batch-tx', async (req, res) => {
         const buyerPubkey = new PublicKey(buyerWallet);
         const paymentTokenMintPubkey = new PublicKey(project.payment_token_mint);
 
+        // Detect token program (Token vs Token-2022)
+        const paymentTokenProgram = await getTokenProgramForMint(connection, paymentTokenMintPubkey);
+        console.log(`   Token program: ${paymentTokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'}`);
+
         // Derive common PDAs (shared across all transactions)
         const [platformConfigPDA] = derivePlatformConfigPDA(programId);
         const [vaultAuthorityPDA] = deriveVaultAuthorityPDA(programId, projectId, paymentTokenMintPubkey);
-        const vaultTokenAccount = await deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMintPubkey);
+        const vaultTokenAccount = deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMintPubkey, paymentTokenProgram);
         const [treasuryPDA] = deriveTreasuryPDA(programId);
-        const treasuryTokenAccount = await deriveTreasuryTokenAccount(treasuryPDA, paymentTokenMintPubkey);
-        const buyerTokenAccount = await getAssociatedTokenAddress(paymentTokenMintPubkey, buyerPubkey);
+        const treasuryTokenAccount = deriveTreasuryTokenAccount(treasuryPDA, paymentTokenMintPubkey, paymentTokenProgram);
+        const buyerTokenAccount = getAssociatedTokenAddressSync(paymentTokenMintPubkey, buyerPubkey, false, paymentTokenProgram, ASSOCIATED_TOKEN_PROGRAM_ID);
 
         // Fetch platform config to get commission rate
         const platformConfigInfo = await connection.getAccountInfo(platformConfigPDA);
@@ -1370,19 +1416,23 @@ router.post('/build-create-boxes-batch-tx', async (req, res) => {
                     buyerPubkey,
                     vaultTokenAccount,
                     vaultAuthorityPDA,
-                    paymentTokenMintPubkey
+                    paymentTokenMintPubkey,
+                    paymentTokenProgram,
+                    ASSOCIATED_TOKEN_PROGRAM_ID
                 );
                 transaction.add(createVaultIx);
-                console.log(`   Added: Create vault ATA instruction (idempotent)`);
+                console.log(`   Added: Create vault ATA instruction (idempotent, ${paymentTokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'})`);
 
                 const createTreasuryIx = createAssociatedTokenAccountIdempotentInstruction(
                     buyerPubkey,
                     treasuryTokenAccount,
                     treasuryPDA,
-                    paymentTokenMintPubkey
+                    paymentTokenMintPubkey,
+                    paymentTokenProgram,
+                    ASSOCIATED_TOKEN_PROGRAM_ID
                 );
                 transaction.add(createTreasuryIx);
-                console.log(`   Added: Create treasury ATA instruction (idempotent)`);
+                console.log(`   Added: Create treasury ATA instruction (idempotent, ${paymentTokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'})`);
             }
 
             // Add create_box instructions for each box in this transaction
@@ -1403,7 +1453,7 @@ router.post('/build-create-boxes-batch-tx', async (req, res) => {
                         vaultTokenAccount: vaultTokenAccount,
                         treasuryTokenAccount: treasuryTokenAccount,
                         treasury: treasuryPDA,
-                        tokenProgram: TOKEN_PROGRAM_ID,
+                        tokenProgram: paymentTokenProgram,
                         systemProgram: SystemProgram.programId,
                     })
                     .transaction();
@@ -2804,16 +2854,23 @@ router.post('/build-settle-box-tx', async (req, res) => {
         const ownerPubkey = new PublicKey(ownerWallet);
         const paymentTokenMintPubkey = new PublicKey(project.payment_token_mint);
 
+        // Detect token program (Token vs Token-2022)
+        const paymentTokenProgram = await getTokenProgramForMint(connection, paymentTokenMintPubkey);
+        console.log(`   Token program: ${paymentTokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'}`);
+
         // Derive PDAs
         const [projectConfigPDA] = deriveProjectConfigPDAStandalone(new PublicKey(config.programId), projectId);
         const [boxInstancePDA] = deriveBoxInstancePDA(programId, projectId, boxId);
         const [vaultAuthorityPDA] = deriveVaultAuthorityPDA(programId, projectId, paymentTokenMintPubkey);
-        const vaultTokenAccount = await deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMintPubkey);
+        const vaultTokenAccount = deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMintPubkey, paymentTokenProgram);
 
-        // Get owner's token account
-        const ownerTokenAccount = await getAssociatedTokenAddress(
+        // Get owner's token account with correct program
+        const ownerTokenAccount = getAssociatedTokenAddressSync(
             paymentTokenMintPubkey,
-            ownerPubkey
+            ownerPubkey,
+            false,
+            paymentTokenProgram,
+            ASSOCIATED_TOKEN_PROGRAM_ID
         );
 
         console.log(`   Project Config PDA: ${projectConfigPDA.toString()}`);
@@ -2885,7 +2942,7 @@ router.post('/build-settle-box-tx', async (req, res) => {
                 paymentTokenMint: paymentTokenMintPubkey,
                 vaultTokenAccount: vaultTokenAccount,
                 ownerTokenAccount: ownerTokenAccount,
-                tokenProgram: TOKEN_PROGRAM_ID,
+                tokenProgram: paymentTokenProgram, // Token or Token-2022
             })
             .transaction();
 
@@ -2897,7 +2954,9 @@ router.post('/build-settle-box-tx', async (req, res) => {
                 ownerPubkey, // payer
                 ownerTokenAccount, // ata
                 ownerPubkey, // owner
-                paymentTokenMintPubkey // mint
+                paymentTokenMintPubkey, // mint
+                paymentTokenProgram, // Token or Token-2022
+                ASSOCIATED_TOKEN_PROGRAM_ID
             );
 
             transaction = new anchor.web3.Transaction();
@@ -3536,10 +3595,14 @@ router.post('/build-refund-box-tx', async (req, res) => {
         const ownerPubkey = new PublicKey(ownerWallet);
         const paymentTokenMintPubkey = new PublicKey(project.payment_token_mint);
 
+        // Detect token program (Token vs Token-2022)
+        const paymentTokenProgram = await getTokenProgramForMint(connection, paymentTokenMintPubkey);
+        console.log(`   Token program: ${paymentTokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'}`);
+
         // Derive PDAs
         const [projectConfigPDA] = deriveProjectConfigPDAStandalone(programId, projectId);
         const [vaultAuthorityPDA] = deriveVaultAuthorityPDA(programId, projectId, paymentTokenMintPubkey);
-        const vaultTokenAccount = await deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMintPubkey);
+        const vaultTokenAccount = deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMintPubkey, paymentTokenProgram);
 
         // Verify on-chain box state before building transaction
         // This catches database/on-chain state mismatches early
@@ -3579,10 +3642,13 @@ router.post('/build-refund-box-tx', async (req, res) => {
             });
         }
 
-        // Get owner's token account
-        const ownerTokenAccount = await getAssociatedTokenAddress(
+        // Get owner's token account with correct program
+        const ownerTokenAccount = getAssociatedTokenAddressSync(
             paymentTokenMintPubkey,
-            ownerPubkey
+            ownerPubkey,
+            false,
+            paymentTokenProgram,
+            ASSOCIATED_TOKEN_PROGRAM_ID
         );
 
         // Build refund transaction
@@ -3599,7 +3665,7 @@ router.post('/build-refund-box-tx', async (req, res) => {
                 paymentTokenMint: paymentTokenMintPubkey,
                 vaultTokenAccount: vaultTokenAccount,
                 ownerTokenAccount: ownerTokenAccount,
-                tokenProgram: TOKEN_PROGRAM_ID,
+                tokenProgram: paymentTokenProgram, // Token or Token-2022
             })
             .transaction();
 

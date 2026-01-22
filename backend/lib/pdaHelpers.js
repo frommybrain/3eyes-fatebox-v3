@@ -3,8 +3,55 @@
 // Use these for utility endpoints and testing
 
 import { PublicKey } from '@solana/web3.js';
-import { getAssociatedTokenAddress } from '@solana/spl-token';
+import {
+    getAssociatedTokenAddress,
+    getAssociatedTokenAddressSync,
+    TOKEN_PROGRAM_ID,
+    TOKEN_2022_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+} from '@solana/spl-token';
 import BN from 'bn.js';
+
+/**
+ * Detect which token program a mint uses (Token or Token-2022)
+ * @param {Connection} connection - Solana connection
+ * @param {PublicKey} mintAddress - Token mint address
+ * @returns {Promise<PublicKey>} - TOKEN_PROGRAM_ID or TOKEN_2022_PROGRAM_ID
+ */
+export async function getTokenProgramForMint(connection, mintAddress) {
+    const mintInfo = await connection.getAccountInfo(mintAddress);
+    if (!mintInfo) {
+        throw new Error(`Mint account not found: ${mintAddress.toString()}`);
+    }
+
+    // Check if the owner is Token-2022 program
+    if (mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+        return TOKEN_2022_PROGRAM_ID;
+    }
+
+    // Default to legacy Token program
+    return TOKEN_PROGRAM_ID;
+}
+
+/**
+ * Get associated token address with automatic token program detection
+ * @param {Connection} connection - Solana connection
+ * @param {PublicKey} mint - Token mint
+ * @param {PublicKey} owner - Owner wallet
+ * @param {boolean} allowOwnerOffCurve - Allow PDA owners
+ * @returns {Promise<{address: PublicKey, tokenProgram: PublicKey}>}
+ */
+export async function getAssociatedTokenAddressWithProgram(connection, mint, owner, allowOwnerOffCurve = false) {
+    const tokenProgram = await getTokenProgramForMint(connection, mint);
+    const address = getAssociatedTokenAddressSync(
+        mint,
+        owner,
+        allowOwnerOffCurve,
+        tokenProgram,
+        ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+    return { address, tokenProgram };
+}
 
 /**
  * Derive platform config PDA (global singleton for tunable parameters)
@@ -36,13 +83,16 @@ export function deriveTreasuryPDA(programId) {
  * Derive treasury token account (ATA for treasury PDA)
  * @param {PublicKey} treasuryPDA - Treasury PDA
  * @param {PublicKey} tokenMint - Token mint
- * @returns {Promise<PublicKey>} - Treasury token account address
+ * @param {PublicKey} tokenProgram - Token program (TOKEN_PROGRAM_ID or TOKEN_2022_PROGRAM_ID)
+ * @returns {PublicKey} - Treasury token account address
  */
-export async function deriveTreasuryTokenAccount(treasuryPDA, tokenMint) {
-    return await getAssociatedTokenAddress(
+export function deriveTreasuryTokenAccount(treasuryPDA, tokenMint, tokenProgram = TOKEN_PROGRAM_ID) {
+    return getAssociatedTokenAddressSync(
         tokenMint,
         treasuryPDA,
-        true // allowOwnerOffCurve - PDAs can own token accounts
+        true, // allowOwnerOffCurve - PDAs can own token accounts
+        tokenProgram,
+        ASSOCIATED_TOKEN_PROGRAM_ID
     );
 }
 
@@ -116,13 +166,16 @@ export function deriveBoxInstancePDA(programId, projectId, boxId) {
  * Derive vault token account (ATA for vault authority)
  * @param {PublicKey} vaultAuthorityPDA - Vault authority PDA
  * @param {PublicKey} paymentTokenMint - Payment token mint
- * @returns {Promise<PublicKey>} - Vault token account address
+ * @param {PublicKey} tokenProgram - Token program (TOKEN_PROGRAM_ID or TOKEN_2022_PROGRAM_ID)
+ * @returns {PublicKey} - Vault token account address
  */
-export async function deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMint) {
-    return await getAssociatedTokenAddress(
+export function deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMint, tokenProgram = TOKEN_PROGRAM_ID) {
+    return getAssociatedTokenAddressSync(
         paymentTokenMint,
         vaultAuthorityPDA,
-        true // allowOwnerOffCurve - PDAs can own token accounts
+        true, // allowOwnerOffCurve - PDAs can own token accounts
+        tokenProgram,
+        ASSOCIATED_TOKEN_PROGRAM_ID
     );
 }
 
@@ -131,15 +184,23 @@ export async function deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMin
  * @param {PublicKey} programId - Program ID
  * @param {number} projectId - Numeric project ID
  * @param {PublicKey} paymentTokenMint - Payment token mint
+ * @param {Connection} connection - Optional Solana connection for token program detection
  * @returns {Promise<Object>} - All PDA addresses
  */
-export async function deriveAllPDAs(programId, projectId, paymentTokenMint) {
+export async function deriveAllPDAs(programId, projectId, paymentTokenMint, connection = null) {
     const [platformConfigPDA, platformConfigBump] = derivePlatformConfigPDA(programId);
     const [projectConfigPDA, projectConfigBump] = deriveProjectConfigPDA(programId, projectId);
     const [vaultAuthorityPDA, vaultAuthorityBump] = deriveVaultAuthorityPDA(programId, projectId, paymentTokenMint);
-    const vaultTokenAccount = await deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMint);
     const [treasuryPDA, treasuryBump] = deriveTreasuryPDA(programId);
-    const treasuryTokenAccount = await deriveTreasuryTokenAccount(treasuryPDA, paymentTokenMint);
+
+    // Detect token program if connection provided
+    let paymentTokenProgram = TOKEN_PROGRAM_ID;
+    if (connection) {
+        paymentTokenProgram = await getTokenProgramForMint(connection, paymentTokenMint);
+    }
+
+    const vaultTokenAccount = deriveVaultTokenAccount(vaultAuthorityPDA, paymentTokenMint, paymentTokenProgram);
+    const treasuryTokenAccount = deriveTreasuryTokenAccount(treasuryPDA, paymentTokenMint, paymentTokenProgram);
 
     return {
         platformConfig: {
@@ -164,5 +225,6 @@ export async function deriveAllPDAs(programId, projectId, paymentTokenMint) {
         treasuryTokenAccount: {
             address: treasuryTokenAccount,
         },
+        paymentTokenProgram, // Include detected token program
     };
 }

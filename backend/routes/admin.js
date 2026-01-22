@@ -3,10 +3,17 @@
 
 import express from 'express';
 import { PublicKey, Transaction, Keypair, SystemProgram, SYSVAR_RENT_PUBKEY } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } from '@solana/spl-token';
+import {
+    TOKEN_PROGRAM_ID,
+    TOKEN_2022_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+    getAssociatedTokenAddress,
+    getAssociatedTokenAddressSync,
+    createAssociatedTokenAccountInstruction
+} from '@solana/spl-token';
 import BN from 'bn.js';
 import { getAnchorProgram } from '../lib/anchorClient.js';
-import { derivePlatformConfigPDA, deriveTreasuryPDA, deriveTreasuryTokenAccount } from '../lib/pdaHelpers.js';
+import { derivePlatformConfigPDA, deriveTreasuryPDA, deriveTreasuryTokenAccount, getTokenProgramForMint } from '../lib/pdaHelpers.js';
 import { getNetworkConfig, getPlatformConfig, clearConfigCache } from '../lib/getNetworkConfig.js';
 import { createClient } from '@supabase/supabase-js';
 import logger, { EventTypes, Severity, ActorTypes } from '../lib/logger.js';
@@ -671,7 +678,12 @@ router.post('/withdraw-treasury', requireSuperAdmin, async (req, res) => {
         const [platformConfigPDA] = derivePlatformConfigPDA(programId);
         const [treasuryPDA] = deriveTreasuryPDA(programId);
         const tokenMintPubkey = new PublicKey(tokenMint);
-        const treasuryTokenAccount = await deriveTreasuryTokenAccount(treasuryPDA, tokenMintPubkey);
+
+        // Detect token program (Token vs Token-2022)
+        const tokenProgram = await getTokenProgramForMint(connection, tokenMintPubkey);
+        console.log(`Token program: ${tokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'}`);
+
+        const treasuryTokenAccount = deriveTreasuryTokenAccount(treasuryPDA, tokenMintPubkey, tokenProgram);
 
         console.log(`Treasury PDA: ${treasuryPDA.toString()}`);
         console.log(`Treasury token account: ${treasuryTokenAccount.toString()}`);
@@ -714,10 +726,13 @@ router.post('/withdraw-treasury', requireSuperAdmin, async (req, res) => {
 
         console.log(`Withdrawal amount: ${withdrawAmountBN.toString()}`);
 
-        // Get admin's token account (destination)
-        const adminTokenAccount = await getAssociatedTokenAddress(
+        // Get admin's token account (destination) with correct token program
+        const adminTokenAccount = getAssociatedTokenAddressSync(
             tokenMintPubkey,
-            adminKeypair.publicKey
+            adminKeypair.publicKey,
+            false,
+            tokenProgram,
+            ASSOCIATED_TOKEN_PROGRAM_ID
         );
 
         // Check if admin token account exists
@@ -738,10 +753,12 @@ router.post('/withdraw-treasury', requireSuperAdmin, async (req, res) => {
                 adminKeypair.publicKey, // payer
                 adminTokenAccount, // ata
                 adminKeypair.publicKey, // owner
-                tokenMintPubkey // mint
+                tokenMintPubkey, // mint
+                tokenProgram, // Token or Token-2022
+                ASSOCIATED_TOKEN_PROGRAM_ID
             );
             transaction.add(createAtaIx);
-            console.log('Added: Create admin ATA instruction');
+            console.log(`Added: Create admin ATA instruction (${tokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'})`);
         }
 
         // Build withdraw_treasury instruction
@@ -754,7 +771,7 @@ router.post('/withdraw-treasury', requireSuperAdmin, async (req, res) => {
                 tokenMint: tokenMintPubkey,
                 treasuryTokenAccount: treasuryTokenAccount,
                 adminTokenAccount: adminTokenAccount,
-                tokenProgram: TOKEN_PROGRAM_ID,
+                tokenProgram: tokenProgram, // Token or Token-2022
             })
             .transaction();
 

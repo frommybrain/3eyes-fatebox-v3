@@ -4,12 +4,19 @@
 import express from 'express';
 import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 import { createClient } from '@supabase/supabase-js';
-import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import {
+    getAssociatedTokenAddress,
+    getAssociatedTokenAddressSync,
+    createAssociatedTokenAccountInstruction,
+    TOKEN_PROGRAM_ID,
+    TOKEN_2022_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+} from '@solana/spl-token';
 import BN from 'bn.js';
 import { getNetworkConfig, getPlatformConfig } from '../lib/getNetworkConfig.js';
 import { getAnchorProgram } from '../lib/anchorClient.js';
 import { testJupiterConnection, KNOWN_TOKENS } from '../lib/priceOracle.js';
-import { deriveVaultAuthorityPDA, derivePlatformConfigPDA } from '../lib/pdaHelpers.js';
+import { deriveVaultAuthorityPDA, derivePlatformConfigPDA, getTokenProgramForMint } from '../lib/pdaHelpers.js';
 import {
     calculateUnopenedBoxReserve,
     calculateExpectedReserve,
@@ -645,6 +652,10 @@ router.post('/build-withdraw-tx', async (req, res) => {
         const ownerPubkey = new PublicKey(ownerWallet);
         const paymentTokenMint = new PublicKey(project.payment_token_mint);
 
+        // Detect token program (Token vs Token-2022)
+        const paymentTokenProgram = await getTokenProgramForMint(connection, paymentTokenMint);
+        console.log(`   Token program: ${paymentTokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'}`);
+
         // Derive PDAs
         const [platformConfigPDA] = derivePlatformConfigPDA(programId);
         const [vaultAuthority] = deriveVaultAuthorityPDA(
@@ -655,10 +666,13 @@ router.post('/build-withdraw-tx', async (req, res) => {
 
         const vaultTokenAccount = new PublicKey(project.vault_token_account);
 
-        // Owner's token account
-        const ownerTokenAccount = await getAssociatedTokenAddress(
+        // Owner's token account with correct program
+        const ownerTokenAccount = getAssociatedTokenAddressSync(
             paymentTokenMint,
-            ownerPubkey
+            ownerPubkey,
+            false,
+            paymentTokenProgram,
+            ASSOCIATED_TOKEN_PROGRAM_ID
         );
 
         // Build transaction
@@ -672,7 +686,9 @@ router.post('/build-withdraw-tx', async (req, res) => {
                     ownerPubkey,
                     ownerTokenAccount,
                     ownerPubkey,
-                    paymentTokenMint
+                    paymentTokenMint,
+                    paymentTokenProgram,
+                    ASSOCIATED_TOKEN_PROGRAM_ID
                 )
             );
         }
@@ -694,7 +710,7 @@ router.post('/build-withdraw-tx', async (req, res) => {
                 vaultTokenAccount: vaultTokenAccount,
                 ownerTokenAccount: ownerTokenAccount,
                 paymentTokenMint: paymentTokenMint,
-                tokenProgram: TOKEN_PROGRAM_ID,
+                tokenProgram: paymentTokenProgram, // Token or Token-2022
             })
             .instruction();
 

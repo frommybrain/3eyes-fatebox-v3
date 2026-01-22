@@ -1,7 +1,7 @@
 // components/three/mainScene.jsx
 'use client'
 
-import Floor from "./floor"
+import {Floor} from "./floor"
 import { VendingMachine } from "./vendingMachine"
 import { DegenBoxLogo } from "./degenBoxLogo"
 
@@ -11,7 +11,7 @@ export default function MainScene() {
         <>
             <VendingMachine />
             <DegenBoxLogo />
-            <Floor size={100} />
+            <Floor size={50} />
         </>
 
     )

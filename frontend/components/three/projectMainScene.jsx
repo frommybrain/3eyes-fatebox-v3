@@ -2,7 +2,7 @@
 'use client'
 
 import { Physics, RigidBody, CuboidCollider, TrimeshCollider } from '@react-three/rapier'
-import Floor from "./floor"
+import { Floor } from "./floor"
 import { VendingMachine } from "./vendingMachine"
 import { VendingMachineCollider } from "./physics/VendingMachineCollider"
 import DroppingBoxManager from "./physics/DroppingBox"
@@ -23,7 +23,7 @@ export default function ProjectMainScene() {
             </RigidBody>
 
             {/* Visual floor */}
-            <Floor size={100} />
+            <Floor />
 
             {/* Dropping boxes */}
             <DroppingBoxManager />

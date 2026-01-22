@@ -90,6 +90,24 @@ export default function Header() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Test button handler - simulates clicking buy and getting 3 boxes confirmed
+  const handleTestCamera = useCallback(() => {
+    if (testActive) return;
+    setTestActive(true);
+    usePurchasingStore.getState().startPurchasing(3); // Move camera to purchase position, expect 3 boxes
+
+    // Simulate batch confirmation after a short delay (like wallet signing)
+    setTimeout(() => {
+      usePurchasingStore.getState().queueBoxDrops(3);
+    }, 500);
+
+    // Reset test button state after animation completes
+    // (endPurchasing is called automatically when all boxes have dropped)
+    setTimeout(() => {
+      setTestActive(false);
+    }, 5000);
+  }, [testActive]);
+
   // Build href - use absolute URL only when on subdomain, otherwise use relative path
   const getHref = (path) => {
     if (onSubdomain && baseUrl) {
@@ -232,6 +250,19 @@ export default function Header() {
             </div>
           </>
         )}
+
+        {/* Test Camera Button */}
+        {/*<button
+          onClick={handleTestCamera}
+          disabled={testActive}
+          className={`px-3 py-1.5 text-xs uppercase tracking-wider font-medium rounded transition-colors ${
+            testActive
+              ? 'bg-degen-warning text-white cursor-not-allowed'
+              : 'bg-degen-black/10 text-degen-black hover:bg-degen-black hover:text-white'
+          }`}
+        >
+          {testActive ? 'Testing...' : 'Test Camera'}
+        </button>*/}
 
         <div className="ml-2 border-l border-degen-black/20 pl-4">
           <WalletButton />

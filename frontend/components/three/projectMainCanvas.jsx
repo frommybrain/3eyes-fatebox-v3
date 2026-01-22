@@ -22,8 +22,8 @@ const CAMERA_SMOOTH_TIME = 0.2          // Transition duration for camera moveme
 const INTRO_DELAY_MS = 100              // Delay before intro animation starts (milliseconds)
 
 // Base camera position and lookAt target (idle state)
-const BASE_POSITION = [-2.19, 1.13, 3.03]
-const BASE_LOOKAT = [0.01, 1.23, -0.09]
+const BASE_POSITION = [-1.89, 1, 2.53]
+const BASE_LOOKAT = [0.01, 1.13, -0.09]
 
 // Initial camera position (slightly offset for intro animation)
 const INTRO_POSITION = [-3.5, 1.8, 5]

@@ -52,3 +52,5 @@ backend/test-buyer-wallet.json
 
 # Image generation (temporary)
 backend/imageGen/
+# Program keypair - NEVER commit this
+backend/program/target/deploy/*-keypair.json

@@ -4,9 +4,13 @@
 import { useEffect, useState, useTransition, useOptimistic, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
-import { Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { getAssociatedTokenAddress } from '@solana/spl-token';
-import { PublicKey } from '@solana/web3.js';
+import { Transaction, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
+import {
+    getAssociatedTokenAddressSync,
+    TOKEN_PROGRAM_ID,
+    TOKEN_2022_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+} from '@solana/spl-token';
 import useProjectStore from '@/store/useProjectStore';
 import useNetworkStore from '@/store/useNetworkStore';
 import {
@@ -79,7 +83,22 @@ export default function ProjectPage({ subdomain }) {
             if (currentProject?.payment_token_mint) {
                 try {
                     const mint = new PublicKey(currentProject.payment_token_mint);
-                    const ata = await getAssociatedTokenAddress(mint, publicKey);
+
+                    // Detect token program (Token vs Token-2022)
+                    const mintAccountInfo = await connection.getAccountInfo(mint);
+                    const tokenProgram = mintAccountInfo?.owner.equals(TOKEN_2022_PROGRAM_ID)
+                        ? TOKEN_2022_PROGRAM_ID
+                        : TOKEN_PROGRAM_ID;
+
+                    // Get ATA with correct token program
+                    const ata = getAssociatedTokenAddressSync(
+                        mint,
+                        publicKey,
+                        false,
+                        tokenProgram,
+                        ASSOCIATED_TOKEN_PROGRAM_ID
+                    );
+
                     const tokenAccountInfo = await connection.getTokenAccountBalance(ata);
                     setTokenBalance(parseFloat(tokenAccountInfo.value.uiAmountString));
                 } catch {

@@ -112,48 +112,70 @@ const TEST_MULTIPLIER = testMultiplierIndex !== -1 ? parseFloat(args[testMultipl
 const devWalletIndex = args.indexOf('--dev-wallet');
 const DEV_WALLET_OVERRIDE = devWalletIndex !== -1 ? args[devWalletIndex + 1] : null;
 
-async function getJupiterQuote(inputMint, outputMint, amount) {
+async function getJupiterQuote(inputMint, outputMint, amount, retries = 3) {
     const apiKey = process.env.JUPITER_API_KEY;
     if (!apiKey) {
         console.log('   JUPITER_API_KEY not set - cannot get swap quote');
         return null;
     }
 
-    try {
-        const params = new URLSearchParams({
-            inputMint,
-            outputMint,
-            amount: amount.toString(),
-            slippageBps: '100', // 1% slippage
-        });
+    const params = new URLSearchParams({
+        inputMint,
+        outputMint,
+        amount: amount.toString(),
+        slippageBps: '100', // 1% slippage
+    });
 
-        const response = await fetch(`https://quote-api.jup.ag/v6/quote?${params}`, {
-            headers: {
-                'Accept': 'application/json',
-            },
-        });
+    // Jupiter API v1 (new endpoint as of Dec 2024)
+    // Docs: https://dev.jup.ag/api-reference/swap/quote
+    const url = `https://api.jup.ag/swap/v1/quote?${params}`;
 
-        if (!response.ok) {
-            console.error(`   Jupiter quote API error: ${response.status}`);
-            return null;
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            console.log(`   Fetching Jupiter quote (attempt ${attempt}/${retries})...`);
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                    'x-api-key': apiKey,
+                },
+                signal: AbortSignal.timeout(15000), // 15 second timeout
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`   Jupiter quote API error: ${response.status} - ${errorText}`);
+                return null;
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error(`   Error getting Jupiter quote (attempt ${attempt}): ${error.message}`);
+            if (attempt < retries) {
+                console.log(`   Retrying in 2 seconds...`);
+                await new Promise(r => setTimeout(r, 2000));
+            }
         }
-
-        return await response.json();
-    } catch (error) {
-        console.error('   Error getting Jupiter quote:', error.message);
-        return null;
     }
+    return null;
 }
 
 async function getJupiterSwapTransaction(quoteResponse, userPublicKey) {
     const apiKey = process.env.JUPITER_API_KEY;
+    if (!apiKey) {
+        console.log('   JUPITER_API_KEY not set - cannot get swap transaction');
+        return null;
+    }
 
     try {
-        const response = await fetch('https://quote-api.jup.ag/v6/swap', {
+        // Jupiter API v1 (new endpoint as of Dec 2024)
+        // Docs: https://dev.jup.ag/api-reference/swap/swap
+        const response = await fetch('https://api.jup.ag/swap/v1/swap', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
+                'x-api-key': apiKey,
             },
             body: JSON.stringify({
                 quoteResponse,
@@ -165,7 +187,8 @@ async function getJupiterSwapTransaction(quoteResponse, userPublicKey) {
         });
 
         if (!response.ok) {
-            console.error(`   Jupiter swap API error: ${response.status}`);
+            const errorText = await response.text();
+            console.error(`   Jupiter swap API error: ${response.status} - ${errorText}`);
             return null;
         }
 

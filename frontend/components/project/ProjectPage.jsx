@@ -17,6 +17,7 @@ import {
     DegenButton,
     DegenCard,
     DegenBadge,
+    DegenCarousel,
     useToast,
 } from '@/components/ui';
 import { SkeletonText, SkeletonButton, SkeletonBox } from '@/components/ui/DegenSkeleton';
@@ -496,18 +497,53 @@ export default function ProjectPage({ subdomain }) {
             );
         }
 
-        // If wallet not connected, show connect wallet prompt
+        // If wallet not connected, show connect wallet prompt with how-to carousel
         if (needsWalletConnection) {
+            const howToSlides = [
+                {
+                    image: '/images/degenbox_about1.jpeg',
+                    title: 'Buy a Box',
+                    description: 'Purchase your box using the project token. Multiple boxes may be acquired.',
+                },
+                {
+                    image: '/images/degenbox_about2.jpeg',
+                    title: 'Build Your Luck',
+                    description: 'Your box is assigned a Luck Score that increases over time until it is opened.',
+                },
+                {
+                    image: '/images/degenbox_about3.jpeg',
+                    title: 'Open & Win',
+                    description: 'Open your box when you feel most fortunate. This process may take up to 45 seconds.',
+                },
+                {
+                    image: '/images/degenbox_about4.jpeg',
+                    title: 'Get Paid',
+                    description: 'Payouts are issued directly to your wallet upon reveal.',
+                },
+            ];
+
             return (
                 <div className="text-center">
-                    <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-4">
+                    <h1 className="text-degen-black text-2xl font-bold uppercase tracking-wider mb-2">
                         {displayProject?.project_name || 'DegenBox'}
                     </h1>
-                    <p className="text-degen-text-muted mb-6">
-                        Connect your wallet to purchase boxes.
+                    <p className="text-degen-text-muted text-sm mb-4">
+                        Connect your wallet to buy lootboxes from the vending machine. 
                     </p>
                     <div className="mb-4">
-                        <WalletButton />
+                        <WalletButton variant="warning" fullWidth />
+                    </div>
+
+                    {/* How To Carousel */}
+                    <div className="border-t border-degen-black pt-4 mt-4 -mx-6 px-6">
+                        <p className="text-degen-text-muted text-xs uppercase tracking-wider mb-3">
+                            How it works
+                        </p>
+                        <DegenCarousel
+                            slides={howToSlides}
+                            showArrows={true}
+                            showDots={true}
+                        />
                     </div>
                 </div>
             );

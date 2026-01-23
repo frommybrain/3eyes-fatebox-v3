@@ -8,7 +8,7 @@ import { useEffect } from 'react';
 import { storeWallet, clearStoredWallet } from '@/lib/auth';
 import { DegenButton } from '@/components/ui';
 
-export default function WalletButton() {
+export default function WalletButton({ variant = 'primary', fullWidth = false, className = '' }) {
     const { publicKey, disconnect, connected } = useWallet();
     const { setVisible } = useWalletModal();
     const router = useRouter();
@@ -44,7 +44,9 @@ export default function WalletButton() {
         return (
             <DegenButton
                 onClick={handleClick}
-                variant="primary"
+                variant={variant}
+                fullWidth={fullWidth}
+                className={className}
             >
                 Connect Wallet
             </DegenButton>

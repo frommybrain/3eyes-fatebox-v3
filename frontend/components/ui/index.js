@@ -14,6 +14,7 @@ export { default as DegenModal, WinModal, BadgeModal, ProjectCreatedModal, OpenB
 export { default as DegenAccordion } from './DegenAccordion';
 export { default as XLogo } from './XLogo';
 export { default as DegenTooltip } from './DegenTooltip';
+export { default as DegenCarousel } from './DegenCarousel';
 export {
     default as DegenSkeleton,
     SkeletonBox,

@@ -450,36 +450,26 @@ export default function AdminDashboard() {
         setSaving(false);
     };
 
+    // Toggle project active status (database only - for emergency admin use)
+    // Note: This only updates the database, NOT on-chain. For proper on-chain updates,
+    // use the ManageProject page which sends an on-chain transaction.
     const toggleProjectActive = async (projectId, currentStatus) => {
         try {
+            const newStatus = !currentStatus;
             const { error } = await supabase
                 .from('projects')
-                .update({ is_active: !currentStatus })
+                .update({
+                    is_active: newStatus,
+                    is_paused: !newStatus, // Keep both fields in sync
+                })
                 .eq('id', projectId);
 
             if (error) throw error;
 
-            toast.success(`Project ${!currentStatus ? 'activated' : 'deactivated'} successfully`);
+            toast.success(`Project ${newStatus ? 'activated' : 'deactivated'} in database. Note: On-chain status may differ - use ManageProject for on-chain updates.`);
             loadAllProjects();
         } catch (error) {
             console.error('Error toggling project active:', error);
-            toast.error('Failed to update project');
-        }
-    };
-
-    const toggleProjectPaused = async (projectId, currentStatus) => {
-        try {
-            const { error } = await supabase
-                .from('projects')
-                .update({ is_paused: !currentStatus })
-                .eq('id', projectId);
-
-            if (error) throw error;
-
-            toast.success(`Project ${!currentStatus ? 'paused' : 'unpaused'} successfully`);
-            loadAllProjects();
-        } catch (error) {
-            console.error('Error toggling project paused:', error);
             toast.error('Failed to update project');
         }
     };
@@ -656,11 +646,8 @@ export default function AdminDashboard() {
                                         <div className="flex-1">
                                             <div className="flex items-center gap-3 mb-2">
                                                 <h3 className="text-degen-black font-medium">{project.project_name}</h3>
-                                                <DegenBadge variant={project.is_active ? 'success' : 'error'}>
-                                                    {project.is_active ? 'ACTIVE' : 'INACTIVE'}
-                                                </DegenBadge>
-                                                <DegenBadge variant={project.is_paused ? 'warning' : 'info'}>
-                                                    {project.is_paused ? 'PAUSED' : 'RUNNING'}
+                                                <DegenBadge variant={project.is_active ? 'success' : 'warning'}>
+                                                    {project.is_active ? 'ACTIVE' : 'PAUSED'}
                                                 </DegenBadge>
                                             </div>
                                             <p className="text-degen-text-muted text-sm mb-2">{project.subdomain}.degenbox.fun</p>
@@ -674,15 +661,9 @@ export default function AdminDashboard() {
                                                 onClick={() => toggleProjectActive(project.id, project.is_active)}
                                                 variant={project.is_active ? 'warning' : 'success'}
                                                 size="sm"
+                                                title="Database only - use ManageProject for on-chain updates"
                                             >
-                                                {project.is_active ? 'Deactivate' : 'Activate'}
-                                            </DegenButton>
-                                            <DegenButton
-                                                onClick={() => toggleProjectPaused(project.id, project.is_paused)}
-                                                variant={project.is_paused ? 'blue' : 'feature'}
-                                                size="sm"
-                                            >
-                                                {project.is_paused ? 'Unpause' : 'Pause'}
+                                                {project.is_active ? 'Pause (DB)' : 'Activate (DB)'}
                                             </DegenButton>
                                         </div>
                                     </div>

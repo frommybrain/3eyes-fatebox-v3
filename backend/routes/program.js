@@ -3401,6 +3401,11 @@ router.post('/confirm-project-update', async (req, res) => {
         if (updates.luckIntervalSeconds !== undefined) {
             dbUpdates.luck_interval_seconds = updates.luckIntervalSeconds || null;
         }
+        if (updates.active !== undefined) {
+            // Sync both is_active and is_paused fields
+            dbUpdates.is_active = updates.active;
+            dbUpdates.is_paused = !updates.active; // Inverse logic
+        }
 
         if (Object.keys(dbUpdates).length === 0) {
             return res.status(400).json({

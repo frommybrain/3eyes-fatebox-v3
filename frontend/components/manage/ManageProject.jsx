@@ -63,6 +63,9 @@ export default function ManageProject({ projectId }) {
     const [newBoxPrice, setNewBoxPrice] = useState('');
     const [updatingBoxPrice, setUpdatingBoxPrice] = useState(false);
 
+    // Pause toggle state
+    const [togglingPause, setTogglingPause] = useState(false);
+
     // On-chain config for luck calculation (baseLuck, maxLuck)
     const [onChainConfig, setOnChainConfig] = useState(null);
 
@@ -181,8 +184,69 @@ export default function ManageProject({ projectId }) {
         }
     };
 
-    const togglePause = () => {
-        handleUpdate({ is_paused: !project.is_paused });
+    // Toggle pause/active status (on-chain + database)
+    const togglePause = async () => {
+        if (!project || !publicKey || !sendTransaction) return;
+
+        // Determine the new active status (inverse of current)
+        // On-chain: active = true means running, active = false means paused
+        // Database: is_active matches on-chain, is_paused is inverse
+        const newActiveStatus = !project.is_active;
+
+        setTogglingPause(true);
+        try {
+            // Step 1: Build transaction via backend
+            const response = await fetch(`${backendUrl}/api/program/build-update-project-tx`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    ownerWallet: publicKey.toString(),
+                    newActive: newActiveStatus,
+                }),
+            });
+
+            const buildResult = await response.json();
+
+            if (!buildResult.success) {
+                throw new Error(buildResult.error || 'Failed to build transaction');
+            }
+
+            // Step 2: Send transaction using wallet adapter
+            const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            transaction.recentBlockhash = blockhash;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+
+            const signature = await sendTransaction(transaction, connection, {
+                skipPreflight: true,
+            });
+            await connection.confirmTransaction(signature, 'confirmed');
+
+            // Step 3: Update database via backend
+            const confirmResponse = await fetch(`${backendUrl}/api/program/confirm-project-update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    signature,
+                    updates: { active: newActiveStatus },
+                }),
+            });
+
+            const confirmResult = await confirmResponse.json();
+            if (!confirmResult.success) {
+                console.warn('DB update failed:', confirmResult.error);
+            }
+
+            toast.success(newActiveStatus ? 'Project resumed! Users can now buy boxes.' : 'Project paused! Box sales are disabled.');
+            loadProject();
+        } catch (error) {
+            console.error('Error toggling pause status:', error);
+            toast.error(error.message || 'Failed to update pause status');
+        } finally {
+            setTogglingPause(false);
+        }
     };
 
     // Update luck interval (on-chain + database)
@@ -664,7 +728,7 @@ export default function ManageProject({ projectId }) {
                         <OverviewTab
                             project={project}
                             projectUrl={projectUrl}
-                            saving={saving}
+                            togglingPause={togglingPause}
                             togglePause={togglePause}
                             platformPaused={config?.paused}
                         />
@@ -719,7 +783,10 @@ export default function ManageProject({ projectId }) {
 // ============================================================================
 // Overview Tab
 // ============================================================================
-function OverviewTab({ project, projectUrl, saving, togglePause, platformPaused }) {
+function OverviewTab({ project, projectUrl, togglingPause, togglePause, platformPaused }) {
+    // Use is_active for status (true = active/live, false = paused)
+    const isActive = project.is_active;
+
     return (
         <div className="space-y-6">
             {/* Project Status */}
@@ -739,16 +806,18 @@ function OverviewTab({ project, projectUrl, saving, togglePause, platformPaused 
                             <div>
                                 <h3 className="text-degen-black font-medium uppercase tracking-wider">Box Sales</h3>
                                 <p className="text-sm text-degen-text-muted">
-                                    {project.is_paused ? 'Box sales are paused - users cannot purchase new boxes' : 'Project is live and accepting box purchases'}
+                                    {isActive
+                                        ? 'Project is live and accepting box purchases'
+                                        : 'Box sales are paused - users cannot purchase new boxes (existing boxes can still be opened/settled)'}
                                 </p>
                             </div>
                             <DegenButton
                                 onClick={togglePause}
-                                disabled={saving || platformPaused}
-                                variant={project.is_paused ? 'warning' : 'success'}
+                                disabled={togglingPause || platformPaused}
+                                variant={isActive ? 'success' : 'warning'}
                                 size="sm"
                             >
-                                {project.is_paused ? 'Paused' : 'Live'}
+                                {togglingPause ? 'Updating...' : (isActive ? 'Live' : 'Paused')}
                             </DegenButton>
                         </div>
                     </div>

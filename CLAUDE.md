@@ -496,7 +496,8 @@ Checks if Switchboard oracles are reachable by testing DNS resolution for the xi
 | `lib/evCalculator.js` | EV/RTP calculations, dynamic vault funding, reserve calculations |
 | `lib/luckHelpers.js` | Luck interval helpers, presets, time-to-max-luck formatting |
 | `scripts/init-platform-config.js` | Initialize platform config PDA |
-| `scripts/process-treasury-fees.js` | Batch process treasury (swap to SOL, buyback) |
+| `scripts/process-treasury-fees.js` | Batch process treasury (personal wallet split) |
+| `scripts/distribute-prize.js` | Send treasury tokens to winner wallets |
 
 ### Switchboard Library Functions (`lib/switchboard.js`)
 
@@ -1914,11 +1915,17 @@ On-chain: calculate commission (5% = 5 tokens)
 95 tokens → Project Vault (for payouts)
 5 tokens → Treasury Token Account (platform revenue)
     ↓
-Admin batches treasury processing:
-    - Withdraw tokens from treasury
-    - Swap all tokens to SOL via Jupiter
-    - 90% of SOL → Buy $3EYES → Treasury wallet
-    - 10% of SOL → Dev wallet
+Admin batches treasury processing (via CLI script):
+
+FOR $3EYES TOKEN:
+    - Keep 90% in treasury (no point buying back what we already have)
+    - Withdraw 10% → Send directly to personal wallet (no swap)
+
+FOR OTHER TOKENS:
+    - Withdraw 100% from treasury
+    - Swap to SOL via Jupiter
+    - 90% of SOL → Buy $3EYES → admin wallet
+    - 10% of SOL → personal wallet
 ```
 
 ### On-Chain Implementation
@@ -1958,11 +1965,11 @@ The admin dashboard includes a Treasury tab showing:
 **File:** `backend/scripts/process-treasury-fees.js`
 
 ```bash
-# Show all available flags
-node scripts/process-treasury-fees.js --help
+# REQUIRED: --personal-wallet for production use
+node scripts/process-treasury-fees.js --personal-wallet <your_personal_wallet>
 
 # Dry run (simulation, no transactions)
-node scripts/process-treasury-fees.js --dry-run
+node scripts/process-treasury-fees.js --personal-wallet <wallet> --dry-run
 
 # Withdraw only (skip Jupiter swaps - useful for devnet testing)
 node scripts/process-treasury-fees.js --withdraw-only
@@ -1971,28 +1978,32 @@ node scripts/process-treasury-fees.js --withdraw-only
 node scripts/process-treasury-fees.js --withdraw-only --test-multiplier 0.2
 
 # Process specific token only
-node scripts/process-treasury-fees.js --token <mint_address>
+node scripts/process-treasury-fees.js --personal-wallet <wallet> --token <mint_address>
 
 # Set minimum SOL threshold (default: 0.001 SOL)
-node scripts/process-treasury-fees.js --min-sol 0.01
-
-# Full mainnet processing with dev wallet
-node scripts/process-treasury-fees.js --dev-wallet <pubkey>
+node scripts/process-treasury-fees.js --personal-wallet <wallet> --min-sol 0.01
 ```
 
 **Script Flow:**
-1. Query all unique payment tokens from projects
-2. Check treasury balance for each token
-3. Get Jupiter quote for SOL value
-4. Skip if below minimum threshold
-5. **Withdraw:** Transfer tokens from treasury PDA to admin wallet
-6. **Swap:** Swap tokens to SOL via Jupiter API (mainnet only)
-7. **Split:** 90% for $3EYES buyback, 10% to dev wallet (if specified)
-8. **Log:** Each step logged to `treasury_processing_log` table
+
+**For $3EYES tokens:**
+1. Check treasury balance
+2. Calculate 10% to withdraw (90% stays in treasury)
+3. Withdraw 10% from treasury → admin wallet
+4. Transfer $3EYES directly to personal wallet (no swap)
+5. Log to database with `action_type: 'personal_transfer'`
+
+**For other tokens (e.g., CATS):**
+1. Check treasury balance, get Jupiter quote for SOL value
+2. Skip if below minimum threshold
+3. Withdraw 100% from treasury → admin wallet
+4. Swap tokens to SOL via Jupiter API
+5. Split SOL: 90% buyback $3EYES, 10% to personal wallet
+6. Log each step to `treasury_processing_log` table
 
 **Database Logging:**
 All treasury operations are logged to the `treasury_processing_log` table with:
-- `action_type`: 'withdraw', 'swap', 'dev_transfer', 'buyback' (REQUIRED)
+- `action_type`: 'withdraw', 'swap', 'personal_transfer', 'buyback' (REQUIRED)
 - `processed_by`: Admin wallet that triggered the operation (REQUIRED)
 - Transaction signatures for Solscan links
 - Amounts and status
@@ -2000,12 +2011,10 @@ All treasury operations are logged to the `treasury_processing_log` table with:
 
 **Important:** The `processed_by` and `action_type` fields are NOT NULL. All inserts must include these fields.
 
-**Testing Status:**
-- Devnet: Withdrawal tested successfully with `--withdraw-only --test-multiplier 0.2`
-- Mainnet: **TESTED & WORKING** (Jan 2026) - Full flow executed successfully:
-  - Withdraw: 10,010.5 3EYES from treasury → admin wallet
-  - Swap: 10,010.5 3EYES → 0.006942 SOL via Jupiter/Pump.fun AMM
-  - Buyback: 0.006248 SOL (90%) → 8,799.3 3EYES
+**Why personal wallet separation?**
+- Keeps platform revenue (admin wallet) separate from personal income
+- $3EYES goes directly to personal wallet - no selling of own token on-chain
+- SOL split also goes to personal wallet for clean accounting
 
 ### CLI Script vs Admin Dashboard Button
 
@@ -2014,14 +2023,52 @@ All treasury operations are logged to the `treasury_processing_log` table with:
 | Feature | CLI Script | Admin Dashboard Button |
 |---------|------------|------------------------|
 | **File** | `backend/scripts/process-treasury-fees.js` | Calls `/api/admin/withdraw-treasury` |
-| **What it does** | Full flow: Withdraw → Swap to SOL → 90% buyback / 10% dev | Simple withdraw only (treasury → admin wallet) |
+| **What it does** | Full flow: Withdraw → Swap → Split to personal wallet | Simple withdraw only (treasury → admin wallet) |
 | **Use case** | Batch processing of accumulated fees | Quick single-token withdrawals |
 | **Jupiter integration** | Yes (mainnet only) | No |
 | **Database logging** | Yes (treasury_processing_log) | No |
 
 **Recommended workflow:**
 1. Use **Admin Dashboard** for quick withdrawals or devnet testing
-2. Use **CLI script** for mainnet batch processing with Jupiter swaps and buyback
+2. Use **CLI script** for mainnet batch processing with Jupiter swaps and personal wallet split
+
+### Prize Distribution
+
+**File:** `backend/scripts/distribute-prize.js`
+
+For competitions and giveaways, admin can send tokens directly from treasury to winner wallets.
+
+```bash
+# Send specific amount of $3EYES (with 6 decimals, 1000 tokens = 1000000000)
+node scripts/distribute-prize.js --to <winner_wallet> --amount 1000000000
+
+# Send 50% of treasury $3EYES balance
+node scripts/distribute-prize.js --to <winner_wallet> --percent 50
+
+# Use different token
+node scripts/distribute-prize.js --to <winner_wallet> --percent 25 --token <mint_address>
+
+# Dry run
+node scripts/distribute-prize.js --to <winner_wallet> --percent 25 --dry-run
+```
+
+**API Endpoint:** `POST /api/admin/distribute-prize`
+
+```json
+{
+  "tokenMint": "G63pAYWk...",  // Token mint (defaults to $3EYES)
+  "toWallet": "ABC123...",    // Winner's wallet address
+  "amount": "1000000000",     // Specific amount in base units
+  // OR
+  "percent": 50               // Percentage of treasury (1-100)
+}
+```
+
+**Features:**
+- Creates winner's token account if needed (paid by admin)
+- Sends directly from treasury to winner (single transaction)
+- Logs to `treasury_processing_log` with `action_type: 'prize_distribution'`
+- Logs to `activity_logs` with full metadata
 
 ### API Endpoints
 
@@ -2030,6 +2077,7 @@ All treasury operations are logged to the `treasury_processing_log` table with:
 | `/api/admin/treasury-balances` | GET | All treasury balances |
 | `/api/admin/treasury/:tokenMint` | GET | Specific token balance |
 | `/api/admin/withdraw-treasury` | POST | Withdraw to admin wallet |
+| `/api/admin/distribute-prize` | POST | Send tokens to winner wallet |
 | `/api/admin/treasury-logs` | GET | Treasury activity logs with Solscan links |
 
 ### Configuration
@@ -2046,7 +2094,10 @@ Commission rate is stored on-chain in `PlatformConfig.platform_commission_bps`:
 2. **Treasury is global** - One treasury PDA, multiple token accounts
 3. **$3EYES shown first** - Even with 0 balance, for visibility
 4. **SOL threshold** - Batch script skips tokens worth less than threshold
-5. **Buyback destination** - $3EYES purchased goes to treasury wallet (not burned)
+5. **Buyback destination** - $3EYES purchased goes to admin wallet (not burned)
+6. **Personal wallet required** - `--personal-wallet` flag required for production treasury processing
+7. **$3EYES stays as $3EYES** - No unnecessary swapping, 10% sent directly to personal wallet
+8. **Prize distribution** - Admin can send treasury tokens directly to winner wallets
 
 ---
 

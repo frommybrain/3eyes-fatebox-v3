@@ -23,7 +23,7 @@
  *   --token <mint>         Only process a specific token mint
  *   --min-sol <amount>     Minimum SOL value to process (default: 0.001)
  *   --test-multiplier <n>  Only process n% of each balance (e.g., 0.1 = 10%)
- *   --dev-wallet <address> Override dev wallet (default: admin wallet)
+ *   --personal-wallet <address> Personal wallet for 10% split (required for production)
  *
  * Requirements:
  *   - DEPLOY_WALLET_JSON in .env
@@ -115,8 +115,8 @@ const minSolIndex = args.indexOf('--min-sol');
 const MIN_SOL_VALUE = minSolIndex !== -1 ? parseFloat(args[minSolIndex + 1]) : 0.001;
 const testMultiplierIndex = args.indexOf('--test-multiplier');
 const TEST_MULTIPLIER = testMultiplierIndex !== -1 ? parseFloat(args[testMultiplierIndex + 1]) : 1.0;
-const devWalletIndex = args.indexOf('--dev-wallet');
-const DEV_WALLET_OVERRIDE = devWalletIndex !== -1 ? args[devWalletIndex + 1] : null;
+const personalWalletIndex = args.indexOf('--personal-wallet');
+const PERSONAL_WALLET = personalWalletIndex !== -1 ? args[personalWalletIndex + 1] : null;
 
 async function getJupiterQuote(inputMint, outputMint, amount, retries = 3) {
     const apiKey = process.env.JUPITER_API_KEY;
@@ -366,11 +366,19 @@ async function main() {
         const isThreeEyesToken = threeEyesMint && payment_token_mint === threeEyesMint;
 
         if (isThreeEyesToken) {
-            console.log(`   🎯 This is $3EYES - special handling: keep 90% in treasury, withdraw only 10% for dev`);
-            // For 3EYES: only withdraw 10% (no point buying back what we already have)
+            console.log(`   🎯 This is $3EYES - special handling: keep 90% in treasury, send 10% directly to personal wallet`);
+
+            if (!PERSONAL_WALLET) {
+                console.log(`   ERROR: --personal-wallet required for $3EYES processing`);
+                console.log(`   Skipping $3EYES - specify personal wallet to receive 10%`);
+                totalSkipped++;
+                continue;
+            }
+
+            // For 3EYES: only withdraw 10% and send directly to personal wallet (no swap needed)
             balance = BigInt(Math.floor(Number(balance) * 0.1));
             const uiBalance = Number(balance) / Math.pow(10, decimals);
-            console.log(`   Processing: ${uiBalance.toLocaleString()} ${payment_token_symbol} (10% of balance for dev)`);
+            console.log(`   Processing: ${uiBalance.toLocaleString()} ${payment_token_symbol} (10% of balance -> personal wallet)`);
         } else if (TEST_MULTIPLIER < 1.0) {
             // Apply test multiplier if set (only for non-3EYES tokens)
             balance = BigInt(Math.floor(Number(balance) * TEST_MULTIPLIER));
@@ -406,14 +414,14 @@ async function main() {
         if (DRY_RUN) {
             console.log('\n   [DRY RUN] Would process:');
             console.log(`   - Withdraw ${uiBalance} ${payment_token_symbol} from treasury`);
-            console.log(`   - Swap to ~${estimatedSol.toFixed(6)} SOL via Jupiter`);
             if (isThreeEyesToken) {
-                console.log(`   - 100% (~${estimatedSol.toFixed(6)} SOL) to dev wallet (no buyback needed - this IS $3EYES)`);
+                console.log(`   - Transfer ${uiBalance} $3EYES directly to personal wallet (no swap)`);
             } else {
+                console.log(`   - Swap to ~${estimatedSol.toFixed(6)} SOL via Jupiter`);
                 if (threeEyesMint) {
-                    console.log(`   - Use ${BUYBACK_PERCENTAGE}% (~${(estimatedSol * BUYBACK_PERCENTAGE / 100).toFixed(6)} SOL) for $3EYES buyback -> treasury`);
+                    console.log(`   - Use ${BUYBACK_PERCENTAGE}% (~${(estimatedSol * BUYBACK_PERCENTAGE / 100).toFixed(6)} SOL) for $3EYES buyback`);
                 }
-                console.log(`   - Send ${DEV_PERCENTAGE}% (~${(estimatedSol * DEV_PERCENTAGE / 100).toFixed(6)} SOL) to dev wallet`);
+                console.log(`   - Send ${DEV_PERCENTAGE}% (~${(estimatedSol * DEV_PERCENTAGE / 100).toFixed(6)} SOL) to personal wallet`);
             }
             totalProcessed++;
             continue;
@@ -521,7 +529,108 @@ async function main() {
             continue;
         }
 
-        // === STEP 2: Swap to SOL via Jupiter ===
+        // === SPECIAL HANDLING FOR $3EYES: Transfer directly to personal wallet (no swap) ===
+        if (isThreeEyesToken && PERSONAL_WALLET) {
+            console.log('\n   Step 2: Transferring $3EYES directly to personal wallet (no swap)...');
+
+            const personalWalletPubkey = new PublicKey(PERSONAL_WALLET);
+
+            // Get/create personal wallet's token account
+            const personalTokenAccount = await getAssociatedTokenAddress(
+                tokenMintPubkey,
+                personalWalletPubkey,
+                false,
+                tokenProgram,
+                ASSOCIATED_TOKEN_PROGRAM_ID
+            );
+
+            // Check if personal token account exists, create if not
+            const personalAccountInfo = await connection.getAccountInfo(personalTokenAccount);
+            if (!personalAccountInfo) {
+                console.log(`   Creating personal wallet token account...`);
+                try {
+                    const { Transaction } = await import('@solana/web3.js');
+                    const createAtaTx = new Transaction().add(
+                        createAssociatedTokenAccountInstruction(
+                            adminKeypair.publicKey,
+                            personalTokenAccount,
+                            personalWalletPubkey,
+                            tokenMintPubkey,
+                            tokenProgram,
+                            ASSOCIATED_TOKEN_PROGRAM_ID
+                        )
+                    );
+
+                    const { blockhash } = await connection.getLatestBlockhash();
+                    createAtaTx.recentBlockhash = blockhash;
+                    createAtaTx.feePayer = adminKeypair.publicKey;
+                    createAtaTx.sign(adminKeypair);
+
+                    const createAtaSig = await connection.sendRawTransaction(createAtaTx.serialize());
+                    await connection.confirmTransaction(createAtaSig, 'confirmed');
+                    console.log(`   Personal wallet ATA created: ${createAtaSig}`);
+                } catch (ataError) {
+                    console.error(`   ERROR creating personal wallet ATA: ${ataError.message}`);
+                    continue;
+                }
+            }
+
+            // Transfer $3EYES from admin wallet to personal wallet
+            try {
+                const { Transaction } = await import('@solana/web3.js');
+                const { createTransferInstruction } = await import('@solana/spl-token');
+
+                const transferTx = new Transaction().add(
+                    createTransferInstruction(
+                        adminTokenAccount,
+                        personalTokenAccount,
+                        adminKeypair.publicKey,
+                        balance,
+                        [],
+                        tokenProgram
+                    )
+                );
+
+                const { blockhash } = await connection.getLatestBlockhash();
+                transferTx.recentBlockhash = blockhash;
+                transferTx.feePayer = adminKeypair.publicKey;
+                transferTx.sign(adminKeypair);
+
+                const transferSig = await connection.sendRawTransaction(transferTx.serialize());
+                await connection.confirmTransaction(transferSig, 'confirmed');
+
+                console.log(`   $3EYES transfer TX: ${transferSig}`);
+                console.log(`   ✅ ${uiBalance.toLocaleString()} $3EYES sent to personal wallet!`);
+
+                // Log to database
+                await logTreasuryTransaction({
+                    actionType: 'personal_transfer',
+                    tokenMint: payment_token_mint,
+                    tokenSymbol: payment_token_symbol,
+                    tokenAmount: balance,
+                    txSignature: transferSig,
+                    status: 'completed',
+                    processedBy: adminKeypair.publicKey.toString(),
+                });
+
+                totalProcessed++;
+                continue; // Skip the normal swap flow for $3EYES
+            } catch (error) {
+                console.error(`   ERROR transferring $3EYES: ${error.message}`);
+                await logTreasuryTransaction({
+                    actionType: 'personal_transfer',
+                    tokenMint: payment_token_mint,
+                    tokenSymbol: payment_token_symbol,
+                    tokenAmount: balance,
+                    status: 'failed',
+                    errorMessage: error.message,
+                    processedBy: adminKeypair.publicKey.toString(),
+                });
+                continue;
+            }
+        }
+
+        // === STEP 2: Swap to SOL via Jupiter (for non-3EYES tokens) ===
         console.log('\n   Step 2: Swapping to SOL via Jupiter...');
 
         const swapQuote = await getJupiterQuote(payment_token_mint, SOL_MINT, balance.toString());
@@ -585,36 +694,27 @@ async function main() {
             continue;
         }
 
-        // === STEP 3: Distribute SOL (buyback + dev) ===
+        // === STEP 3: Distribute SOL (buyback + personal) ===
         console.log('\n   Step 3: Distributing SOL...');
 
-        // For 3EYES: 100% to dev (no buyback needed - this IS 3EYES)
-        // For other tokens: 90% buyback, 10% dev
-        const buybackAmount = isThreeEyesToken ? BigInt(0) : (outAmountLamports * BigInt(BUYBACK_PERCENTAGE)) / BigInt(100);
-        const devAmount = isThreeEyesToken ? outAmountLamports : outAmountLamports - buybackAmount;
+        // 90% buyback $3EYES, 10% to personal wallet
+        const buybackAmount = (outAmountLamports * BigInt(BUYBACK_PERCENTAGE)) / BigInt(100);
+        const personalAmount = outAmountLamports - buybackAmount;
 
-        if (isThreeEyesToken) {
-            console.log(`   🎯 3EYES token - skipping buyback (no need to buy what we already have)`);
-            console.log(`   Dev: ${Number(devAmount) / LAMPORTS_PER_SOL} SOL (100%)`);
-        } else {
-            console.log(`   Buyback: ${Number(buybackAmount) / LAMPORTS_PER_SOL} SOL (${BUYBACK_PERCENTAGE}%)`);
-            console.log(`   Dev: ${Number(devAmount) / LAMPORTS_PER_SOL} SOL (${DEV_PERCENTAGE}%)`);
-        }
-        // Determine dev wallet (override or default to admin)
-        const devWallet = DEV_WALLET_OVERRIDE
-            ? new PublicKey(DEV_WALLET_OVERRIDE)
-            : adminKeypair.publicKey;
+        console.log(`   Buyback: ${Number(buybackAmount) / LAMPORTS_PER_SOL} SOL (${BUYBACK_PERCENTAGE}%)`);
+        console.log(`   Personal: ${Number(personalAmount) / LAMPORTS_PER_SOL} SOL (${DEV_PERCENTAGE}%)`);
 
-        // Transfer dev portion if different wallet
-        if (DEV_WALLET_OVERRIDE && devAmount > BigInt(0)) {
-            console.log(`\n   Transferring ${Number(devAmount) / LAMPORTS_PER_SOL} SOL to dev wallet...`);
+        // Transfer personal portion to personal wallet
+        if (PERSONAL_WALLET && personalAmount > BigInt(0)) {
+            const personalWalletPubkey = new PublicKey(PERSONAL_WALLET);
+            console.log(`\n   Transferring ${Number(personalAmount) / LAMPORTS_PER_SOL} SOL to personal wallet...`);
             try {
                 const { Transaction, SystemProgram } = await import('@solana/web3.js');
                 const transferTx = new Transaction().add(
                     SystemProgram.transfer({
                         fromPubkey: adminKeypair.publicKey,
-                        toPubkey: devWallet,
-                        lamports: devAmount,
+                        toPubkey: personalWalletPubkey,
+                        lamports: personalAmount,
                     })
                 );
 
@@ -623,35 +723,35 @@ async function main() {
                 transferTx.feePayer = adminKeypair.publicKey;
                 transferTx.sign(adminKeypair);
 
-                const devTxSig = await connection.sendRawTransaction(transferTx.serialize());
-                await connection.confirmTransaction(devTxSig, 'confirmed');
-                console.log(`   Dev transfer TX: ${devTxSig}`);
+                const personalTxSig = await connection.sendRawTransaction(transferTx.serialize());
+                await connection.confirmTransaction(personalTxSig, 'confirmed');
+                console.log(`   Personal transfer TX: ${personalTxSig}`);
 
-                // Log dev transfer to database
+                // Log personal transfer to database
                 await logTreasuryTransaction({
-                    actionType: 'dev_transfer',
+                    actionType: 'personal_transfer',
                     tokenMint: payment_token_mint,
                     tokenSymbol: payment_token_symbol,
-                    devSolAmount: devAmount,
-                    devTransferSignature: devTxSig,
+                    devSolAmount: personalAmount,
+                    devTransferSignature: personalTxSig,
                     status: 'completed',
                     processedBy: adminKeypair.publicKey.toString(),
                 });
             } catch (error) {
-                console.error(`   ERROR transferring to dev wallet: ${error.message}`);
-                // Log failed dev transfer
+                console.error(`   ERROR transferring to personal wallet: ${error.message}`);
+                // Log failed personal transfer
                 await logTreasuryTransaction({
-                    actionType: 'dev_transfer',
+                    actionType: 'personal_transfer',
                     tokenMint: payment_token_mint,
                     tokenSymbol: payment_token_symbol,
-                    devSolAmount: devAmount,
+                    devSolAmount: personalAmount,
                     status: 'failed',
                     errorMessage: error.message,
                     processedBy: adminKeypair.publicKey.toString(),
                 });
             }
-        } else {
-            console.log(`   Dev SOL remains in admin wallet: ${adminKeypair.publicKey.toString()}`);
+        } else if (!PERSONAL_WALLET) {
+            console.log(`   ⚠️  No --personal-wallet specified, 10% SOL remains in admin wallet`);
         }
 
         // Buy $3EYES with the buyback portion

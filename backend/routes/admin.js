@@ -861,6 +861,301 @@ router.post('/withdraw-treasury', requireSuperAdmin, async (req, res) => {
 });
 
 /**
+ * POST /api/admin/distribute-prize
+ * Distribute tokens from treasury to a winner wallet (for competitions/prizes)
+ * Requires X-Wallet-Address header matching on-chain admin
+ *
+ * Body:
+ * - tokenMint: string - Token mint address (typically $3EYES)
+ * - toWallet: string - Winner's wallet address
+ * - amount: string (optional) - Specific amount to send (in base units)
+ * - percent: number (optional) - Percentage of treasury balance to send (1-100)
+ *
+ * Note: Must provide either amount OR percent, not both
+ */
+router.post('/distribute-prize', requireSuperAdmin, async (req, res) => {
+    try {
+        const { tokenMint, toWallet, amount, percent } = req.body;
+
+        // Validation
+        if (!tokenMint) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required field: tokenMint',
+            });
+        }
+        if (!toWallet) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required field: toWallet',
+            });
+        }
+        if (!amount && !percent) {
+            return res.status(400).json({
+                success: false,
+                error: 'Must provide either amount or percent',
+            });
+        }
+        if (amount && percent) {
+            return res.status(400).json({
+                success: false,
+                error: 'Provide either amount OR percent, not both',
+            });
+        }
+        if (percent && (percent < 1 || percent > 100)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Percent must be between 1 and 100',
+            });
+        }
+
+        // Validate toWallet is a valid pubkey
+        let toWalletPubkey;
+        try {
+            toWalletPubkey = new PublicKey(toWallet);
+        } catch (e) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid toWallet address',
+            });
+        }
+
+        console.log('\n========================================');
+        console.log('  Prize Distribution');
+        console.log('========================================');
+        console.log(`Token mint: ${tokenMint}`);
+        console.log(`To wallet: ${toWallet}`);
+        console.log(`Amount: ${amount || `${percent}% of treasury`}`);
+
+        // Load deploy wallet (admin)
+        const deployWalletJson = process.env.DEPLOY_WALLET_JSON;
+        if (!deployWalletJson) {
+            return res.status(500).json({
+                success: false,
+                error: 'Deploy wallet not configured on server',
+            });
+        }
+
+        let adminKeypair;
+        try {
+            const secretKey = Uint8Array.from(JSON.parse(deployWalletJson));
+            adminKeypair = Keypair.fromSecretKey(secretKey);
+        } catch (e) {
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to parse deploy wallet keypair',
+            });
+        }
+
+        console.log(`Admin wallet: ${adminKeypair.publicKey.toString()}`);
+
+        // Get network config and program
+        const config = await getNetworkConfig();
+        const { program, connection, programId } = await getAnchorProgram();
+
+        // Derive PDAs
+        const [platformConfigPDA] = derivePlatformConfigPDA(programId);
+        const [treasuryPDA] = deriveTreasuryPDA(programId);
+        const tokenMintPubkey = new PublicKey(tokenMint);
+
+        // Detect token program (Token vs Token-2022)
+        const tokenProgram = await getTokenProgramForMint(connection, tokenMintPubkey);
+        console.log(`Token program: ${tokenProgram.equals(TOKEN_2022_PROGRAM_ID) ? 'Token-2022' : 'Token'}`);
+
+        const treasuryTokenAccount = deriveTreasuryTokenAccount(treasuryPDA, tokenMintPubkey, tokenProgram);
+
+        console.log(`Treasury PDA: ${treasuryPDA.toString()}`);
+        console.log(`Treasury token account: ${treasuryTokenAccount.toString()}`);
+
+        // Check treasury balance
+        const treasuryAccountInfo = await connection.getAccountInfo(treasuryTokenAccount);
+        if (!treasuryAccountInfo) {
+            return res.status(400).json({
+                success: false,
+                error: 'Treasury token account does not exist (no balance for this token)',
+            });
+        }
+
+        const treasuryBalanceBN = new BN(treasuryAccountInfo.data.subarray(64, 72), 'le');
+        console.log(`Treasury balance: ${treasuryBalanceBN.toString()}`);
+
+        if (treasuryBalanceBN.isZero()) {
+            return res.status(400).json({
+                success: false,
+                error: 'Treasury balance is zero',
+            });
+        }
+
+        // Calculate withdrawal amount
+        let withdrawAmountBN;
+        if (amount) {
+            withdrawAmountBN = new BN(amount);
+            if (withdrawAmountBN.gt(treasuryBalanceBN)) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Amount exceeds treasury balance',
+                    treasuryBalance: treasuryBalanceBN.toString(),
+                    requestedAmount: withdrawAmountBN.toString(),
+                });
+            }
+        } else {
+            // Calculate percentage
+            const percentBN = new BN(percent);
+            withdrawAmountBN = treasuryBalanceBN.mul(percentBN).div(new BN(100));
+        }
+
+        console.log(`Prize amount: ${withdrawAmountBN.toString()}`);
+
+        // Get winner's token account (destination)
+        const winnerTokenAccount = await getAssociatedTokenAddress(
+            tokenMintPubkey,
+            toWalletPubkey,
+            false,
+            tokenProgram,
+            ASSOCIATED_TOKEN_PROGRAM_ID
+        );
+
+        // Check if winner's token account exists
+        const winnerTokenAccountInfo = await connection.getAccountInfo(winnerTokenAccount);
+        const winnerAtaNeedsCreation = !winnerTokenAccountInfo;
+
+        console.log(`Winner token account: ${winnerTokenAccount.toString()}`);
+        if (winnerAtaNeedsCreation) {
+            console.log('Winner token account needs to be created');
+        }
+
+        // Build transaction
+        const transaction = new Transaction();
+
+        // Create winner's ATA if needed (paid by admin)
+        if (winnerAtaNeedsCreation) {
+            const createAtaIx = createAssociatedTokenAccountInstruction(
+                adminKeypair.publicKey, // payer
+                winnerTokenAccount, // ata
+                toWalletPubkey, // owner
+                tokenMintPubkey, // mint
+                tokenProgram,
+                ASSOCIATED_TOKEN_PROGRAM_ID
+            );
+            transaction.add(createAtaIx);
+            console.log('Added: Create winner ATA instruction');
+        }
+
+        // Build withdraw_treasury instruction (treasury -> admin)
+        // Then we'll transfer from admin to winner
+        const withdrawTx = await program.methods
+            .withdrawTreasury(withdrawAmountBN)
+            .accounts({
+                admin: adminKeypair.publicKey,
+                platformConfig: platformConfigPDA,
+                treasury: treasuryPDA,
+                tokenMint: tokenMintPubkey,
+                treasuryTokenAccount: treasuryTokenAccount,
+                adminTokenAccount: winnerTokenAccount, // Send directly to winner!
+                tokenProgram: tokenProgram,
+            })
+            .transaction();
+
+        transaction.add(...withdrawTx.instructions);
+        console.log('Added: withdraw_treasury instruction (direct to winner)');
+
+        // Get recent blockhash
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+        transaction.recentBlockhash = blockhash;
+        transaction.lastValidBlockHeight = lastValidBlockHeight;
+        transaction.feePayer = adminKeypair.publicKey;
+
+        // Sign with admin keypair
+        transaction.sign(adminKeypair);
+
+        // Send transaction
+        console.log('Sending transaction...');
+        const signature = await connection.sendRawTransaction(transaction.serialize(), {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
+        });
+
+        console.log(`Transaction sent: ${signature}`);
+
+        // Wait for confirmation
+        const confirmation = await connection.confirmTransaction({
+            signature,
+            blockhash,
+            lastValidBlockHeight,
+        }, 'confirmed');
+
+        if (confirmation.value.err) {
+            throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+        }
+
+        console.log('Prize distribution successful!');
+
+        // Get token decimals for formatted output
+        const { getMint } = await import('@solana/spl-token');
+        const mintInfo = await getMint(connection, tokenMintPubkey, 'confirmed', tokenProgram);
+        const formattedAmount = Number(withdrawAmountBN.toString()) / Math.pow(10, mintInfo.decimals);
+
+        // Log to database for tracking
+        const { error: logError } = await supabase
+            .from('treasury_processing_log')
+            .insert({
+                token_mint: tokenMint,
+                amount_withdrawn: withdrawAmountBN.toString(),
+                tx_signature: signature,
+                processed_at: new Date().toISOString(),
+                processed_by: adminKeypair.publicKey.toString(),
+                action_type: 'prize_distribution',
+                status: 'completed',
+                error_message: null, // Use this field to store winner address for reference
+            });
+
+        if (logError) {
+            console.warn('Warning: Failed to log prize distribution to database:', logError);
+        }
+
+        // Log to activity_logs as well
+        try {
+            await logger.log({
+                eventType: EventTypes.TREASURY_OPERATION,
+                severity: Severity.INFO,
+                actorWallet: adminKeypair.publicKey.toString(),
+                txSignature: signature,
+                metadata: {
+                    action: 'prize_distribution',
+                    tokenMint,
+                    toWallet,
+                    amount: withdrawAmountBN.toString(),
+                    amountFormatted: formattedAmount,
+                    percent: percent || null,
+                },
+            });
+        } catch (logError) {
+            console.warn('Warning: Failed to log to activity_logs:', logError);
+        }
+
+        return res.json({
+            success: true,
+            message: 'Prize distributed successfully',
+            tokenMint,
+            toWallet,
+            amount: withdrawAmountBN.toString(),
+            amountFormatted: formattedAmount,
+            percent: percent || null,
+            signature,
+            explorerUrl: `https://explorer.solana.com/tx/${signature}?cluster=${config.network}`,
+        });
+
+    } catch (error) {
+        console.error('Error distributing prize:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Failed to distribute prize',
+            details: sanitizeErrorMessage(error.message),
+        });
+    }
+});
+
+/**
  * GET /api/admin/treasury-logs
  * Fetches treasury processing logs with optional filtering
  */

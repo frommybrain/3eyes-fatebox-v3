@@ -13,9 +13,11 @@ import {
     DegenBadge,
     DegenInput,
     DegenLoadingState,
+    DegenModal,
     useToast,
 } from '@/components/ui';
 import LogsViewer from './LogsViewer';
+import ProjectStatsModal from './ProjectStatsModal';
 
 export default function AdminDashboard() {
     const { toast } = useToast();
@@ -44,6 +46,12 @@ export default function AdminDashboard() {
 
     // Server health state
     const [serverHealth, setServerHealth] = useState(null); // null = loading, { status, latency, error? }
+
+    // Project stats modal state
+    const [statsModalOpen, setStatsModalOpen] = useState(false);
+    const [selectedProjectId, setSelectedProjectId] = useState(null);
+    const [projectStats, setProjectStats] = useState(null);
+    const [statsLoading, setStatsLoading] = useState(false);
 
     // Check if user is admin
     const isAdmin = publicKey && config && publicKey.toString() === config.adminWallet.toString();
@@ -243,6 +251,32 @@ export default function AdminDashboard() {
             toast.error('Failed to load treasury data');
         }
         setTreasuryLoading(false);
+    };
+
+    // Load project stats
+    const loadProjectStats = async (projectId) => {
+        setSelectedProjectId(projectId);
+        setStatsLoading(true);
+        setStatsModalOpen(true);
+        setProjectStats(null);
+
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+            const response = await fetch(`${backendUrl}/api/projects/${projectId}/stats`);
+            const result = await response.json();
+
+            if (result.success) {
+                setProjectStats(result);
+            } else {
+                toast.error('Failed to load stats: ' + result.error);
+                setStatsModalOpen(false);
+            }
+        } catch (error) {
+            console.error('Error loading project stats:', error);
+            toast.error('Failed to load project stats');
+            setStatsModalOpen(false);
+        }
+        setStatsLoading(false);
     };
 
     // Load treasury activity logs
@@ -658,6 +692,13 @@ export default function AdminDashboard() {
                                         </div>
                                         <div className="flex gap-2">
                                             <DegenButton
+                                                onClick={() => loadProjectStats(project.id)}
+                                                variant="secondary"
+                                                size="sm"
+                                            >
+                                                Stats
+                                            </DegenButton>
+                                            <DegenButton
                                                 onClick={() => toggleProjectActive(project.id, project.is_active)}
                                                 variant={project.is_active ? 'warning' : 'success'}
                                                 size="sm"
@@ -672,6 +713,18 @@ export default function AdminDashboard() {
                         )}
                     </DegenCard>
                 )}
+
+                {/* Project Stats Modal */}
+                <ProjectStatsModal
+                    isOpen={statsModalOpen}
+                    onClose={() => {
+                        setStatsModalOpen(false);
+                        setProjectStats(null);
+                        setSelectedProjectId(null);
+                    }}
+                    stats={projectStats}
+                    loading={statsLoading}
+                />
 
                 {/* Config Tab */}
                 {activeTab === 'config' && (

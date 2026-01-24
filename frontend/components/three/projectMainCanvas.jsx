@@ -3,7 +3,7 @@
 
 import { useRef, useEffect, useState, memo } from 'react'
 import { Canvas } from '@react-three/fiber'
-import { Stats, PerspectiveCamera, CameraControls, AccumulativeShadows, RandomizedLight, CameraShake } from '@react-three/drei'
+import { PerspectiveCamera, CameraControls } from '@react-three/drei'
 import Lights from './lights'
 import ProjectMainScene from './projectMainScene'
 import usePurchasingStore from '@/store/usePurchasingStore'
@@ -133,7 +133,7 @@ const ProjectMainCanvas = memo(function ProjectMainCanvas({ onReady }) {
                     enabled={false}
                 />
                 <CameraController cameraControlsRef={cameraControlsRef} isReady={controlsReady} />
-                
+
             </Canvas>
         </div>
     )

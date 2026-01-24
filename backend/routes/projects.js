@@ -550,4 +550,209 @@ router.get('/boxes/by-owner/:walletAddress', async (req, res) => {
     }
 });
 
+/**
+ * GET /api/projects/:projectId/stats
+ * Get comprehensive statistics for a project
+ *
+ * Returns:
+ * - Project details
+ * - Box statistics (counts by status)
+ * - Outcome breakdown (counts by tier)
+ * - Financial summary (revenue, payouts, profit)
+ * - User statistics
+ * - Timeline info
+ */
+router.get('/:projectId/stats', async (req, res) => {
+    try {
+        const { projectId } = req.params;
+
+        // Get project details
+        const { data: project, error: projectError } = await supabase
+            .from('projects')
+            .select('*')
+            .eq('id', projectId)
+            .single();
+
+        if (projectError) {
+            return res.status(404).json({
+                success: false,
+                error: 'Project not found',
+                details: projectError.message
+            });
+        }
+
+        // Get all boxes for this project
+        const { data: boxes, error: boxesError } = await supabase
+            .from('boxes')
+            .select('*')
+            .eq('project_id', projectId);
+
+        if (boxesError) {
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to fetch boxes',
+                details: boxesError.message
+            });
+        }
+
+        const decimals = project.payment_token_decimals || 6;
+        const boxPrice = project.box_price / Math.pow(10, decimals);
+
+        // Derive status from box state
+        const getStatus = (box) => {
+            if (box.refunded_at) return 'refunded';
+            if (box.settled_at) return 'settled';
+            if (box.committed_at) return 'committed';
+            return 'purchased';
+        };
+
+        // Count by status
+        const statusCounts = boxes.reduce((acc, box) => {
+            const status = getStatus(box);
+            acc[status] = (acc[status] || 0) + 1;
+            return acc;
+        }, {});
+
+        // Get settled boxes
+        const settledBoxes = boxes.filter(b => b.settled_at !== null);
+
+        // Tier names mapping
+        // 1 = Dud, 2 = Rebate (0.5x), 3 = Break-even (1x), 4 = Profit (1.5x), 5 = Jackpot (4x), 6 = Refunded
+        const tierNames = {
+            1: { name: 'Dud (Loss)', multiplier: 0 },
+            2: { name: 'Rebate', multiplier: 0.5 },
+            3: { name: 'Break Even', multiplier: 1 },
+            4: { name: 'Profit', multiplier: 1.5 },
+            5: { name: 'Jackpot', multiplier: 4 },
+            6: { name: 'Refunded', multiplier: 1 },
+        };
+
+        // Count by outcome tier
+        const outcomeCounts = settledBoxes.reduce((acc, box) => {
+            const tier = box.box_result;
+            if (tier !== null && tier !== undefined) {
+                if (!acc[tier]) {
+                    acc[tier] = {
+                        tier,
+                        name: tierNames[tier]?.name || `Unknown (${tier})`,
+                        multiplier: tierNames[tier]?.multiplier,
+                        count: 0,
+                        totalPaid: 0,
+                    };
+                }
+                acc[tier].count++;
+                acc[tier].totalPaid += box.payout_amount ? box.payout_amount / Math.pow(10, decimals) : 0;
+            }
+            return acc;
+        }, {});
+
+        // Convert to array and calculate percentages
+        const outcomeBreakdown = Object.values(outcomeCounts)
+            .sort((a, b) => a.tier - b.tier)
+            .map(outcome => ({
+                ...outcome,
+                percentage: settledBoxes.length > 0 ? ((outcome.count / settledBoxes.length) * 100).toFixed(1) : 0,
+                avgPayout: outcome.count > 0 ? (outcome.totalPaid / outcome.count).toFixed(2) : 0,
+            }));
+
+        // Financial calculations
+        const totalRevenue = boxes.length * boxPrice;
+        const totalPaidOut = settledBoxes.reduce((sum, box) => {
+            return sum + (box.payout_amount ? box.payout_amount / Math.pow(10, decimals) : 0);
+        }, 0);
+        const netProfit = totalRevenue - totalPaidOut;
+        const houseEdge = totalRevenue > 0 ? ((1 - totalPaidOut / totalRevenue) * 100).toFixed(2) : 0;
+
+        // Platform commission
+        const platformCommissionBps = project.platform_commission_bps || 100;
+        const platformCommission = (totalRevenue * platformCommissionBps) / 10000;
+
+        // User statistics
+        const uniqueBuyers = new Set(boxes.map(b => b.owner_wallet)).size;
+        const buyerCounts = boxes.reduce((acc, box) => {
+            acc[box.owner_wallet] = (acc[box.owner_wallet] || 0) + 1;
+            return acc;
+        }, {});
+        const topBuyers = Object.entries(buyerCounts)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+            .map(([wallet, count]) => ({
+                wallet: wallet.slice(0, 4) + '...' + wallet.slice(-4),
+                fullWallet: wallet,
+                count
+            }));
+
+        // Luck statistics
+        const luckValues = settledBoxes.map(b => b.luck_value).filter(l => l !== null && l !== undefined);
+        const luckStats = luckValues.length > 0 ? {
+            average: (luckValues.reduce((a, b) => a + b, 0) / luckValues.length).toFixed(1),
+            min: Math.min(...luckValues),
+            max: Math.max(...luckValues),
+        } : null;
+
+        // Timeline
+        const sortedBoxes = [...boxes].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        let timeline = null;
+        if (sortedBoxes.length > 0) {
+            const firstDate = new Date(sortedBoxes[0].created_at);
+            const lastDate = new Date(sortedBoxes[sortedBoxes.length - 1].created_at);
+            const durationMs = lastDate - firstDate;
+            const durationHours = durationMs / (1000 * 60 * 60);
+            timeline = {
+                firstBox: sortedBoxes[0].created_at,
+                lastBox: sortedBoxes[sortedBoxes.length - 1].created_at,
+                durationHours: durationHours.toFixed(1),
+                durationDays: (durationHours / 24).toFixed(1),
+            };
+        }
+
+        return res.json({
+            success: true,
+            project: {
+                id: project.id,
+                name: project.project_name,
+                subdomain: project.subdomain,
+                numericId: project.project_numeric_id,
+                tokenSymbol: project.payment_token_symbol,
+                tokenMint: project.payment_token_mint,
+                boxPrice,
+                isActive: project.is_active,
+                isPaused: project.is_paused,
+                createdAt: project.created_at,
+                closedAt: project.closed_at,
+            },
+            boxStats: {
+                total: boxes.length,
+                byStatus: statusCounts,
+                settled: settledBoxes.length,
+            },
+            outcomeBreakdown,
+            financial: {
+                boxPrice,
+                totalRevenue,
+                totalPaidOut,
+                netProfit,
+                houseEdge: parseFloat(houseEdge),
+                platformCommissionRate: platformCommissionBps / 100,
+                platformCommission,
+            },
+            users: {
+                uniqueBuyers,
+                avgBoxesPerBuyer: uniqueBuyers > 0 ? (boxes.length / uniqueBuyers).toFixed(1) : 0,
+                topBuyers,
+            },
+            luckStats,
+            timeline,
+        });
+
+    } catch (error) {
+        console.error('Error fetching project stats:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Internal server error',
+            details: sanitizeErrorMessage(error.message)
+        });
+    }
+});
+
 export default router;

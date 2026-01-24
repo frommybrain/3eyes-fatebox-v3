@@ -1,9 +1,8 @@
 // components/three/mainCanvas.jsx
 'use client'
 
-import { useRef } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { PerspectiveCamera, Lightformer, Environment, OrbitControls, SoftShadows, AccumulativeShadows, RandomizedLight, CameraShake } from '@react-three/drei'
+import { PerspectiveCamera } from '@react-three/drei'
 import Lights from './lights'
 import MainScene from './mainScene'
 import { easing } from 'maath'
@@ -71,10 +70,6 @@ export default function MainCanvas({ purchasing = false }) {
                     far={100}
                 />
                 <CameraController />
-                <AccumulativeShadows temporal frames={10} scale={10} colorBlend={1} opacity={0.5}>
-                    <RandomizedLight amount={8} position={[20, 30, 20]} />
-                </AccumulativeShadows>
-
             </Canvas>
         </div>
     )

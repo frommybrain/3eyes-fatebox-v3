@@ -1,6 +1,7 @@
 // components/project/ProjectPage.jsx
 'use client';
 
+import Image from 'next/image';
 import { useEffect, useState, useTransition, useOptimistic, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
@@ -528,7 +529,7 @@ export default function ProjectPage({ subdomain }) {
                         {displayProject?.project_name || 'DegenBox'}
                     </h1>
                     <p className="text-degen-text-muted text-sm mb-4">
-                        Connect your wallet to buy lootboxes from the vending machine. 
+                        Connect your wallet to buy lootboxes from the vending machine.
                     </p>
                     <div className="mb-4">
                         <WalletButton variant="warning" fullWidth />
@@ -575,10 +576,17 @@ export default function ProjectPage({ subdomain }) {
         if (isProjectNotFound) {
             return (
                 <div className="text-center">
-                    <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-2">
+                    <Image
+                        src="/images/degenbox_not_found.jpeg"
+                        alt="Project Paused"
+                        width={500}
+                        height={500}
+                        className="mx-auto mb-4"
+                    />
+                    <h1 className="text-degen-black text-xl font-bold uppercase tracking-wider mb-2">
                         Project Not Found
                     </h1>
-                    <p className="text-degen-text-muted mb-6">
+                    <p className="text-degen-text-muted mb-6 text-sm">
                         {projectError || `The project "${subdomain}" does not exist.`}
                     </p>
                     <DegenButton onClick={() => router.push('/')} variant="primary">
@@ -595,10 +603,10 @@ export default function ProjectPage({ subdomain }) {
                     <div className="inline-block px-3 py-1 bg-red-500 text-white text-xs font-bold uppercase tracking-wider mb-4">
                         Platform Maintenance
                     </div>
-                    <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-2">
+                    <h1 className="text-degen-black text-xl font-bold uppercase tracking-wider mb-2">
                         Platform Temporarily Paused
                     </h1>
-                    <p className="text-degen-text-muted mb-6">
+                    <p className="text-degen-text-muted mb-6 text-sm">
                         The platform is undergoing maintenance. Box purchases are temporarily disabled.
                         Please check back soon!
                     </p>
@@ -613,16 +621,21 @@ export default function ProjectPage({ subdomain }) {
         if (isProjectPaused) {
             return (
                 <div className="text-center">
-                    <h1 className="text-degen-black text-2xl font-medium uppercase tracking-wider mb-2">
+                    <Image
+                        src="/images/degenbox_paused.jpeg"
+                        alt="Project Paused"
+                        width={500}
+                        height={500}
+                        className="mx-auto mb-4"
+                    />
+                    <h1 className="text-degen-black text-xl font-bold uppercase tracking-wider mb-2">
                         Project Paused
                     </h1>
-                    <p className="text-degen-text-muted mb-6">
-                        {displayProject.project_name} is currently paused by the creator.
+                    <p className="text-degen-text-muted mb-6 text-sm">
+                        <strong>{displayProject.project_name}</strong> has been paused by the project creator
                         Check back later!
                     </p>
-                    <DegenButton onClick={() => router.push('/')} variant="primary">
-                        Browse Other Projects
-                    </DegenButton>
+
                 </div>
             );
         }
@@ -783,7 +796,7 @@ export default function ProjectPage({ subdomain }) {
             {/* Project UI Panel */}
             <div className={`fixed top-0 left-0 w-full lg:w-1/3 h-screen z-10 pointer-events-none transition-opacity duration-100 border-r border-degen-black ${isPending ? 'opacity-80' : 'opacity-100'}`}>
                 <div className="flex flex-col items-center justify-center h-full pointer-events-auto px-2 md:px-4">
-                    <DegenCard variant="white" padding="lg" className="w-full">
+                    <DegenCard variant="white" padding="sm" className="w-full">
                         {renderCardContent()}
                     </DegenCard>
                 </div>

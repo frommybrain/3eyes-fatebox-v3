@@ -109,59 +109,125 @@ export function SkeletonCard({ children, className = '', padding = 'md' }) {
 
 /**
  * MyBoxesTabSkeleton - Skeleton for the boxes tab
- * Matches: Summary card + Project groups with box grids
+ * Matches: Summary card + InlineTransactionStatus + Project groups with row layout
  */
 export function MyBoxesTabSkeleton() {
     return (
-        <div className="space-y-8">
-            {/* Summary Card */}
-            <SkeletonCard padding="sm">
+        <div className="space-y-3">
+            {/* Summary Card - matches DegenCard variant="default" padding="sm" */}
+            <div className="bg-degen-container border border-degen-black p-3">
                 <div className="flex items-center justify-between">
-                    <div className="space-y-2">
-                        <SkeletonText width="180px" height="1.5rem" />
-                        <SkeletonText width="220px" height="0.875rem" />
+                    <div className="flex items-center gap-6">
+                        {/* Boxes stat */}
+                        <div className="flex flex-col items-center">
+                            <SkeletonText width="24px" height="1.125rem" />
+                            <SkeletonText width="36px" height="0.625rem" className="mt-1" />
+                        </div>
+                        {/* Projects stat */}
+                        <div className="flex flex-col items-center">
+                            <SkeletonText width="24px" height="1.125rem" />
+                            <SkeletonText width="48px" height="0.625rem" className="mt-1" />
+                        </div>
                     </div>
                 </div>
-            </SkeletonCard>
+            </div>
+
+            {/* InlineTransactionStatus placeholder */}
+            <div className="flex items-center gap-2 py-2 px-2">
+                <SkeletonCircle size={8} />
+                <SkeletonText width="48px" height="0.75rem" />
+            </div>
 
             {/* Project Group 1 */}
-            <ProjectBoxesGroupSkeleton boxCount={5} />
+            <ProjectBoxesGroupSkeleton boxCount={3} />
 
             {/* Project Group 2 */}
-            <ProjectBoxesGroupSkeleton boxCount={3} />
+            <ProjectBoxesGroupSkeleton boxCount={2} />
         </div>
     );
 }
 
 /**
  * ProjectBoxesGroupSkeleton - Skeleton for a project's box group
+ * Matches the actual row-based layout with filters
  */
-export function ProjectBoxesGroupSkeleton({ boxCount = 5 }) {
+export function ProjectBoxesGroupSkeleton({ boxCount = 3 }) {
     return (
-        <div className="bg-degen-container border border-degen-black overflow-hidden">
-            {/* Project Header */}
+        <div className="bg-degen-container border border-degen-black">
+            {/* Project Header - matches actual layout */}
             <div className="p-3 border-b border-degen-black flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                    <SkeletonBox className="w-12 h-12 border border-degen-black" />
-                    <div className="space-y-2">
-                        <SkeletonText width="150px" height="1.25rem" />
-                        <SkeletonText width="180px" height="0.75rem" />
+                    {/* Project logo */}
+                    <SkeletonBox className="w-12 h-12 rounded-lg" />
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <SkeletonText width="120px" height="1.125rem" />
+                            <SkeletonText width="40px" height="0.75rem" />
+                        </div>
+                        <SkeletonText width="140px" height="0.875rem" className="mt-1 hidden md:block" />
                     </div>
                 </div>
-                <div className="text-right space-y-2">
-                    <SkeletonText width="80px" height="1rem" className="ml-auto" />
-                    <SkeletonText width="120px" height="0.75rem" className="ml-auto" />
+                {/* Stats and collapse */}
+                <div className="flex items-center gap-4">
+                    <div className="hidden md:flex items-center gap-4">
+                        <div className="flex flex-col items-center">
+                            <SkeletonText width="20px" height="1.125rem" />
+                            <SkeletonText width="36px" height="0.625rem" className="mt-1" />
+                        </div>
+                        <div className="flex flex-col items-center">
+                            <SkeletonText width="20px" height="1.125rem" />
+                            <SkeletonText width="48px" height="0.625rem" className="mt-1" />
+                        </div>
+                    </div>
+                    <SkeletonBox className="w-5 h-5" />
                 </div>
             </div>
 
-            {/* Boxes Grid */}
+            {/* Filter tabs */}
+            <div className="px-3 pt-3 pb-2 border-b border-degen-border">
+                <div className="flex items-center gap-3">
+                    <SkeletonBox className="w-4 h-4 shrink-0" />
+                    <div className="hidden sm:flex gap-1">
+                        <SkeletonButton width="60px" size="sm" />
+                        <SkeletonButton width="80px" size="sm" />
+                        <SkeletonButton width="55px" size="sm" />
+                    </div>
+                </div>
+            </div>
+
+            {/* Box rows */}
             <div className="p-3">
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                <div className="space-y-2">
                     {Array.from({ length: boxCount }).map((_, i) => (
-                        <BoxCardSkeleton key={i} />
+                        <BoxRowSkeleton key={i} />
                     ))}
                 </div>
             </div>
+        </div>
+    );
+}
+
+/**
+ * BoxRowSkeleton - Skeleton for a single box row
+ * Matches BoxCardRow layout
+ */
+export function BoxRowSkeleton() {
+    return (
+        <div className="bg-degen-white border border-degen-black p-3 flex items-center gap-3">
+            {/* State indicator dot */}
+            <SkeletonCircle size={8} />
+            {/* Box number */}
+            <SkeletonText width="50px" height="0.875rem" />
+            {/* Status text */}
+            <SkeletonText width="70px" height="0.875rem" />
+            {/* Spacer */}
+            <div className="flex-1" />
+            {/* Luck or payout */}
+            <SkeletonText width="40px" height="0.875rem" className="hidden sm:block" />
+            {/* Action button */}
+            <SkeletonButton width="80px" size="sm" />
+            {/* Dropdown */}
+            <SkeletonBox className="w-7 h-7" />
         </div>
     );
 }
@@ -348,26 +414,86 @@ export function MyProfileTabSkeleton() {
  * DashboardSkeleton - Full dashboard page skeleton
  * Shows header, tab navigation, and default tab content (boxes)
  * Used during initial config loading to prevent layout shifts
+ * Matches: min-h-screen bg-degen-bg pt-24 pb-12 px-2 md:px-4
  */
 export function DashboardSkeleton() {
     return (
-        <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-4">
+        <div className="min-h-screen bg-degen-bg pt-24 pb-12 px-2 md:px-4">
             <div className="w-full mx-auto">
-                {/* Header */}
-                <div className="mb-8">
-                    <SkeletonText width="220px" height="2.5rem" className="mb-2" />
-                    <SkeletonText width="380px" height="1.25rem" />
+                {/* Header - matches mb-4 */}
+                <div className="mb-4">
+                    <SkeletonText width="180px" height="2.25rem" className="mb-2" />
                 </div>
 
-                {/* Tab Navigation */}
-                <div className="flex gap-2 mb-8 border-b border-degen-black pb-2">
-                    <SkeletonButton width="100px" size="md" />
-                    <SkeletonButton width="110px" size="md" />
-                    <SkeletonButton width="80px" size="md" />
-                </div>
+                {/* Main Content Grid - 3/4 dashboard, 1/4 leaderboard */}
+                <div className="flex flex-col lg:flex-row gap-4">
+                    {/* Main Dashboard Content - 3/4 */}
+                    <div className="w-full lg:w-3/4">
+                        {/* Tab Navigation - matches DegenTabsList */}
+                        <div className="inline-flex border border-degen-black mb-4">
+                            <div className={`${shimmerClass} px-4 py-2 w-[80px] h-[38px] border-r border-degen-black`} />
+                            <div className={`${shimmerClass} px-4 py-2 w-[100px] h-[38px] border-r border-degen-black`} />
+                            <div className={`${shimmerClass} px-4 py-2 w-[70px] h-[38px]`} />
+                        </div>
 
-                {/* Default Tab Content (Boxes) */}
-                <MyBoxesTabSkeleton />
+                        {/* Default Tab Content (Boxes) */}
+                        <MyBoxesTabSkeleton />
+                    </div>
+
+                    {/* Leaderboard Sidebar - 1/4 */}
+                    <div className="w-full lg:w-1/4 lg:self-start lg:sticky lg:top-16">
+                        <LeaderboardSkeleton />
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+/**
+ * LeaderboardSkeleton - Skeleton for the leaderboard sidebar
+ */
+export function LeaderboardSkeleton() {
+    return (
+        <div className="space-y-4">
+            {/* Top Projects */}
+            <div className="bg-degen-container border border-degen-black">
+                <div className="p-3 border-b border-degen-black">
+                    <SkeletonText width="90px" height="0.875rem" />
+                </div>
+                <div className="p-2 space-y-1">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                        <div key={i} className="flex items-center gap-3 p-2">
+                            <SkeletonText width="16px" height="0.625rem" />
+                            <SkeletonCircle size={32} />
+                            <div className="flex-1 min-w-0">
+                                <SkeletonText width="80px" height="0.875rem" className="mb-1" />
+                                <SkeletonText width="50px" height="0.75rem" />
+                            </div>
+                            <SkeletonText width="32px" height="0.75rem" />
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            {/* Luckiest Users */}
+            <div className="bg-degen-container border border-degen-black">
+                <div className="p-3 border-b border-degen-black">
+                    <SkeletonText width="100px" height="0.875rem" />
+                </div>
+                <div className="p-2 space-y-1">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                        <div key={i} className="flex items-center gap-3 p-2">
+                            <SkeletonText width="20px" height="0.75rem" />
+                            <SkeletonCircle size={32} />
+                            <div className="flex-1 min-w-0">
+                                <SkeletonText width="70px" height="0.875rem" className="mb-1" />
+                                <SkeletonText width="40px" height="0.75rem" />
+                            </div>
+                            <SkeletonText width="45px" height="0.75rem" />
+                        </div>
+                    ))}
+                </div>
             </div>
         </div>
     );
@@ -387,8 +513,10 @@ export default {
     MyProfileTab: MyProfileTabSkeleton,
     // Component skeletons
     BoxCard: BoxCardSkeleton,
+    BoxRow: BoxRowSkeleton,
     ProjectCard: ProjectCardSkeleton,
     ProjectBoxesGroup: ProjectBoxesGroupSkeleton,
+    Leaderboard: LeaderboardSkeleton,
     // Full page skeletons
     Dashboard: DashboardSkeleton,
 };

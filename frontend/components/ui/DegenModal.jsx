@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import DegenButton from './DegenButton';
 import DegenTooltip from './DegenTooltip';
@@ -71,6 +72,14 @@ export default function DegenModal({
         }
     }, [onClose]);
 
+    // Track if we're mounted (for Portal)
+    const [mounted, setMounted] = useState(false);
+
+    useEffect(() => {
+        setMounted(true);
+        return () => setMounted(false);
+    }, []);
+
     useEffect(() => {
         if (isOpen) {
             document.addEventListener('keydown', handleEscape);
@@ -83,7 +92,7 @@ export default function DegenModal({
         };
     }, [isOpen, handleEscape]);
 
-    if (!isOpen) return null;
+    if (!isOpen || !mounted) return null;
 
     const sizeClasses = {
         sm: 'max-w-sm',
@@ -100,7 +109,9 @@ export default function DegenModal({
         }
     };
 
-    return (
+    // Use Portal to render modal at document body level
+    // This escapes any stacking context issues from parent containers
+    const modalContent = (
         <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
             onClick={handleBackdropClick}
@@ -201,6 +212,8 @@ export default function DegenModal({
             `}</style>
         </div>
     );
+
+    return createPortal(modalContent, document.body);
 }
 
 /**
@@ -222,9 +235,11 @@ export function WinModal({
     amount,
     tokenSymbol,
     badgeUrl,
+    multiplier, // e.g. "1.5x", "4x", "0x"
     onShare,
 }) {
     const tierConfig = {
+        1: { name: 'Dud', variant: 'default' },
         2: { name: 'Rebate', variant: 'default' },
         3: { name: 'Break-even', variant: 'default' },
         4: { name: 'Profit', variant: 'success' },
@@ -232,6 +247,19 @@ export function WinModal({
     };
 
     const config = tierConfig[tier] || tierConfig[2];
+
+    // Split multiplier into number and "x" for separate styling
+    // e.g. "1.5x" -> { number: "1.5", suffix: "x" }
+    const parseMultiplier = (mult) => {
+        if (!mult) return { number: '?', suffix: 'x' };
+        const match = mult.match(/^([\d.]+)(x?)$/i);
+        if (match) {
+            return { number: match[1], suffix: match[2] || 'x' };
+        }
+        return { number: mult.replace(/x$/i, ''), suffix: 'x' };
+    };
+
+    const { number: multiplierNumber, suffix: multiplierSuffix } = parseMultiplier(multiplier);
 
     return (
         <DegenModal
@@ -255,9 +283,17 @@ export function WinModal({
                         />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center bg-degen-container">
-                            <span className="text-degen-text-muted text-4xl font-bold uppercase">
-                                {config.name}
-                            </span>
+                            {/* Show multiplier with styled x, or tier name as fallback */}
+                            {multiplier ? (
+                                <span className="text-degen-black font-bold uppercase">
+                                    <span className="text-5xl">{multiplierNumber}</span>
+                                    <span className="text-2xl text-degen-text-muted">{multiplierSuffix}</span>
+                                </span>
+                            ) : (
+                                <span className="text-degen-text-muted text-4xl font-bold uppercase">
+                                    {config.name}
+                                </span>
+                            )}
                         </div>
                     )}
                 </div>
@@ -275,10 +311,17 @@ export function WinModal({
                     </DegenButton>
                 )}
 
-                {/* Box Tier Row */}
+                {/* Box Result Row - show multiplier if available, otherwise tier name */}
                 <div className="flex justify-between items-center text-sm py-2 border-b border-degen-black">
-                    <span className="text-degen-text-muted uppercase tracking-wider">Box Tier</span>
-                    <span className="text-degen-black font-medium uppercase">{config.name}</span>
+                    <span className="text-degen-text-muted uppercase tracking-wider">Result</span>
+                    {multiplier ? (
+                        <span className="text-degen-black font-medium">
+                            <span className="text-lg">{multiplierNumber}</span>
+                            <span className="text-xs text-degen-text-muted">{multiplierSuffix}</span>
+                        </span>
+                    ) : (
+                        <span className="text-degen-black font-medium uppercase">{config.name}</span>
+                    )}
                 </div>
 
                 {/* Payout Row */}
@@ -375,6 +418,82 @@ export function ProjectCreatedModal({
                         {projectUrl}
                     </a>
                 )}
+            </div>
+        </DegenModal>
+    );
+}
+
+/**
+ * PurchaseSuccessModal - Modal shown after successful box purchase
+ * Gives user choice: "Open Now" or "Hold & Grow Luck"
+ */
+export function PurchaseSuccessModal({
+    isOpen,
+    onClose,
+    boxNumber,
+    projectName,
+    onOpenNow,      // Starts unified open flow
+    onHoldForLuck,  // Goes to dashboard
+    isProcessing = false,
+}) {
+    return (
+        <DegenModal
+            isOpen={isOpen}
+            onClose={onClose}
+            title="Box Purchased!"
+            variant="success"
+            showClose={!isProcessing}
+            closeOnBackdrop={!isProcessing}
+            size="lg"
+        >
+            <div className="text-center">
+                <Image
+                    src="/images/degenbox_two_thumbs_up.jpeg"
+                    alt="Purchase Success"
+                    width={400}
+                    height={300}
+                    className="w-full h-auto mb-4 border border-degen-black"
+                />
+
+                <p className="text-degen-black text-lg font-medium mb-2">
+                    Box #{boxNumber} is yours!
+                </p>
+
+                <p className="text-degen-text-muted text-sm mb-6">
+                    What would you like to do?
+                </p>
+
+                {/* Choice Cards */}
+                <div className="grid grid-cols-1 gap-3 mb-4">
+                    {/* Open Now Option */}
+                    <button
+                        onClick={onOpenNow}
+                        disabled={isProcessing}
+                        className="w-full p-4 bg-degen-green text-white border-2 border-degen-black hover:brightness-110 transition-all disabled:opacity-50"
+                    >
+                        <div className="font-bold uppercase tracking-wider mb-1">Open Now</div>
+                        <div className="text-sm opacity-90">
+                            Open immediately with base luck (5/60)
+                        </div>
+                    </button>
+
+                    {/* Hold for Luck Option */}
+                    <button
+                        onClick={onHoldForLuck}
+                        disabled={isProcessing}
+                        className="w-full p-4 bg-degen-container text-degen-black border-2 border-degen-black hover:bg-degen-black hover:text-degen-white transition-all disabled:opacity-50"
+                    >
+                        <div className="font-bold uppercase tracking-wider mb-1">Hold & Grow Luck</div>
+                        <div className="text-sm text-degen-text-muted">
+                            Wait for better odds. View in dashboard.
+                        </div>
+                    </button>
+                </div>
+
+                {/* Info Text */}
+                <p className="text-degen-text-light text-xs">
+                    Luck increases over time. Higher luck = better payout odds!
+                </p>
             </div>
         </DegenModal>
     );

@@ -3,7 +3,9 @@ import "./globals.css";
 import Header from "@/components/ui/header";
 import WalletProvider from "@/components/wallet/WalletProvider";
 import NetworkInitializer from "@/components/providers/NetworkInitializer";
+import ThemeProvider from "@/components/providers/ThemeProvider";
 import { DegenToastProvider, TransactionProvider } from "@/components/ui";
+import TransitionOverlay from "@/components/ui/TransitionOverlay";
 
 const threeEyesFont = localFont({
   src: [
@@ -33,16 +35,19 @@ export default function RootLayout({ children }) {
       <body
         className={`${threeEyesFont.variable} font-sans antialiased`}
       >
-        <NetworkInitializer>
-          <WalletProvider>
-            <DegenToastProvider>
-              <TransactionProvider>
-                <Header />
-                {children}
-              </TransactionProvider>
-            </DegenToastProvider>
-          </WalletProvider>
-        </NetworkInitializer>
+        <ThemeProvider>
+          <NetworkInitializer>
+            <WalletProvider>
+              <DegenToastProvider>
+                <TransactionProvider>
+                  <Header />
+                  {children}
+                  <TransitionOverlay />
+                </TransactionProvider>
+              </DegenToastProvider>
+            </WalletProvider>
+          </NetworkInitializer>
+        </ThemeProvider>
       </body>
     </html>
   );

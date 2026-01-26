@@ -1,11 +1,12 @@
 // components/dashboard/Dashboard.jsx
 'use client';
 
-import { useEffect, useState, useCallback, useTransition, useOptimistic, useMemo } from 'react';
+import { useEffect, useState, useCallback, useTransition, useOptimistic, useMemo, useRef } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useConnection } from '@solana/wallet-adapter-react';
 import { Transaction } from '@solana/web3.js';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Image from 'next/image';
 import useProjectStore from '@/store/useProjectStore';
 import useNetworkStore from '@/store/useNetworkStore';
 import { getProjectUrl } from '@/lib/getNetworkConfig';
@@ -24,6 +25,7 @@ import {
     CardDropdown,
     useToast,
     useTransaction,
+    InlineTransactionStatus,
     WinModal,
     BadgeModal,
     XLogo,
@@ -32,7 +34,6 @@ import {
     MyProfileTabSkeleton,
     DashboardSkeleton,
     BoxCardSkeleton,
-    OpenBoxConfirmModal,
     DegenTooltip,
 } from '@/components/ui';
 import { getWinShareHandler, getMyProjectShareHandler } from '@/lib/shareManager';
@@ -40,6 +41,7 @@ import TrophyCabinet from '@/components/profile/TrophyCabinet';
 import ProfileStats from '@/components/profile/ProfileStats';
 import ProfileBadges from '@/components/profile/ProfileBadges';
 import DegenAccordion from '@/components/ui/DegenAccordion';
+import { useTransitionOverlay, checkTransitionArrival } from '@/components/ui/TransitionOverlay';
 
 // Super admin wallet - only this wallet can access My Projects tab
 const SUPER_ADMIN_WALLET = 'Fop6HTZr57VAHw8t2S8MGwJvxJ9BGWHvLfLrRajKMv6';
@@ -72,7 +74,11 @@ export default function Dashboard() {
     const { publicKey, connected } = useWallet();
     const searchParams = useSearchParams();
     const initialTab = searchParams.get('tab') || 'boxes';
+    const openBoxParam = searchParams.get('openBox'); // Box ID to auto-open from purchase flow
     const [activeTab, setActiveTab] = useState(initialTab);
+
+    // Auto-open box state (from post-purchase "Open Now" flow)
+    const [autoOpenBoxId, setAutoOpenBoxId] = useState(openBoxParam ? parseInt(openBoxParam) : null);
 
     // Badge notification state
     const [newBadges, setNewBadges] = useState([]);
@@ -87,6 +93,20 @@ export default function Dashboard() {
     } = useProjectStore();
 
     const { config, configLoading } = useNetworkStore();
+
+    // Transition overlay for smooth page entrance
+    const { revealPage } = useTransitionOverlay();
+
+    // Reveal the transition overlay once config is loaded
+    useEffect(() => {
+        if (!configLoading && checkTransitionArrival()) {
+            // Small delay to ensure content is painted
+            const timer = setTimeout(() => {
+                revealPage();
+            }, 100);
+            return () => clearTimeout(timer);
+        }
+    }, [configLoading, revealPage]);
 
     // Load data when connected
     useEffect(() => {
@@ -192,62 +212,76 @@ export default function Dashboard() {
                 {/* Header */}
                 <div className="mb-4">
                     <h1 className="text-degen-black text-4xl font-medium uppercase tracking-wider mb-2">Dashboard</h1>
-
                 </div>
 
-                {/* Tab Navigation */}
-                <DegenTabs value={activeTab} onValueChange={(value) => {
-                    // Prevent non-admins from accessing projects tab
-                    if (value === 'projects' && !isAdmin) return;
-                    setActiveTab(value);
-                }}>
-                    <DegenTabsList className="mb-4">
-                        <DegenTabsTrigger value="boxes">
-                            My Boxes
-                        </DegenTabsTrigger>
-                        <DegenTooltip
-                            content="We are currently working with projects on an as-per basis to onboard them to deploy their own community lootbox. If you are interested in running your own lootbox, please reach out to @3eyes_iii on X.com"
-                            position="bottom"
-                            maxWidth={320}
-                            disabled={isAdmin}
-                        >
-                            <DegenTabsTrigger
-                                value="projects"
-                                disabled={!isAdmin}
-                                className={!isAdmin ? 'relative' : ''}
-                                label="My Projects"
-                            >
-                                {!isAdmin && (
-                                    <span className="absolute -top-2 -right-3 px-1.5 py-0.5 text-[10px] font-bold uppercase bg-degen-yellow text-degen-black rounded-sm whitespace-nowrap">
-                                        Coming Soon
-                                    </span>
-                                )}
-                            </DegenTabsTrigger>
-                        </DegenTooltip>
-                        <DegenTabsTrigger value="profile">
-                            Profile
-                        </DegenTabsTrigger>
-                    </DegenTabsList>
+                {/* Main Content Grid - 3/4 dashboard, 1/4 leaderboard */}
+                <div className="flex flex-col lg:flex-row gap-4">
+                    {/* Main Dashboard Content - 3/4 */}
+                    <div className="w-full lg:w-3/4">
+                        {/* Tab Navigation */}
+                        <DegenTabs value={activeTab} onValueChange={(value) => {
+                            // Prevent non-admins from accessing projects tab
+                            if (value === 'projects' && !isAdmin) return;
+                            setActiveTab(value);
+                        }}>
+                            <DegenTabsList className="mb-4">
+                                <DegenTabsTrigger value="boxes">
+                                    My Boxes
+                                </DegenTabsTrigger>
+                                <DegenTooltip
+                                    content="We are currently working with projects on an as-per basis to onboard them to deploy their own community lootbox. If you are interested in running your own lootbox, please reach out to @3eyes_iii on X.com"
+                                    position="bottom"
+                                    maxWidth={320}
+                                    disabled={isAdmin}
+                                >
+                                    <DegenTabsTrigger
+                                        value="projects"
+                                        disabled={!isAdmin}
+                                        className={!isAdmin ? 'relative' : ''}
+                                        label="My Projects"
+                                    >
+                                        {!isAdmin && (
+                                            <span className="absolute -top-2 -right-3 px-1.5 py-0.5 text-[10px] font-bold uppercase bg-degen-yellow text-degen-black rounded-sm whitespace-nowrap">
+                                                Coming Soon
+                                            </span>
+                                        )}
+                                    </DegenTabsTrigger>
+                                </DegenTooltip>
+                                <DegenTabsTrigger value="profile">
+                                    Profile
+                                </DegenTabsTrigger>
+                            </DegenTabsList>
 
-                    {/* Only render projects tab content for admins */}
-                    {isAdmin && (
-                        <DegenTabsContent value="projects">
-                            <MyProjectsTab
-                                projects={projects}
-                                projectsLoading={projectsLoading}
-                                projectsError={projectsError}
-                            />
-                        </DegenTabsContent>
-                    )}
+                            {/* Only render projects tab content for admins */}
+                            {isAdmin && (
+                                <DegenTabsContent value="projects">
+                                    <MyProjectsTab
+                                        projects={projects}
+                                        projectsLoading={projectsLoading}
+                                        projectsError={projectsError}
+                                    />
+                                </DegenTabsContent>
+                            )}
 
-                    <DegenTabsContent value="boxes">
-                        <MyBoxesTab walletAddress={publicKey?.toString()} />
-                    </DegenTabsContent>
+                            <DegenTabsContent value="boxes">
+                                <MyBoxesTab
+                                    walletAddress={publicKey?.toString()}
+                                    autoOpenBoxId={autoOpenBoxId}
+                                    onAutoOpenComplete={() => setAutoOpenBoxId(null)}
+                                />
+                            </DegenTabsContent>
 
-                    <DegenTabsContent value="profile">
-                        <MyProfileTab walletAddress={publicKey?.toString()} />
-                    </DegenTabsContent>
-                </DegenTabs>
+                            <DegenTabsContent value="profile">
+                                <MyProfileTab walletAddress={publicKey?.toString()} />
+                            </DegenTabsContent>
+                        </DegenTabs>
+                    </div>
+
+                    {/* Leaderboard Sidebar - 1/4, sticky on desktop */}
+                    <div className="w-full lg:w-1/4 lg:self-start lg:sticky lg:top-16">
+                        <Leaderboard />
+                    </div>
+                </div>
 
                 {/* Badge Notification Modal - DISABLED: Badge system temporarily disabled */}
                 {/* <BadgeModal
@@ -256,6 +290,195 @@ export default function Dashboard() {
                     badge={currentBadge}
                 /> */}
             </div>
+        </div>
+    );
+}
+
+// Leaderboard component for top projects and top users
+function Leaderboard() {
+    const [topProjects, setTopProjects] = useState([]);
+    const [topUsers, setTopUsers] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        const fetchLeaderboard = async () => {
+            try {
+                setLoading(true);
+                const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+                const response = await fetch(`${backendUrl}/api/projects/leaderboard?projectLimit=5&userLimit=5&minBoxes=3`);
+                const data = await response.json();
+
+                if (data.success) {
+                    setTopProjects(data.topProjects || []);
+                    setTopUsers(data.topUsers || []);
+                } else {
+                    setError(data.error);
+                }
+            } catch (err) {
+                console.error('Error fetching leaderboard:', err);
+                setError('Failed to load leaderboard');
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchLeaderboard();
+    }, []);
+
+    // Get luck score color based on value
+    const getLuckColor = (score) => {
+        if (score >= 1.5) return 'text-degen-yellow'; // Very lucky (150%+ return)
+        if (score >= 1.0) return 'text-degen-green';  // Lucky (100%+ return)
+        if (score >= 0.7) return 'text-degen-blue';   // Average
+        return 'text-degen-text-muted';               // Below average
+    };
+
+    // Get luck label
+    const getLuckLabel = (score) => {
+        if (score >= 2.0) return 'On Fire';
+        if (score >= 1.5) return 'Hot';
+        if (score >= 1.0) return 'Lucky';
+        if (score >= 0.7) return 'Warm';
+        return 'Cold';
+    };
+
+    return (
+        <div className="space-y-4">
+            {/* Top Projects */}
+            <DegenCard variant="default" padding="none">
+                <div className="p-3 border-b border-degen-black">
+                    <h3 className="text-degen-black text-sm font-medium uppercase tracking-wider">
+                        Top Projects
+                    </h3>
+                </div>
+                <div className="p-2">
+                    {loading ? (
+                        <div className="py-4 text-center text-degen-text-muted text-sm">Loading...</div>
+                    ) : error ? (
+                        <div className="py-4 text-center text-degen-text-muted text-sm">{error}</div>
+                    ) : topProjects.length === 0 ? (
+                        <div className="py-4 text-center text-degen-text-muted text-sm">No projects yet</div>
+                    ) : (
+                        <div className="space-y-1">
+                            {topProjects.map((project, index) => (
+                                <div
+                                    key={project.id}
+                                    className="flex items-center gap-3 p-2"
+                                >
+                                    {/* Rank */}
+                                    <div className="w-5 text-center text-white text-[10px] font-medium">
+                                        {index + 1}
+                                    </div>
+                                    {/* Round project icon/logo */}
+                                    <div className="w-8 h-8 rounded-full bg-degen-black flex items-center justify-center text-degen-white text-xs font-bold flex-shrink-0 overflow-hidden">
+                                        {project.logo_url ? (
+                                            <img
+                                                src={project.logo_url}
+                                                alt={project.project_name}
+                                                className="w-full h-full object-cover"
+                                            />
+                                        ) : (
+                                            project.project_name[0]
+                                        )}
+                                    </div>
+                                    {/* Project info */}
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-degen-black font-medium text-sm truncate">
+                                            {project.project_name}
+                                        </p>
+                                        <p className="text-degen-text-muted text-xs">
+                                            {(project.boxes_purchased || 0).toLocaleString()} boxes
+                                        </p>
+                                    </div>
+                                    {/* View link */}
+                                    <a
+                                        href={`https://${project.subdomain}.degenbox.fun`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-degen-blue text-xs font-medium uppercase tracking-wider hover:underline flex-shrink-0"
+                                    >
+                                        View
+                                    </a>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </DegenCard>
+
+            {/* Top Users - Hottest */}
+            <DegenCard variant="default" padding="none">
+                <div className="p-3 border-b border-degen-black">
+                    <h3 className="text-degen-black text-sm font-medium uppercase tracking-wider">
+                        Luckiest Users
+                    </h3>
+                </div>
+                <div className="p-2">
+                    {loading ? (
+                        <div className="py-4 text-center text-degen-text-muted text-sm">Loading...</div>
+                    ) : error ? (
+                        <div className="py-4 text-center text-degen-text-muted text-sm">{error}</div>
+                    ) : topUsers.length === 0 ? (
+                        <div className="py-4 text-center text-degen-text-muted text-sm">No qualifying users yet</div>
+                    ) : (
+                        <div className="space-y-1">
+                            {topUsers.map((user, index) => {
+                                const shortWallet = `${user.wallet_address.slice(0, 4)}...${user.wallet_address.slice(-4)}`;
+                                const displayName = user.username || shortWallet;
+                                return (
+                                    <div
+                                        key={user.wallet_address}
+                                        className="flex items-center gap-3 p-2"
+                                    >
+                                        {/* Rank */}
+                                        <div className="w-6 text-center text-degen-text-muted text-xs font-bold">
+                                            #{index + 1}
+                                        </div>
+                                        {/* User avatar */}
+                                        <div className="w-8 h-8 rounded-full bg-degen-container border border-degen-black flex items-center justify-center text-degen-black text-xs font-bold flex-shrink-0 overflow-hidden">
+                                            {user.avatar_url ? (
+                                                <img
+                                                    src={user.avatar_url}
+                                                    alt={displayName}
+                                                    className="w-full h-full object-cover"
+                                                />
+                                            ) : (
+                                                user.wallet_address.slice(0, 2)
+                                            )}
+                                        </div>
+                                        {/* User info */}
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-degen-black font-medium text-sm truncate">
+                                                {displayName}
+                                            </p>
+                                            <div className="flex items-center gap-1">
+                                                <span className={`text-xs font-bold ${getLuckColor(user.luck_score)}`}>
+                                                    {user.luck_score.toFixed(2)}x
+                                                </span>
+                                                {user.luck_score >= 1.0 && (
+                                                    <FlameIcon className="w-3 h-3 text-orange-500" />
+                                                )}
+                                            </div>
+                                        </div>
+                                        {/* Stats */}
+                                        <div className="text-right flex-shrink-0">
+                                            <p className="text-degen-text-muted text-xs">
+                                                {user.boxes_opened} boxes
+                                            </p>
+                                            {user.jackpots > 0 && (
+                                                <p className="text-degen-yellow text-xs font-bold">
+                                                    {user.jackpots} jackpot{user.jackpots > 1 ? 's' : ''}
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            </DegenCard>
         </div>
     );
 }
@@ -283,13 +506,106 @@ function MyProjectsTab({ projects, projectsLoading, projectsError }) {
                     actionHref="/dashboard/create"
                 />
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {projects.map((project) => (
                         <ProjectCard key={project.id} project={project} />
                     ))}
                 </div>
             )}
         </>
+    );
+}
+
+/**
+ * AvatarUploadSection - Allows users to upload a custom avatar or choose from defaults
+ */
+function AvatarUploadSection({ walletAddress, currentAvatar, onAvatarChange }) {
+    const { toast } = useToast();
+    const [uploading, setUploading] = useState(false);
+
+    // Handle file upload
+    const handleFileUpload = async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        // Validate file type
+        const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+        if (!allowedTypes.includes(file.type)) {
+            toast.error('Please upload a JPEG, PNG, GIF, or WebP image');
+            return;
+        }
+
+        // Validate file size (2MB max)
+        if (file.size > 2 * 1024 * 1024) {
+            toast.error('Image must be less than 2MB');
+            return;
+        }
+
+        setUploading(true);
+        try {
+            const formData = new FormData();
+            formData.append('avatar', file);
+
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+            const response = await fetch(`${backendUrl}/api/users/${walletAddress}/avatar`, {
+                method: 'POST',
+                body: formData,
+            });
+
+            const data = await response.json();
+            if (data.success) {
+                onAvatarChange(data.avatarUrl);
+                toast.success('Avatar updated!');
+            } else {
+                toast.error(data.error || 'Failed to upload avatar');
+            }
+        } catch (error) {
+            console.error('Error uploading avatar:', error);
+            toast.error('Failed to upload avatar');
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    return (
+        <div className="mb-6">
+            <label className="block text-degen-black font-medium text-sm uppercase tracking-wider mb-2">
+                Profile Picture
+            </label>
+            <div className="flex items-start gap-4">
+                {/* Current avatar */}
+                <div className="w-20 h-20 bg-degen-container border border-degen-black flex items-center justify-center overflow-hidden flex-shrink-0">
+                    {currentAvatar ? (
+                        <img src={currentAvatar} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                        <span className="text-2xl text-degen-text-muted">?</span>
+                    )}
+                </div>
+
+                {/* Upload options */}
+                <div className="flex-1 space-y-2">
+                    {/* Upload button */}
+                    <label className={`
+                        inline-flex items-center gap-2 px-4 py-2 text-sm font-medium uppercase tracking-wider
+                        cursor-pointer transition-colors
+                        ${uploading ? 'bg-degen-container text-degen-text-muted' : 'bg-degen-green text-black hover:opacity-80'}
+                    `}>
+                        <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/gif,image/webp"
+                            onChange={handleFileUpload}
+                            disabled={uploading}
+                            className="hidden"
+                        />
+                        {uploading ? 'Uploading...' : 'Upload Image'}
+                    </label>
+
+                    <p className="text-degen-text-muted text-xs">
+                        Max 2MB. JPEG, PNG, GIF, or WebP.
+                    </p>
+                </div>
+            </div>
+        </div>
     );
 }
 
@@ -302,6 +618,7 @@ function MyProfileTab({ walletAddress }) {
     const [saving, setSaving] = useState(false);
     const [username, setUsername] = useState('');
     const [xHandle, setXHandle] = useState('');
+    const [avatarUrl, setAvatarUrl] = useState(null);
     const [usernameAvailable, setUsernameAvailable] = useState(null);
     const [usernameChecking, setUsernameChecking] = useState(false);
     const [profileTab, setProfileTab] = useState('trophies');
@@ -323,6 +640,7 @@ function MyProfileTab({ walletAddress }) {
                     if (data.profile) {
                         setUsername(data.profile.username || '');
                         setXHandle(data.profile.xHandle || '');
+                        setAvatarUrl(data.profile.avatar_url || null);
                     }
                 }
             } catch (error) {
@@ -416,8 +734,14 @@ function MyProfileTab({ walletAddress }) {
                 {/* Profile Info Card */}
                 <DegenCard variant="white" padding="sm">
                     {/* Avatar/Icon */}
-                    <div className="w-20 h-20 mx-auto mb-3 bg-degen-black flex items-center justify-center text-degen-white text-3xl font-bold border border-degen-black">
-                        {profile?.username ? profile.username[0].toUpperCase() : '?'}
+                    <div className="w-20 h-20 mx-auto mb-3 bg-degen-black flex items-center justify-center text-degen-white text-3xl font-bold border border-degen-black overflow-hidden">
+                        {avatarUrl ? (
+                            <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                        ) : profile?.username ? (
+                            profile.username[0].toUpperCase()
+                        ) : (
+                            '?'
+                        )}
                     </div>
 
                     {/* Username */}
@@ -451,20 +775,20 @@ function MyProfileTab({ walletAddress }) {
                         </h3>
                         <div className="grid grid-cols-2 gap-2">
                             <div className="text-center p-2 bg-degen-white border border-degen-black">
-                                <p className="text-degen-text-muted text-xs uppercase">Boxes</p>
                                 <p className="text-degen-black text-lg font-medium">{stats.totalBoxes || 0}</p>
+                                <p className="text-degen-text-muted text-[10px] uppercase">Boxes</p>
                             </div>
                             <div className="text-center p-2 bg-degen-white border border-degen-black">
-                                <p className="text-degen-text-muted text-xs uppercase">Wins</p>
                                 <p className="text-degen-black text-lg font-medium">{stats.winsCount || 0}</p>
+                                <p className="text-degen-text-muted text-[10px] uppercase">Wins</p>
                             </div>
                             <div className={`text-center p-2 border border-degen-black ${stats.jackpotCount > 0 ? 'bg-degen-yellow' : 'bg-degen-white'}`}>
-                                <p className="text-degen-text-muted text-xs uppercase">Jackpots</p>
                                 <p className="text-degen-black text-lg font-medium">{stats.jackpotCount || 0}</p>
+                                <p className="text-degen-text-muted text-[10px] uppercase">Jackpots</p>
                             </div>
                             <div className="text-center p-2 bg-degen-white border border-degen-black">
-                                <p className="text-degen-text-muted text-xs uppercase">Projects</p>
                                 <p className="text-degen-black text-lg font-medium">{stats.projectsCreated || 0}</p>
+                                <p className="text-degen-text-muted text-[10px] uppercase">Projects</p>
                             </div>
                         </div>
                     </DegenCard>
@@ -531,6 +855,13 @@ function MyProfileTab({ walletAddress }) {
                             <h2 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-6">
                                 Profile Settings
                             </h2>
+
+                            {/* Avatar Upload */}
+                            <AvatarUploadSection
+                                walletAddress={walletAddress}
+                                currentAvatar={avatarUrl}
+                                onAvatarChange={setAvatarUrl}
+                            />
 
                             {/* Wallet Address */}
                             <div className="mb-6">
@@ -658,11 +989,35 @@ function MyProfileTab({ walletAddress }) {
     );
 }
 
-function MyBoxesTab({ walletAddress }) {
+function MyBoxesTab({ walletAddress, autoOpenBoxId = null, onAutoOpenComplete = null }) {
+    const router = useRouter();
     const [boxesData, setBoxesData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [isPending, startTransition] = useTransition();
+
+    // Check if we're entering from a page transition (e.g., from "Hold & Grow Luck")
+    const shouldAnimateEntrance = useRef(false);
+    useEffect(() => {
+        // Check once on mount if we came from a transition
+        if (typeof window !== 'undefined') {
+            const marker = sessionStorage.getItem('dashboard-entrance');
+            if (marker) {
+                sessionStorage.removeItem('dashboard-entrance');
+                shouldAnimateEntrance.current = true;
+            }
+        }
+    }, []);
+
+    // Clear the URL parameter when we have an autoOpenBoxId so refresh doesn't re-trigger
+    useEffect(() => {
+        if (autoOpenBoxId) {
+            // Remove the openBox param from URL without triggering navigation
+            const url = new URL(window.location.href);
+            url.searchParams.delete('openBox');
+            window.history.replaceState({}, '', url.toString());
+        }
+    }, [autoOpenBoxId]);
 
     // Fetch boxes data
     const fetchUserBoxes = useCallback(async () => {
@@ -701,6 +1056,19 @@ function MyBoxesTab({ walletAddress }) {
         fetchUserBoxes();
     }, [fetchUserBoxes]);
 
+    // Show toast when coming from "Open Now" flow
+    const { toast } = useToast();
+    useEffect(() => {
+        if (autoOpenBoxId && boxesData && !loading) {
+            toast.info(`Box #${autoOpenBoxId} is ready! Click "Open Box" to start.`, {
+                title: 'Ready to Open',
+                duration: 8000,
+            });
+            // Clear the auto-open state
+            if (onAutoOpenComplete) onAutoOpenComplete();
+        }
+    }, [autoOpenBoxId, boxesData, loading, onAutoOpenComplete, toast]);
+
     if (loading) {
         return <MyBoxesTabSkeleton />;
     }
@@ -728,11 +1096,17 @@ function MyBoxesTab({ walletAddress }) {
             {/* Summary */}
             <DegenCard variant="default" padding="sm">
                 <div className="flex items-center justify-between">
-                    <div>
-                        <h2 className="text-degen-black text-lg font-medium uppercase tracking-wider">Your Collection</h2>
-                        <p className="text-degen-text-muted text-sm">
-                            {boxesData.totalBoxes} box{boxesData.totalBoxes !== 1 ? 'es' : ''} across {boxesData.projectCount} project{boxesData.projectCount !== 1 ? 's' : ''}
-                        </p>
+                    <div className="flex items-center gap-6">
+                        {/* Boxes stat */}
+                        <div className="flex flex-col items-center">
+                            <PaddedNumber value={boxesData.totalBoxes} />
+                            <span className="text-degen-text-muted text-[10px] uppercase tracking-wider mt-1">boxes</span>
+                        </div>
+                        {/* Projects stat */}
+                        <div className="flex flex-col items-center">
+                            <PaddedNumber value={boxesData.projectCount} />
+                            <span className="text-degen-text-muted text-[10px] uppercase tracking-wider mt-1">projects</span>
+                        </div>
                     </div>
                     <div className="flex items-center gap-4">
                         {isPending && (
@@ -744,12 +1118,17 @@ function MyBoxesTab({ walletAddress }) {
                 </div>
             </DegenCard>
 
+            {/* Inline transaction status (degen mode) */}
+            <InlineTransactionStatus />
+
             {/* Projects with Boxes */}
-            {boxesData.projectsWithBoxes.map((projectGroup) => (
+            {boxesData.projectsWithBoxes.map((projectGroup, index) => (
                 <ProjectBoxesGroup
                     key={projectGroup.project.id}
                     projectGroup={projectGroup}
                     onRefresh={refreshBoxes}
+                    animateEntrance={shouldAnimateEntrance.current}
+                    entranceDelay={index * 0.1}
                 />
             ))}
         </div>
@@ -788,10 +1167,11 @@ const BOX_FILTERS = {
     },
 };
 
-function ProjectBoxesGroup({ projectGroup, onRefresh }) {
+function ProjectBoxesGroup({ projectGroup, onRefresh, animateEntrance = false, entranceDelay = 0 }) {
     const { project, boxes } = projectGroup;
     const projectUrl = getProjectUrl(project.subdomain);
     const [activeFilter, setActiveFilter] = useState('all');
+    const [isCollapsed, setIsCollapsed] = useState(false);
 
     // Count boxes for each filter category
     const filterCounts = useMemo(() => {
@@ -813,15 +1193,32 @@ function ProjectBoxesGroup({ projectGroup, onRefresh }) {
     const revealedBoxes = filterCounts.wins + filterCounts.lost + filterCounts.refund;
 
     return (
-        <DegenCard variant="default" padding="none" >
+        <DegenCard
+            variant="default"
+            padding="none"
+            className={animateEntrance ? 'animate-entrance' : ''}
+            style={animateEntrance ? { animationDelay: `${entranceDelay}s` } : undefined}
+        >
             {/* Project Header */}
             <div className="p-3 border-b border-degen-black flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-degen-black flex items-center justify-center text-xl text-degen-white">
-
+                    {/* Project image */}
+                    <div className="w-12 h-12 bg-degen-black flex items-center justify-center text-xl text-degen-white flex-shrink-0 overflow-hidden rounded-lg">
+                        {(project.logo_url || project.image_url || project.project_logo || project.projectLogo) ? (
+                            <img
+                                src={project.logo_url || project.image_url || project.project_logo || project.projectLogo}
+                                alt={project.project_name}
+                                className="w-full h-full object-cover"
+                            />
+                        ) : (
+                            project.project_name?.[0] || '?'
+                        )}
                     </div>
                     <div>
-                        <h3 className="text-degen-black text-lg font-extrabold uppercase tracking-wider">{project.project_name}</h3>
+                        <div className="flex items-center gap-2">
+                            <h3 className="text-degen-black text-lg font-extrabold uppercase tracking-wider">{project.project_name}</h3>
+                            <span className="text-degen-green text-xs font-medium">${project.payment_token_symbol || 'SOL'}</span>
+                        </div>
                         <a
                             href={projectUrl}
                             target="_blank"
@@ -841,88 +1238,208 @@ function ProjectBoxesGroup({ projectGroup, onRefresh }) {
                         </a>
                     </div>
                 </div>
-                <div className="text-right hidden md:block">
-                    <p className="text-degen-black font-medium">{boxes.length} box{boxes.length !== 1 ? 'es' : ''}</p>
-                    <p className="text-degen-text-muted text-sm">
-                        {/* {pendingBoxes} pending,*/}{revealedBoxes} revealed
-                    </p>
-                </div>
-            </div>
-
-            {/* Filter - Dropdown on mobile, Tabs on desktop */}
-            <div className="px-3 pt-3 pb-2 border-b border-degen-border">
-                {/* Mobile Dropdown */}
-                <div className="sm:hidden">
-                    <DegenDropdown
-                        options={Object.entries(BOX_FILTERS).map(([key, { label }]) => ({
-                            value: key,
-                            label,
-                            count: filterCounts[key],
-                        }))}
-                        value={activeFilter}
-                        onChange={setActiveFilter}
-                        showCounts={true}
-                    />
-                </div>
-
-                {/* Desktop Tabs */}
-                <div className="hidden sm:flex gap-1 overflow-x-auto">
-                    {Object.entries(BOX_FILTERS).map(([key, { label }]) => {
-                        const count = filterCounts[key];
-                        const isActive = activeFilter === key;
-                        // Hide filters with 0 count (except 'all')
-                        if (count === 0 && key !== 'all') return null;
-
-                        return (
-                            <button
-                                key={key}
-                                onClick={() => setActiveFilter(key)}
-                                className={`
-                                    px-3 py-1.5 text-xs font-medium uppercase tracking-wider
-                                    border transition-colors duration-100
-                                    flex items-center gap-1.5
-                                    ${isActive
-                                        ? 'bg-degen-black text-white border-degen-black'
-                                        : 'bg-white text-degen-black border-degen-black hover:bg-degen-container'
-                                    }
-                                `}
-                            >
-                                {label}
-                                <span className={`
-                                    text-[10px] px-1.5 py-0.5 rounded-sm
-                                    ${isActive
-                                        ? 'bg-white/20 text-white'
-                                        : 'bg-degen-container text-degen-text-muted'
-                                    }
-                                `}>
-                                    {count}
-                                </span>
-                            </button>
-                        );
-                    })}
-                </div>
-            </div>
-
-            {/* Boxes Grid */}
-            <div className="p-3">
-                {filteredAndSortedBoxes.length === 0 ? (
-                    <div className="text-center py-8 text-degen-text-muted">
-                        No boxes match this filter
+                {/* Stats and collapse on right */}
+                <div className="flex items-center gap-4">
+                    {/* Stats - boxes and revealed */}
+                    <div className="hidden md:flex items-center gap-4">
+                        <div className="flex flex-col items-center">
+                            <PaddedNumber value={boxes.length} />
+                            <span className="text-degen-text-muted text-[10px] uppercase tracking-wider mt-1">boxes</span>
+                        </div>
+                        <div className="flex flex-col items-center">
+                            <PaddedNumber value={revealedBoxes} />
+                            <span className="text-degen-text-muted text-[10px] uppercase tracking-wider mt-1">revealed</span>
+                        </div>
                     </div>
-                ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                        {filteredAndSortedBoxes.map((box) => (
-                            <BoxCard
-                                key={box.id}
-                                box={box}
-                                project={project}
-                                onRefresh={onRefresh}
-                            />
-                        ))}
-                    </div>
-                )}
+                    {/* Collapse toggle */}
+                    <button
+                        onClick={() => setIsCollapsed(!isCollapsed)}
+                        className="p-1 hover:bg-degen-container rounded transition-colors cursor-pointer group"
+                    >
+                        <ChevronDownIcon className={`w-5 h-5 text-degen-text-muted group-hover:text-black transition-all duration-200 ${isCollapsed ? '-rotate-90' : ''}`} />
+                    </button>
+                </div>
             </div>
+
+            {/* Collapsible content */}
+            {!isCollapsed && (
+                <>
+                    {/* Filter - Dropdown on mobile, Tabs on desktop */}
+                    <div className="px-3 pt-3 pb-2 border-b border-degen-border">
+                        <div className="flex items-center gap-3">
+                            {/* Filter Icon - Triangle of dots */}
+                            <FilterIcon className="w-4 h-4 text-degen-text-muted flex-shrink-0" />
+
+                            {/* Mobile Dropdown */}
+                            <div className="sm:hidden flex-1">
+                                <DegenDropdown
+                                    options={Object.entries(BOX_FILTERS).map(([key, { label }]) => ({
+                                        value: key,
+                                        label,
+                                        count: filterCounts[key],
+                                    }))}
+                                    value={activeFilter}
+                                    onChange={setActiveFilter}
+                                    showCounts={true}
+                                />
+                            </div>
+
+                            {/* Desktop Tabs */}
+                            <div className="hidden sm:flex gap-1 overflow-x-auto flex-1">
+                                {Object.entries(BOX_FILTERS).map(([key, { label }]) => {
+                                    const count = filterCounts[key];
+                                    const isActive = activeFilter === key;
+                                    // Hide filters with 0 count (except 'all')
+                                    if (count === 0 && key !== 'all') return null;
+
+                                    return (
+                                        <button
+                                            key={key}
+                                            onClick={() => setActiveFilter(key)}
+                                            className={`
+                                                px-3 py-1.5 text-xs font-medium uppercase tracking-wider
+                                                border transition-colors duration-100 cursor-pointer
+                                                flex items-center gap-1.5
+                                                ${isActive
+                                                    ? 'bg-degen-black text-white border-degen-black'
+                                                    : 'bg-white text-degen-black border-degen-black hover:bg-degen-black hover:text-white'
+                                                }
+                                            `}
+                                        >
+                                            {label}
+                                            <span className={`
+                                                text-[10px] px-1.5 py-0.5 rounded-sm
+                                                ${isActive
+                                                    ? 'bg-white/20 text-white'
+                                                    : 'bg-degen-container text-degen-text-muted'
+                                                }
+                                            `}>
+                                                {count}
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Boxes Grid/List */}
+                    <BoxList boxes={filteredAndSortedBoxes} project={project} onRefresh={onRefresh} animateEntrance={animateEntrance} />
+                </>
+            )}
         </DegenCard>
+    );
+}
+
+// Box list component - always uses row layout
+function BoxList({ boxes, project, onRefresh, animateEntrance = false }) {
+    if (boxes.length === 0) {
+        return (
+            <div className="p-3">
+                <div className="text-center py-8 text-degen-text-muted">
+                    No boxes match this filter
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="p-3">
+            <div className="space-y-2">
+                {boxes.map((box, index) => (
+                    <div
+                        key={box.id}
+                        className={animateEntrance ? 'animate-entrance' : ''}
+                        style={animateEntrance ? { animationDelay: `${0.15 + index * 0.05}s` } : undefined}
+                    >
+                        <BoxCardRow
+                            box={box}
+                            project={project}
+                            onRefresh={onRefresh}
+                        />
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+// Luck icon component
+function LuckIcon({ className = '' }) {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none" className={className}>
+            <path d="M17.28 9.05a5.5 5.5 0 1 0-10.56 0A5.5 5.5 0 1 0 12 17.66a5.5 5.5 0 1 0 5.28-8.6Z"/>
+            <path d="M11 17.66h2v5h-2z"/>
+        </svg>
+    );
+}
+
+// Flame icon component for "hot" display
+function FlameIcon({ className = '' }) {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+            <path d="M12 3q1 4 4 6.5t3 5.5a1 1 0 0 1-14 0 5 5 0 0 1 1-3 1 1 0 0 0 5 0c0-2-1.5-3-1.5-5q0-2 2.5-4"/>
+        </svg>
+    );
+}
+
+// Chevron down icon for collapsible sections
+function ChevronDownIcon({ className = '' }) {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+            <path d="m6 9 6 6 6-6"/>
+        </svg>
+    );
+}
+
+// Display number in large font
+function PaddedNumber({ value }) {
+    return (
+        <span className="text-lg font-mono font-medium">
+            {value}
+        </span>
+    );
+}
+
+// State indicator colors for row layout
+function getStateColor(box, isExpired, isRefundEligible) {
+    const isRevealed = box.box_result > 0;
+    const isCommitted = box.randomness_committed && !isRevealed;
+    const isPending = box.box_result === 0 && !box.randomness_committed;
+    const hasReward = box.payout_amount > 0;
+    const isJackpot = box.box_result === 5;
+    const isRefunded = box.box_result === 6;
+
+    if (isPending) return 'bg-degen-yellow';
+    if (isCommitted && !isExpired && !isRefundEligible) return 'bg-degen-yellow';
+    if (isRefundEligible) return 'bg-degen-text-muted';
+    if (isRefunded) return 'bg-degen-text-muted';
+    if (isExpired && !isRefundEligible) return 'bg-degen-error';
+    if (isJackpot) return 'bg-degen-yellow';
+    if (hasReward && !isJackpot && !isRefunded) return 'bg-degen-green';
+    if (isRevealed && !hasReward && !isRefunded && !isRefundEligible) return 'bg-degen-text-muted';
+    return 'bg-degen-container';
+}
+
+// Custom filter icon - triangle of dots pointing down
+function FilterIcon({ className = '' }) {
+    return (
+        <svg
+            viewBox="0 0 16 14"
+            fill="currentColor"
+            className={className}
+            xmlns="http://www.w3.org/2000/svg"
+        >
+            {/* Top row - 3 dots */}
+            <circle cx="2" cy="2" r="2" />
+            <circle cx="8" cy="2" r="2" />
+            <circle cx="14" cy="2" r="2" />
+            {/* Middle row - 2 dots */}
+            <circle cx="5" cy="7" r="2" />
+            <circle cx="11" cy="7" r="2" />
+            {/* Bottom row - 1 dot */}
+            <circle cx="8" cy="12" r="2" />
+        </svg>
     );
 }
 
@@ -1023,17 +1540,20 @@ function ExpiryPieClock({ expiryCountdown, formatExpiryTime }) {
                 className="w-5 h-5 flex items-center justify-center cursor-pointer"
             >
                 <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-                    {/* Background circle - white (elapsed/empty time) */}
+                    {/* Background circle - transparent (elapsed/empty time) */}
                     <circle
                         cx={center}
                         cy={center}
                         r={radius}
-                        fill="#ffffff"
+                        fill="none"
+                        className="stroke-current opacity-30"
+                        strokeWidth="1"
                     />
-                    {/* Remaining time pie slice - black, shrinks clockwise as time passes */}
+                    {/* Remaining time pie slice - uses currentColor, shrinks clockwise as time passes */}
                     <path
                         d={getRemainingArcPath()}
-                        fill="#1a1a1a"
+                        fill="currentColor"
+                        className="opacity-60"
                     />
                     {/* Border circle */}
                     <circle
@@ -1041,8 +1561,9 @@ function ExpiryPieClock({ expiryCountdown, formatExpiryTime }) {
                         cy={center}
                         r={radius}
                         fill="none"
-                        stroke="#1a1a1a"
+                        stroke="currentColor"
                         strokeWidth="1"
+                        className="opacity-60"
                     />
                 </svg>
             </button>
@@ -1060,75 +1581,166 @@ function ExpiryPieClock({ expiryCountdown, formatExpiryTime }) {
     );
 }
 
-function BoxCard({ box, project, onRefresh }) {
+// Row-based BoxCard for degen mode
+function BoxCardRow({ box, project, onRefresh }) {
     const { publicKey, signTransaction, sendTransaction } = useWallet();
     const { connection } = useConnection();
     const { config } = useNetworkStore();
     const { toast } = useToast();
     const { startTransaction, addLog, endTransaction, startCountdown } = useTransaction();
 
-    const walletAddress = publicKey?.toString();
-    const network = config?.network || 'devnet';
     const [isProcessing, setIsProcessing] = useState(false);
-    const [processingStep, setProcessingStep] = useState(null); // 'commit' | 'reveal' | 'claim'
-    const [revealResult, setRevealResult] = useState(null);
-    const [error, setError] = useState(null);
-    const [revealCountdown, setRevealCountdown] = useState(null); // seconds until reveal enabled
-    const [expiryCountdown, setExpiryCountdown] = useState(null); // seconds until commit expires
-    const [commitCooldown, setCommitCooldown] = useState(null); // seconds until "Open Box" enabled after purchase
-    const [refundCooldown, setRefundCooldown] = useState(null); // seconds until refund enabled (grace period)
-    const [currentLuck, setCurrentLuck] = useState(config?.baseLuck || 5); // Real-time luck display
-    const [, startBoxTransition] = useTransition();
-
-    // Win popup state
+    const [processingStep, setProcessingStep] = useState(null);
     const [showWinModal, setShowWinModal] = useState(false);
     const [winData, setWinData] = useState(null);
+    const [currentLuck, setCurrentLuck] = useState(null); // null = loading
+    const [commitCooldown, setCommitCooldown] = useState(null);
+    const [revealCountdown, setRevealCountdown] = useState(null);
+    const [expiryCountdown, setExpiryCountdown] = useState(null);
+    const [refundCooldown, setRefundCooldown] = useState(null);
+    const [, startBoxTransition] = useTransition();
+    const [optimisticBox, setOptimisticBox] = useOptimistic(box, (currentBox, update) => ({ ...currentBox, ...update }));
 
-    // Open box confirmation modal state
-    const [showOpenConfirm, setShowOpenConfirm] = useState(false);
+    // Unified open flow state (commit → wait → reveal → settle in one go)
+    const [unifiedFlowActive, setUnifiedFlowActive] = useState(false);
+    const [unifiedFlowStep, setUnifiedFlowStep] = useState(null); // 'committing' | 'waiting' | 'revealing' | 'complete'
+    const [unifiedFlowCountdown, setUnifiedFlowCountdown] = useState(0);
+    const [unifiedFlowLog, setUnifiedFlowLog] = useState('');
+    const [unifiedFlowError, setUnifiedFlowError] = useState(null);
 
-    // Optimistic box state for instant UI feedback
-    const [optimisticBox, setOptimisticBox] = useOptimistic(
-        box,
-        (currentBox, update) => ({ ...currentBox, ...update })
-    );
-
-    // Use optimistic state for rendering
     const displayBox = optimisticBox;
+    const network = config?.network || 'devnet';
+    const walletAddress = publicKey?.toString();
 
-    // Box states (using optimistic state)
+    // Initialize nowMs with useState to avoid Date.now() during render
+    const [nowMs] = useState(() => Date.now());
+
+    // Parse timestamps as UTC
+    const purchasedAtUTC = parseAsUTC(displayBox.purchased_at);
+    const committedAtUTC = parseAsUTC(displayBox.committed_at);
+
+    // Derived states
     const isRevealed = displayBox.box_result > 0;
     const isCommitted = displayBox.randomness_committed && !isRevealed;
     const isPending = displayBox.box_result === 0 && !displayBox.randomness_committed;
     const hasReward = displayBox.payout_amount > 0;
     const isJackpot = displayBox.box_result === 5;
+    const isSettled = !!displayBox.settled_at;
     const isRefunded = displayBox.box_result === 6;
-    // Use actual box prop for refund_eligible (not optimistic state) since it's set by backend
-    // Also check optimistic state in case we just marked it eligible in this session
-    const isRefundEligible = (box.refund_eligible === true || displayBox.refund_eligible === true) && !isRefunded;
+    const isRefundEligible = displayBox.refund_eligible && !isRefunded;
+    const isExpired = isCommitted && committedAtUTC && (nowMs - committedAtUTC > REVEAL_WINDOW_SECONDS * 1000);
 
-    // Check if commit has expired (uses REVEAL_WINDOW_SECONDS config)
-    // Use parseAsUTC to handle timezone-agnostic timestamps from database
-    const committedAtUTC = parseAsUTC(box.committed_at);
-    const isExpired = isCommitted && committedAtUTC &&
-        (Date.now() - committedAtUTC > REVEAL_WINDOW_SECONDS * 1000);
+    // Format payout
+    const payoutFormatted = hasReward
+        ? (displayBox.payout_amount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
+        : '0';
+
+    // Get state color for the indicator
+    const stateColor = getStateColor(displayBox, isExpired, isRefundEligible);
+
+    // Status text
+    const getStatusText = () => {
+        // Show unified flow step if active
+        if (unifiedFlowActive) {
+            if (unifiedFlowStep === 'committing') return 'Opening...';
+            if (unifiedFlowStep === 'waiting') return unifiedFlowCountdown > 0 ? `Waiting ${unifiedFlowCountdown}s` : 'Ready!';
+            if (unifiedFlowStep === 'revealing') return 'Revealing & Claiming...';
+            return 'Processing...';
+        }
+        if (isRefunded) return 'Refunded';
+        if (isRefundEligible) return 'Refund Available';
+        if (isExpired) return 'Expired';
+        if (isJackpot) return 'JACKPOT!';
+        if (hasReward && isSettled) return 'Won';
+        if (hasReward && !isSettled) return 'Unclaimed Win';
+        if (isRevealed && !hasReward) return 'No Win';
+        if (isCommitted) return 'Opening...';
+        return 'Unopened';
+    };
+
+    // Get tier name from result
+    const getTierName = (result) => {
+        switch (result) {
+            case 1: return 'Dud';
+            case 2: return 'Rebate';
+            case 3: return 'Break-even';
+            case 4: return 'Profit';
+            case 5: return 'Jackpot';
+            case 6: return 'Refunded';
+            default: return 'Pending';
+        }
+    };
+
+    // Construct badge URL from tier and badge image ID
+    const getBadgeUrl = (tier, badgeImageId) => {
+        if (!badgeImageId || tier < 2) return null;
+        const tierFolders = { 2: '0.5x', 3: '1x', 4: '1.5x', 5: '4x' };
+        const folder = tierFolders[tier];
+        if (!folder) return null;
+        return `https://degenbox.fra1.cdn.digitaloceanspaces.com/badges/${folder}/${badgeImageId}.png`;
+    };
+
+    // Helper: Get payout multiplier string from reward amount and box price
+    const getPayoutMultiplier = (payoutAmount, boxPrice) => {
+        if (!boxPrice || boxPrice === 0) return '0x';
+        const multiplier = payoutAmount / boxPrice;
+        if (multiplier === 0) return '0x';
+        if (Number.isInteger(multiplier)) return `${multiplier}x`;
+        return `${multiplier.toFixed(1)}x`;
+    };
+
+    // Get project URL
+    const getProjectUrl = (subdomain) => {
+        if (typeof window === 'undefined') return '/';
+        const hostname = window.location.hostname;
+        if (hostname === 'localhost' || hostname === '127.0.0.1') {
+            return `http://localhost:3000/p/${subdomain}`;
+        }
+        return `https://${subdomain}.degenbox.fun`;
+    };
+
+    // Calculate current luck
+    const calculateCurrentLuck = useCallback(() => {
+        // Try purchased_at first, then created_at as fallback
+        const createdTime = purchasedAtUTC || parseAsUTC(displayBox.created_at);
+        if (!createdTime || !config) return config?.baseLuck || 5;
+
+        const holdTimeSeconds = Math.floor((Date.now() - createdTime) / 1000);
+        const luckInterval = project?.luck_interval_seconds || config?.luckIntervalSeconds || 3600;
+        const baseLuck = config?.baseLuck || 5;
+        const maxLuck = config?.maxLuck || 60;
+
+        const bonusLuck = Math.floor(holdTimeSeconds / luckInterval);
+        return Math.min(baseLuck + bonusLuck, maxLuck);
+    }, [purchasedAtUTC, displayBox.created_at, config, project?.luck_interval_seconds]);
+
+    // Update luck display every second for real-time counting
+    // Stop counting when box is being processed (opened)
+    useEffect(() => {
+        if (!isPending || isProcessing) return;
+        // Update every second for real-time display (first tick happens immediately)
+        const interval = setInterval(() => {
+            setCurrentLuck(calculateCurrentLuck());
+        }, 1000);
+        return () => clearInterval(interval);
+    }, [isPending, isProcessing, calculateCurrentLuck]);
 
     // Cooldown timer for pending boxes (must wait 30s after purchase before opening)
     useEffect(() => {
         if (!isPending || !box.created_at) return;
 
-        // Use parseAsUTC to handle timezone-agnostic timestamps from database
         const createdTime = parseAsUTC(box.created_at);
         if (!createdTime) return;
 
-        const COMMIT_COOLDOWN = 30 * 1000; // 30 seconds after purchase before commit/open is allowed
+        // Use openBoxCooldown from config (default 30 seconds)
+        const openBoxCooldownMs = (config?.openBoxCooldown || 30) * 1000;
 
         const updateCooldown = () => {
             const now = Date.now();
             const timeSincePurchase = now - createdTime;
 
-            if (timeSincePurchase < COMMIT_COOLDOWN) {
-                setCommitCooldown(Math.ceil((COMMIT_COOLDOWN - timeSincePurchase) / 1000));
+            if (timeSincePurchase < openBoxCooldownMs) {
+                setCommitCooldown(Math.ceil((openBoxCooldownMs - timeSincePurchase) / 1000));
             } else {
                 setCommitCooldown(0);
             }
@@ -1137,35 +1749,12 @@ function BoxCard({ box, project, onRefresh }) {
         updateCooldown();
         const interval = setInterval(updateCooldown, 1000);
         return () => clearInterval(interval);
-    }, [isPending, box.created_at]);
+    }, [isPending, box.created_at, config?.openBoxCooldown]);
 
-    // Real-time luck update for pending boxes
-    useEffect(() => {
-        if (!isPending || !box.created_at || !config) return;
-
-        const updateLuck = () => {
-            const createdTime = parseAsUTC(box.created_at);
-            if (!createdTime) return;
-
-            const holdTimeSeconds = Math.floor((Date.now() - createdTime) / 1000);
-            const luckInterval = project?.luck_interval_seconds || config?.luckIntervalSeconds || 3600;
-            const baseLuck = config?.baseLuck || 5;
-            const maxLuck = config?.maxLuck || 60;
-
-            const bonusLuck = Math.floor(holdTimeSeconds / luckInterval);
-            setCurrentLuck(Math.min(baseLuck + bonusLuck, maxLuck));
-        };
-
-        updateLuck();
-        const interval = setInterval(updateLuck, 1000);
-        return () => clearInterval(interval);
-    }, [isPending, box.created_at, config, project?.luck_interval_seconds]);
-
-    // Countdown timers for committed boxes
+    // Countdown timers for committed boxes (reveal countdown + expiry countdown)
     useEffect(() => {
         if (!isCommitted || !box.committed_at) return;
 
-        // Use parseAsUTC to handle timezone-agnostic timestamps from database
         const committedTime = parseAsUTC(box.committed_at);
         if (!committedTime) return;
 
@@ -1237,29 +1826,863 @@ function BoxCard({ box, project, onRefresh }) {
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     };
 
-    // Calculate current luck based on hold time
-    const calculateCurrentLuck = () => {
-        if (!box.created_at || !config) return config?.baseLuck || 5;
+    // Handle commit box (Open Box - step 1)
+    const handleCommit = async () => {
+        if (!publicKey || !signTransaction) return;
 
-        const createdTime = parseAsUTC(box.created_at);
-        if (!createdTime) return config?.baseLuck || 5;
+        setIsProcessing(true);
+        setProcessingStep('commit');
+        startTransaction(`Opening Box #${box.box_number}...`);
 
-        const holdTimeSeconds = Math.floor((Date.now() - createdTime) / 1000);
-        // Use project's luck interval if set, otherwise platform default
-        const luckInterval = project?.luck_interval_seconds || config?.luckIntervalSeconds || 3600;
-        const baseLuck = config?.baseLuck || 5;
-        const maxLuck = config?.maxLuck || 60;
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
 
-        const bonusLuck = Math.floor(holdTimeSeconds / luckInterval);
-        return Math.min(baseLuck + bonusLuck, maxLuck);
+            // Optimistic update: immediately show as "committed" state (wrapped in transition)
+            startBoxTransition(() => {
+                setOptimisticBox({ randomness_committed: true, committed_at: new Date().toISOString() });
+            });
+
+            // Step 1: Generate randomness keypair CLIENT-SIDE (prevents Phantom security warning)
+            addLog('Generating randomness keypair...');
+            const { Keypair } = await import('@solana/web3.js');
+            const randomnessKeypair = Keypair.generate();
+            const randomnessPublicKey = randomnessKeypair.publicKey.toString();
+
+            // Step 2: Build commit transaction with client-generated public key
+            addLog('Building transaction...');
+            const buildResponse = await fetch(`${backendUrl}/api/program/build-commit-box-tx`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    ownerWallet: walletAddress,
+                    randomnessPublicKey,
+                }),
+            });
+
+            const buildResult = await buildResponse.json();
+            if (!buildResult.success) {
+                throw new Error(buildResult.details || buildResult.error);
+            }
+            addLog('Transaction built');
+
+            // Step 3: Deserialize transaction
+            const { Transaction } = await import('@solana/web3.js');
+            const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
+
+            // Step 4: Sign in the correct order to avoid Phantom's Lighthouse security warnings
+            addLog('Requesting wallet signature...');
+
+            // 4a: Phantom wallet signs first
+            const walletSignedTx = await signTransaction(transaction);
+
+            // 4b: Additional signers (randomness keypair) sign afterward
+            walletSignedTx.partialSign(randomnessKeypair);
+
+            // 4c: Send the fully signed transaction
+            const signature = await connection.sendRawTransaction(walletSignedTx.serialize(), {
+                skipPreflight: true,
+                preflightCommitment: 'confirmed',
+            });
+            addLog(`TX: ${signature.slice(0, 8)}...`);
+
+            // Step 5: Wait for confirmation
+            addLog('Waiting for confirmation...');
+            await connection.confirmTransaction(signature, 'confirmed');
+
+            // Optimistic UI update - show committed state immediately
+            startBoxTransition(() => {
+                setOptimisticBox({
+                    randomness_committed: true,
+                    randomness_account: buildResult.randomnessAccount
+                });
+            });
+
+            // Step 7: Confirm with backend
+            addLog('Confirming with backend...');
+            await fetch(`${backendUrl}/api/program/confirm-commit`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    signature,
+                    randomnessAccount: buildResult.randomnessAccount,
+                }),
+            });
+
+            endTransaction(true, 'Box opened! Wait 10s then reveal.');
+            // Refresh boxes list to show committed state
+            if (onRefresh) onRefresh();
+
+        } catch (err) {
+            console.error('Error committing box:', err);
+            let errorMessage = err.message;
+            if (err.logs) {
+                console.error('Transaction logs:', err.logs);
+            }
+
+            // Clean up error messages for common user-caused errors
+            const errorLower = (err.message || '').toLowerCase();
+            if (errorLower.includes('user rejected') || errorLower.includes('rejected the request')) {
+                errorMessage = 'Transaction cancelled. You can try opening the box again.';
+            } else if (errorLower.includes('insufficient')) {
+                errorMessage = 'Insufficient SOL for transaction fees. Please add SOL and try again.';
+            }
+
+            endTransaction(false, errorMessage);
+        } finally {
+            setIsProcessing(false);
+            setProcessingStep(null);
+        }
     };
 
-    // Format payout amount
-    const payoutFormatted = box.payout_amount
-        ? (box.payout_amount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
-        : '0';
+    // Handle reveal box (step 2 - after commit)
+    const handleReveal = async () => {
+        if (!publicKey || !sendTransaction) return;
 
-    // Solscan URLs (more user-friendly than Solana Explorer)
+        // Check if reveal is too soon (need to wait ~10 seconds for oracle)
+        if (revealCountdown > 0) {
+            toast.error(`Please wait ${revealCountdown} seconds for oracle...`);
+            return;
+        }
+
+        setIsProcessing(true);
+        setProcessingStep('reveal');
+        startTransaction(`Revealing Box #${box.box_number}...`);
+
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+
+            // Start 16-second countdown - this is the oracle timeout duration
+            addLog('Waiting for oracle randomness...');
+            startCountdown(16);
+            // Use combined endpoint that does reveal + settle in one transaction
+            const buildResponse = await fetch(`${backendUrl}/api/program/build-reveal-and-settle-tx`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    ownerWallet: walletAddress,
+                }),
+            });
+
+            const buildResult = await buildResponse.json();
+
+            if (!buildResult.success) {
+                const errorCode = buildResult.errorCode;
+                console.log('Reveal failed:', { errorCode, refundEligible: buildResult.refundEligible, error: buildResult.error });
+
+                // If backend marked as refund-eligible, update UI immediately
+                if (buildResult.refundEligible === true) {
+                    console.log('Box marked as refund-eligible by backend - updating UI immediately');
+                    startBoxTransition(() => {
+                        setOptimisticBox({
+                            refund_eligible: true,
+                            randomness_committed: false
+                        });
+                    });
+                    endTransaction(false, 'Refund available');
+                    if (onRefresh) onRefresh();
+                    return;
+                }
+
+                // Check if expired - box becomes a Dud
+                if (buildResult.expired || errorCode === 'REVEAL_EXPIRED') {
+                    startBoxTransition(() => {
+                        setOptimisticBox({
+                            box_result: 1,
+                            payout_amount: 0,
+                            randomness_committed: false,
+                        });
+                    });
+                    endTransaction(false, 'Reveal window expired - box is now a Dud');
+                    if (onRefresh) onRefresh();
+                    return;
+                }
+
+                // Handle oracle unavailability
+                if (errorCode === 'ORACLE_UNAVAILABLE' || errorCode === 'ORACLE_TIMEOUT') {
+                    const timeRemaining = buildResult.timeRemainingSeconds;
+                    let timeMsg = '';
+                    if (timeRemaining && timeRemaining > 0) {
+                        const mins = Math.floor(timeRemaining / 60);
+                        const secs = timeRemaining % 60;
+                        timeMsg = ` You have ${mins}m ${secs}s remaining to retry.`;
+                    }
+                    const retryMsg = buildResult.retryAfterSeconds
+                        ? ` Try again in ${buildResult.retryAfterSeconds} seconds.`
+                        : ' Please try again shortly.';
+                    toast.error(buildResult.error + timeMsg + retryMsg);
+                    endTransaction(false, 'Oracle temporarily unavailable');
+                    return;
+                }
+
+                // Handle insufficient funds
+                if (errorCode === 'INSUFFICIENT_FUNDS') {
+                    toast.error(buildResult.error);
+                    endTransaction(false, 'Insufficient SOL for fees');
+                    return;
+                }
+
+                throw new Error(buildResult.details || buildResult.error);
+            }
+
+            // Check if result was recovered from on-chain (already revealed)
+            if (buildResult.alreadyRevealed && buildResult.reward) {
+                addLog('Result recovered from on-chain!');
+                startBoxTransition(() => {
+                    setOptimisticBox({
+                        box_result: buildResult.reward.tier,
+                        payout_amount: buildResult.reward.payoutAmount,
+                        randomness_committed: false
+                    });
+                });
+
+                const tierName = getTierName(buildResult.reward.tier);
+                const payout = buildResult.reward.payoutAmount
+                    ? (buildResult.reward.payoutAmount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
+                    : '0';
+                endTransaction(true, `Recovered: ${tierName}! Payout: ${payout} ${project.payment_token_symbol}`);
+
+                // Show win popup for winning results (tier > 1)
+                if (buildResult.reward.tier > 1) {
+                    setWinData({
+                        tier: buildResult.reward.tier,
+                        amount: payout,
+                        tokenSymbol: project.payment_token_symbol,
+                        multiplier: getPayoutMultiplier(buildResult.reward.payoutAmount, project.box_price),
+                        projectUrl: getProjectUrl(project.subdomain),
+                        badgeUrl: getBadgeUrl(buildResult.reward.tier, buildResult.reward.badgeImageId),
+                    });
+                    setShowWinModal(true);
+                }
+
+                if (onRefresh) onRefresh();
+                return;
+            }
+
+            addLog('Reveal transaction built');
+
+            // Deserialize transaction
+            const { Transaction } = await import('@solana/web3.js');
+            const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            transaction.recentBlockhash = blockhash;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+
+            // Send transaction using wallet adapter
+            addLog('Requesting wallet signature...');
+            const signature = await sendTransaction(transaction, connection, {
+                skipPreflight: true,
+            });
+            addLog(`TX: ${signature.slice(0, 8)}...`);
+
+            // Wait for confirmation
+            addLog('Waiting for confirmation...');
+            await connection.confirmTransaction(signature, 'confirmed');
+
+            // Confirm with backend to read on-chain reward
+            addLog('Reading on-chain result...');
+            const confirmResponse = await fetch(`${backendUrl}/api/program/confirm-reveal`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    ownerWallet: walletAddress,
+                    signature,
+                }),
+            });
+
+            const confirmResult = await confirmResponse.json();
+            if (confirmResult.success && confirmResult.reward) {
+                startBoxTransition(() => {
+                    setOptimisticBox({
+                        box_result: confirmResult.reward?.tier || 1,
+                        payout_amount: confirmResult.reward?.payoutAmount || 0,
+                        randomness_committed: false,
+                        settled_at: new Date().toISOString(),
+                        settle_tx_signature: signature,
+                    });
+                });
+
+                const tierName = getTierName(confirmResult.reward?.tier);
+                const payout = confirmResult.reward?.payoutAmount
+                    ? (confirmResult.reward.payoutAmount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
+                    : '0';
+
+                // Settlement already happened in combined transaction - just confirm with backend
+                if (confirmResult.reward?.tier > 1 && confirmResult.reward?.payoutAmount > 0) {
+                    addLog(`Result: ${tierName}! Claiming ${payout} ${project.payment_token_symbol}...`);
+
+                    // Confirm settle with backend (settlement already done in combined tx)
+                    await fetch(`${backendUrl}/api/program/confirm-settle`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            projectId: project.project_numeric_id,
+                            boxId: box.box_number,
+                            signature,
+                        }),
+                    });
+
+                    endTransaction(true, `${tierName}! Claimed ${payout} ${project.payment_token_symbol}!`);
+                    toast.success(`${tierName}! Claimed ${payout} ${project.payment_token_symbol}!`);
+
+                    // Show win popup for winning results
+                    setWinData({
+                        tier: confirmResult.reward.tier,
+                        amount: payout,
+                        tokenSymbol: project.payment_token_symbol,
+                        multiplier: getPayoutMultiplier(confirmResult.reward.payoutAmount, project.box_price),
+                        projectUrl: getProjectUrl(project.subdomain),
+                        badgeUrl: getBadgeUrl(confirmResult.reward.tier, confirmResult.reward.badgeImageId),
+                    });
+                    setShowWinModal(true);
+                } else {
+                    // No reward or dud - just end the reveal transaction
+                    endTransaction(true, `Result: ${tierName}!`);
+                }
+            } else {
+                endTransaction(true, 'Revealed!');
+            }
+
+            // Refresh boxes list
+            if (onRefresh) onRefresh();
+
+        } catch (err) {
+            console.error('Error revealing box:', err);
+
+            // Check if this is "already processed" error - retry to trigger recovery flow
+            if (err.message?.includes('already been processed') || err.message?.includes('AlreadyProcessed')) {
+                console.log('Transaction already processed - retrying to trigger recovery flow...');
+                addLog('Recovering result...');
+
+                try {
+                    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+                    // Use combined endpoint for recovery as well
+                    const retryResponse = await fetch(`${backendUrl}/api/program/build-reveal-and-settle-tx`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            projectId: project.project_numeric_id,
+                            boxId: box.box_number,
+                            ownerWallet: walletAddress,
+                        }),
+                    });
+
+                    const retryResult = await retryResponse.json();
+
+                    if (retryResult.alreadyRevealed && retryResult.reward) {
+                        startBoxTransition(() => {
+                            setOptimisticBox({
+                                box_result: retryResult.reward.tier,
+                                payout_amount: retryResult.reward.payoutAmount,
+                                randomness_committed: false
+                            });
+                        });
+
+                        const tierName = getTierName(retryResult.reward.tier);
+                        const payout = retryResult.reward.payoutAmount
+                            ? (retryResult.reward.payoutAmount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
+                            : '0';
+                        endTransaction(true, `Recovered: ${tierName}! Payout: ${payout} ${project.payment_token_symbol}`);
+
+                        if (retryResult.reward.tier > 1) {
+                            setWinData({
+                                tier: retryResult.reward.tier,
+                                amount: payout,
+                                tokenSymbol: project.payment_token_symbol,
+                                multiplier: getPayoutMultiplier(retryResult.reward.payoutAmount, project.box_price),
+                                projectUrl: getProjectUrl(project.subdomain),
+                                badgeUrl: getBadgeUrl(retryResult.reward.tier, retryResult.reward.badgeImageId),
+                            });
+                            setShowWinModal(true);
+                        }
+
+                        if (onRefresh) onRefresh();
+                        return;
+                    }
+                } catch (retryErr) {
+                    console.error('Recovery retry failed:', retryErr);
+                }
+            }
+
+            let errorMessage = err.message;
+            if (err.logs) {
+                console.error('Transaction logs:', err.logs);
+                errorMessage = err.logs.join('\n');
+            }
+            if (err.message?.includes('custom program error')) {
+                errorMessage = `Program error: ${err.message}`;
+            }
+
+            // Detect user-initiated errors
+            const errorLower = (err.message || '').toLowerCase();
+            const isUserCausedError =
+                errorLower.includes('user rejected') ||
+                errorLower.includes('rejected the request') ||
+                errorLower.includes('user denied') ||
+                errorLower.includes('user cancelled') ||
+                errorLower.includes('user canceled') ||
+                errorLower.includes('transaction was rejected') ||
+                errorLower.includes('insufficient funds') ||
+                errorLower.includes('insufficient lamports') ||
+                errorLower.includes('insufficient sol') ||
+                errorLower.includes('not enough sol') ||
+                errorLower.includes('expired') ||
+                errorLower.includes('wallet disconnected') ||
+                errorLower.includes('wallet not connected') ||
+                errorLower.includes('no wallet');
+
+            if (isUserCausedError) {
+                if (errorLower.includes('user rejected') || errorLower.includes('rejected the request')) {
+                    errorMessage = 'Transaction cancelled. You can try revealing again.';
+                } else if (errorLower.includes('insufficient')) {
+                    errorMessage = 'Insufficient SOL for transaction fees. Please add SOL and try again.';
+                } else if (errorLower.includes('expired')) {
+                    errorMessage = 'Reveal window expired. Box is now a Dud.';
+                }
+                console.log('User-caused error during reveal (not marking refund-eligible):', err.message);
+            } else {
+                errorMessage = 'System error during reveal. Please try again. If the issue persists and time runs out, a refund will be available.';
+
+                try {
+                    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+                    const markResponse = await fetch(`${backendUrl}/api/program/mark-reveal-failed`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            projectId: project.project_numeric_id,
+                            boxId: box.box_number,
+                            ownerWallet: walletAddress,
+                            failureReason: `system_error: ${err.message?.substring(0, 200)}`,
+                        }),
+                    });
+                    const markResult = await markResponse.json();
+                    if (markResult.success) {
+                        console.log('Box marked as refund-eligible due to system error');
+                        startBoxTransition(() => {
+                            setOptimisticBox({
+                                refund_eligible: true,
+                                randomness_committed: false
+                            });
+                        });
+                        errorMessage = null;
+                    }
+                } catch (markErr) {
+                    console.error('Failed to mark box as refund-eligible:', markErr);
+                }
+            }
+
+            if (errorMessage) {
+                toast.error(errorMessage);
+            }
+            endTransaction(false, errorMessage || 'Reveal failed');
+        } finally {
+            setIsProcessing(false);
+            setProcessingStep(null);
+        }
+    };
+
+    // Handle claim reward (settle)
+    const handleClaim = async () => {
+        if (!publicKey || !sendTransaction) return;
+
+        setIsProcessing(true);
+        setProcessingStep('claim');
+        startTransaction(`Claiming reward from Box #${box.box_number}...`);
+
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+
+            addLog('Building settle transaction...');
+            const buildResponse = await fetch(`${backendUrl}/api/program/build-settle-box-tx`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    ownerWallet: walletAddress,
+                }),
+            });
+
+            const buildResult = await buildResponse.json();
+            if (!buildResult.success) {
+                throw new Error(buildResult.details || buildResult.error);
+            }
+            addLog('Transaction built');
+
+            const { Transaction } = await import('@solana/web3.js');
+            const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            transaction.recentBlockhash = blockhash;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+
+            addLog('Requesting wallet signature...');
+            const signature = await sendTransaction(transaction, connection, {
+                skipPreflight: true,
+            });
+            addLog(`TX: ${signature.slice(0, 8)}...`);
+
+            addLog('Waiting for confirmation...');
+            await connection.confirmTransaction(signature, 'confirmed');
+
+            startBoxTransition(() => {
+                setOptimisticBox({
+                    settled_at: new Date().toISOString(),
+                    settle_tx_signature: signature,
+                });
+            });
+
+            addLog('Confirming with backend...');
+            await fetch(`${backendUrl}/api/program/confirm-settle`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    signature,
+                }),
+            });
+
+            endTransaction(true, `Claimed ${payoutFormatted} ${project.payment_token_symbol}!`);
+            toast.success(`Successfully claimed ${payoutFormatted} ${project.payment_token_symbol}!`);
+            if (onRefresh) onRefresh();
+
+        } catch (err) {
+            console.error('Error claiming reward:', err);
+            let errorMessage = err.message;
+            const errorLower = (err.message || '').toLowerCase();
+            if (errorLower.includes('user rejected') || errorLower.includes('rejected the request')) {
+                errorMessage = 'Transaction cancelled. You can try claiming again.';
+            } else if (errorLower.includes('insufficient')) {
+                errorMessage = 'Insufficient SOL for transaction fees. Please add SOL and try again.';
+            }
+            toast.error(errorMessage);
+            endTransaction(false, errorMessage);
+        } finally {
+            setIsProcessing(false);
+            setProcessingStep(null);
+        }
+    };
+
+    // Handle refund (for boxes that failed due to system issues)
+    const handleRefund = async () => {
+        if (!publicKey || !sendTransaction) return;
+
+        setIsProcessing(true);
+        setProcessingStep('refund');
+        startTransaction(`Refunding Box #${box.box_number}...`);
+
+        try {
+            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+
+            addLog('Building refund transaction...');
+            const buildResponse = await fetch(`${backendUrl}/api/program/build-refund-box-tx`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    ownerWallet: walletAddress,
+                }),
+            });
+
+            const buildResult = await buildResponse.json();
+            if (!buildResult.success) {
+                throw new Error(buildResult.details || buildResult.error);
+            }
+            addLog('Transaction built');
+
+            const { Transaction } = await import('@solana/web3.js');
+            const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            transaction.recentBlockhash = blockhash;
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+
+            addLog('Requesting wallet signature...');
+            const signature = await sendTransaction(transaction, connection, {
+                skipPreflight: true,
+            });
+            addLog(`TX: ${signature.slice(0, 8)}...`);
+
+            addLog('Waiting for confirmation...');
+            await connection.confirmTransaction(signature, 'confirmed');
+
+            addLog('Verifying refund on-chain...');
+            const confirmResponse = await fetch(`${backendUrl}/api/program/confirm-refund`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    ownerWallet: walletAddress,
+                    signature,
+                }),
+            });
+
+            const confirmResult = await confirmResponse.json();
+            if (!confirmResult.success) {
+                throw new Error(confirmResult.error || 'Refund verification failed');
+            }
+
+            startBoxTransition(() => {
+                setOptimisticBox({
+                    box_result: 6,
+                    refund_eligible: false,
+                    payout_amount: buildResult.refundAmount,
+                    refund_tx_signature: signature
+                });
+            });
+
+            const refundFormatted = buildResult.refundAmount
+                ? (buildResult.refundAmount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
+                : payoutFormatted;
+
+            endTransaction(true, `Refunded ${refundFormatted} ${project.payment_token_symbol}!`);
+            toast.success(`Successfully refunded ${refundFormatted} ${project.payment_token_symbol}!`);
+            if (onRefresh) onRefresh();
+
+        } catch (err) {
+            console.error('Error refunding box:', err);
+            let errorMessage = err.message;
+            const errorLower = (err.message || '').toLowerCase();
+            if (errorLower.includes('user rejected') || errorLower.includes('rejected the request')) {
+                errorMessage = 'Transaction cancelled. You can try claiming the refund again.';
+            } else if (errorLower.includes('insufficient')) {
+                errorMessage = 'Insufficient SOL for transaction fees. Please add SOL and try again.';
+            }
+            toast.error(errorMessage);
+            endTransaction(false, errorMessage);
+        } finally {
+            setIsProcessing(false);
+            setProcessingStep(null);
+        }
+    };
+
+    // Unified Open Flow - opens box with commit → wait → reveal → settle in one go
+    const handleUnifiedOpen = async () => {
+        if (!publicKey || !signTransaction || !sendTransaction) {
+            toast.error('Wallet not connected properly');
+            return;
+        }
+
+        setUnifiedFlowActive(true);
+        setUnifiedFlowStep('committing');
+        setUnifiedFlowLog('');
+        setUnifiedFlowError(null);
+        setIsProcessing(true);
+        setProcessingStep('unified');
+
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
+        // Get reveal cooldown from config (default 10s)
+        const revealCooldown = config?.revealBoxCooldown || 10;
+
+        try {
+            // ============================================
+            // STEP 1: COMMIT (Create VRF request, freeze luck)
+            // ============================================
+            setUnifiedFlowLog('Generating randomness');
+
+            const { Keypair, Transaction } = await import('@solana/web3.js');
+            const randomnessKeypair = Keypair.generate();
+            const randomnessPublicKey = randomnessKeypair.publicKey.toString();
+
+            setUnifiedFlowLog('Building transaction');
+            const commitBuildResponse = await fetch(`${backendUrl}/api/program/build-commit-box-tx`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    ownerWallet: walletAddress,
+                    randomnessPublicKey,
+                }),
+            });
+
+            const commitBuildResult = await commitBuildResponse.json();
+            if (!commitBuildResult.success) {
+                throw new Error(commitBuildResult.details || commitBuildResult.error);
+            }
+
+            const commitTx = Transaction.from(Buffer.from(commitBuildResult.transaction, 'base64'));
+
+            setUnifiedFlowLog('Waiting for wallet approval');
+            const walletSignedTx = await signTransaction(commitTx);
+            walletSignedTx.partialSign(randomnessKeypair);
+
+            setUnifiedFlowLog('Sending transaction');
+            const commitSignature = await connection.sendRawTransaction(walletSignedTx.serialize(), {
+                skipPreflight: true,
+                preflightCommitment: 'confirmed',
+            });
+
+            setUnifiedFlowLog('Confirming on-chain');
+            await connection.confirmTransaction(commitSignature, 'confirmed');
+
+            // Confirm with backend (silent)
+            await fetch(`${backendUrl}/api/program/confirm-commit`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    signature: commitSignature,
+                    randomnessAccount: commitBuildResult.randomnessAccount,
+                }),
+            });
+
+            // ============================================
+            // STEP 2: WAIT FOR ORACLE
+            // ============================================
+            setUnifiedFlowStep('waiting');
+
+            // Use cooldown from config + 2s buffer
+            const waitTime = revealCooldown + 2;
+            for (let i = waitTime; i >= 0; i--) {
+                setUnifiedFlowCountdown(i);
+                setUnifiedFlowLog(i > 0 ? 'Oracle generating randomness' : 'Ready to reveal!');
+                if (i > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            }
+
+            // ============================================
+            // STEP 3: REVEAL + SETTLE (Combined in one transaction)
+            // ============================================
+            setUnifiedFlowStep('revealing');
+            setUnifiedFlowLog('Building reveal transaction');
+
+            const revealBuildResponse = await fetch(`${backendUrl}/api/program/build-reveal-and-settle-tx`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    ownerWallet: walletAddress,
+                }),
+            });
+
+            const revealBuildResult = await revealBuildResponse.json();
+
+            if (!revealBuildResult.success) {
+                if (revealBuildResult.refundEligible) {
+                    // Mark as refund-eligible in UI
+                    startBoxTransition(() => {
+                        setOptimisticBox({ refund_eligible: true });
+                    });
+                    setUnifiedFlowError('Oracle unavailable - refund available');
+                    if (onRefresh) onRefresh();
+                    return;
+                }
+                throw new Error(revealBuildResult.details || revealBuildResult.error);
+            }
+
+            // Check if already revealed (edge case)
+            if (revealBuildResult.alreadyRevealed && revealBuildResult.reward) {
+                const reward = revealBuildResult.reward;
+                const multiplier = getPayoutMultiplier(reward.payoutAmount, project.box_price);
+                const payoutFmt = (reward.payoutAmount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2);
+                setWinData({ tier: reward.tier, amount: payoutFmt, tokenSymbol: project.payment_token_symbol, multiplier });
+                setShowWinModal(true);
+                setUnifiedFlowActive(false);
+                setUnifiedFlowStep(null);
+                if (onRefresh) onRefresh();
+                return;
+            }
+
+            const revealTx = Transaction.from(Buffer.from(revealBuildResult.transaction, 'base64'));
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+            revealTx.recentBlockhash = blockhash;
+            revealTx.lastValidBlockHeight = lastValidBlockHeight;
+
+            setUnifiedFlowLog('Waiting for wallet approval');
+            const revealSignature = await sendTransaction(revealTx, connection, { skipPreflight: true });
+
+            setUnifiedFlowLog('Confirming transaction');
+            await connection.confirmTransaction(revealSignature, 'confirmed');
+
+            // Get reward result from backend (reveal is done, settle is done)
+            const confirmRevealResponse = await fetch(`${backendUrl}/api/program/confirm-reveal`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    projectId: project.project_numeric_id,
+                    boxId: box.box_number,
+                    ownerWallet: walletAddress,
+                    signature: revealSignature,
+                }),
+            });
+
+            const confirmRevealResult = await confirmRevealResponse.json();
+            if (!confirmRevealResult.success || !confirmRevealResult.reward) {
+                throw new Error('Failed to read reveal result');
+            }
+
+            const reward = confirmRevealResult.reward;
+            const multiplier = getPayoutMultiplier(reward.payoutAmount, project.box_price);
+            const payoutFmt = (reward.payoutAmount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2);
+
+            // Confirm settle with backend (silent) - settlement already happened in combined tx
+            if (reward.tier > 1 && reward.payoutAmount > 0) {
+                await fetch(`${backendUrl}/api/program/confirm-settle`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        projectId: project.project_numeric_id,
+                        boxId: box.box_number,
+                        signature: revealSignature,
+                    }),
+                });
+            }
+
+            // Update optimistic state and show win modal
+            startBoxTransition(() => {
+                setOptimisticBox({
+                    box_result: reward.tier,
+                    payout_amount: reward.payoutAmount,
+                    settled_at: new Date().toISOString(),
+                });
+            });
+
+            if (reward.tier > 1) {
+                setWinData({ tier: reward.tier, amount: payoutFmt, tokenSymbol: project.payment_token_symbol, multiplier, claimed: true });
+            } else {
+                setWinData({ tier: reward.tier, amount: '0', tokenSymbol: project.payment_token_symbol, multiplier: '0x', claimed: true });
+            }
+            setShowWinModal(true);
+
+            // Refresh box list
+            if (onRefresh) onRefresh();
+
+        } catch (err) {
+            console.error('Unified open flow error:', err);
+
+            const errorLower = (err.message || '').toLowerCase();
+            let errorMessage = err.message;
+
+            if (errorLower.includes('user rejected') || errorLower.includes('rejected the request')) {
+                errorMessage = 'Transaction cancelled';
+            } else if (errorLower.includes('insufficient')) {
+                errorMessage = 'Insufficient SOL for transaction fees';
+            }
+
+            setUnifiedFlowError(errorMessage);
+            toast.error(errorMessage);
+        } finally {
+            setIsProcessing(false);
+            setProcessingStep(null);
+            setUnifiedFlowActive(false);
+            setUnifiedFlowStep(null);
+            setUnifiedFlowLog('');
+        }
+    };
+
+    // Solscan URL helpers
     const getSolscanTxUrl = (signature) => {
         const base = 'https://solscan.io/tx';
         return network === 'mainnet-beta'
@@ -1274,7 +2697,7 @@ function BoxCard({ box, project, onRefresh }) {
             : `${base}/${address}?cluster=${network}`;
     };
 
-    // Build menu items for on-chain proof
+    // Build menu items for on-chain proof (transaction links, not actions)
     const getMenuItems = () => {
         const items = [];
 
@@ -1335,1077 +2758,168 @@ function BoxCard({ box, project, onRefresh }) {
         return items;
     };
 
-    // Get tier name from result
-    // DB values: 0=pending, 1=dud, 2=rebate, 3=break-even, 4=profit, 5=jackpot, 6=refunded
-    const getTierName = (result) => {
-        switch (result) {
-            case 1: return 'Dud';
-            case 2: return 'Rebate';
-            case 3: return 'Break-even';
-            case 4: return 'Profit';
-            case 5: return 'Jackpot';
-            case 6: return 'Refunded';
-            default: return 'Pending';
-        }
-    };
-
-    // Construct badge URL from tier and badge image ID
-    const getBadgeUrl = (tier, badgeImageId) => {
-        if (!badgeImageId || tier < 2) return null;
-
-        const tierFolders = { 2: '0.5x', 3: '1x', 4: '1.5x', 5: '4x' };
-        const tierPrefixes = { 2: 'badge_0-5x_', 3: 'badge_1x_', 4: 'badge_1-5x_', 5: 'badge_4x_' };
-
-        const folder = tierFolders[tier];
-        const prefix = tierPrefixes[tier];
-        if (!folder || !prefix) return null;
-
-        const paddedId = String(badgeImageId).padStart(3, '0');
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-        return `${supabaseUrl}/storage/v1/object/public/badges/${folder}/${prefix}${paddedId}.png`;
-    };
-
-    // Handle commit box (Open Box - step 1)
-    const handleCommit = async () => {
-        if (!publicKey || !signTransaction) return;
-
-        setIsProcessing(true);
-        setProcessingStep('commit');
-        setError(null);
-        startTransaction(`Opening Box #${box.box_number}...`);
-
-        try {
-            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
-
-            // Optimistic update: immediately show as "committed" state (wrapped in transition)
-            startBoxTransition(() => {
-                setOptimisticBox({ randomness_committed: true, committed_at: new Date().toISOString() });
-            });
-
-            // Step 1: Generate randomness keypair CLIENT-SIDE (prevents Phantom security warning)
-            // Phantom flags transactions where backend sends secret keys as potentially malicious
-            addLog('Generating randomness keypair...');
-            const { Keypair } = await import('@solana/web3.js');
-            const randomnessKeypair = Keypair.generate();
-            const randomnessPublicKey = randomnessKeypair.publicKey.toString();
-
-            // Step 2: Build commit transaction with client-generated public key
-            addLog('Building transaction...');
-            const buildResponse = await fetch(`${backendUrl}/api/program/build-commit-box-tx`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    projectId: project.project_numeric_id,
-                    boxId: box.box_number,
-                    ownerWallet: walletAddress,
-                    randomnessPublicKey, // Send client-generated public key
-                }),
-            });
-
-            const buildResult = await buildResponse.json();
-            if (!buildResult.success) {
-                throw new Error(buildResult.details || buildResult.error);
-            }
-            addLog('Transaction built');
-
-            // Step 3: Deserialize transaction
-            const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
-
-            // Step 4: Sign in the correct order to avoid Phantom's Lighthouse security warnings
-            // Per Phantom support: Wallet MUST sign first, then additional signers sign afterward
-            // See: https://docs.phantom.app/solana/signing-a-transaction#signing-and-sending-a-transaction-with-multiple-signers
-            addLog('Requesting wallet signature...');
-
-            // 4a: Phantom wallet signs first
-            const walletSignedTx = await signTransaction(transaction);
-
-            // 4b: Additional signers (randomness keypair) sign afterward
-            walletSignedTx.partialSign(randomnessKeypair);
-
-            // 4c: Send the fully signed transaction
-            const signature = await connection.sendRawTransaction(walletSignedTx.serialize(), {
-                skipPreflight: true,
-                preflightCommitment: 'confirmed',
-            });
-            addLog(`TX: ${signature.slice(0, 8)}...`);
-
-            // Step 5: Wait for confirmation
-            addLog('Waiting for confirmation...');
-            await connection.confirmTransaction(signature, 'confirmed');
-
-            // Optimistic UI update - show committed state immediately
-            startBoxTransition(() => {
-                setOptimisticBox({
-                    randomness_committed: true,
-                    randomness_account: buildResult.randomnessAccount
-                });
-            });
-
-            // Step 7: Confirm with backend
-            addLog('Confirming with backend...');
-            await fetch(`${backendUrl}/api/program/confirm-commit`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    projectId: project.project_numeric_id,
-                    boxId: box.box_number,
-                    signature,
-                    randomnessAccount: buildResult.randomnessAccount,
-                }),
-            });
-
-            endTransaction(true, 'Box opened! Wait 10s then reveal.');
-            // Refresh boxes list to show committed state
-            if (onRefresh) onRefresh();
-
-        } catch (err) {
-            console.error('Error committing box:', err);
-            let errorMessage = err.message;
-            if (err.logs) {
-                console.error('Transaction logs:', err.logs);
-            }
-
-            // Clean up error messages for common user-caused errors
-            const errorLower = (err.message || '').toLowerCase();
-            if (errorLower.includes('user rejected') || errorLower.includes('rejected the request')) {
-                errorMessage = 'Transaction cancelled. You can try opening the box again.';
-            } else if (errorLower.includes('insufficient')) {
-                errorMessage = 'Insufficient SOL for transaction fees. Please add SOL and try again.';
-            }
-
-            setError(errorMessage);
-            endTransaction(false, errorMessage);
-        } finally {
-            setIsProcessing(false);
-            setProcessingStep(null);
-        }
-    };
-
-    // Handle reveal box (step 2 - after commit)
-    const handleReveal = async () => {
-        if (!publicKey || !sendTransaction) return;
-
-        // Check if reveal is too soon (need to wait ~10 seconds for oracle)
-        if (revealCountdown > 0) {
-            setError(`Please wait ${revealCountdown} seconds for oracle...`);
-            return;
-        }
-
-        setIsProcessing(true);
-        setProcessingStep('reveal');
-        setError(null);
-        startTransaction(`Revealing Box #${box.box_number}...`);
-
-        // Note: We don't optimistically update reveal since we don't know the result yet
-        // The result comes from the blockchain/mock, so we wait for the actual response
-
-        try {
-            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
-
-            // Step 1: Build reveal transaction
-            // Start 16-second countdown - this is the oracle timeout duration
-            addLog('Waiting for oracle randomness...');
-            startCountdown(16);
-            const buildResponse = await fetch(`${backendUrl}/api/program/build-reveal-box-tx`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    projectId: project.project_numeric_id,
-                    boxId: box.box_number,
-                    ownerWallet: walletAddress,
-                }),
-            });
-
-            const buildResult = await buildResponse.json();
-
-            if (!buildResult.success) {
-                // Handle specific error codes from backend
-                const errorCode = buildResult.errorCode;
-                console.log('Reveal failed:', { errorCode, refundEligible: buildResult.refundEligible, error: buildResult.error });
-
-                // PRIORITY: If backend marked as refund-eligible, update UI immediately
-                // This takes precedence over other error handling to ensure user can claim refund
-                if (buildResult.refundEligible === true) {
-                    console.log('Box marked as refund-eligible by backend - updating UI immediately');
-                    startBoxTransition(() => {
-                        setOptimisticBox({
-                            refund_eligible: true,
-                            randomness_committed: false  // Clear committed state so box shows refund UI
-                        });
-                    });
-                    // Don't show error message - the refund UI with info tooltip is sufficient
-                    setError(null);
-                    endTransaction(false, 'Refund available');
-                    if (onRefresh) onRefresh();
-                    return;
-                }
-
-                // Check if expired - box becomes a Dud
-                if (buildResult.expired || errorCode === 'REVEAL_EXPIRED') {
-                    // Update UI immediately to show Dud state
-                    startBoxTransition(() => {
-                        setOptimisticBox({
-                            box_result: 1, // Dud tier
-                            payout_amount: 0,
-                            randomness_committed: false,
-                        });
-                    });
-                    endTransaction(false, 'Reveal window expired - box is now a Dud');
-                    if (onRefresh) onRefresh();
-                    return;
-                }
-
-                // Handle oracle unavailability - show retry message
-                // Note: If refundEligible was true, it was already handled above
-                if (errorCode === 'ORACLE_UNAVAILABLE' || errorCode === 'ORACLE_TIMEOUT') {
-                    const timeRemaining = buildResult.timeRemainingSeconds;
-                    let timeMsg = '';
-                    if (timeRemaining && timeRemaining > 0) {
-                        const mins = Math.floor(timeRemaining / 60);
-                        const secs = timeRemaining % 60;
-                        timeMsg = ` You have ${mins}m ${secs}s remaining to retry.`;
-                    }
-                    const retryMsg = buildResult.retryAfterSeconds
-                        ? ` Try again in ${buildResult.retryAfterSeconds} seconds.`
-                        : ' Please try again shortly.';
-
-                    const fullErrorMsg = buildResult.error + timeMsg + retryMsg;
-                    setError(fullErrorMsg);
-                    endTransaction(false, 'Oracle temporarily unavailable');
-                    return;
-                }
-
-                // Handle insufficient funds
-                if (errorCode === 'INSUFFICIENT_FUNDS') {
-                    setError(buildResult.error);
-                    endTransaction(false, 'Insufficient SOL for fees');
-                    return;
-                }
-
-                throw new Error(buildResult.details || buildResult.error);
-            }
-
-            // Check if result was recovered from on-chain (already revealed)
-            if (buildResult.alreadyRevealed && buildResult.reward) {
-                addLog('Result recovered from on-chain!');
-
-                // Update UI with recovered result
-                startBoxTransition(() => {
-                    setOptimisticBox({
-                        box_result: buildResult.reward.tier,
-                        payout_amount: buildResult.reward.payoutAmount,
-                        randomness_committed: false
-                    });
-                });
-                setRevealResult(buildResult.reward);
-
-                const tierName = getTierName(buildResult.reward.tier);
-                const payout = buildResult.reward.payoutAmount
-                    ? (buildResult.reward.payoutAmount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
-                    : '0';
-                endTransaction(true, `Recovered: ${tierName}! Payout: ${payout} ${project.payment_token_symbol}`);
-
-                // Show win popup for winning results (tier > 1, not dud)
-                if (buildResult.reward.tier > 1) {
-                    setWinData({
-                        tier: buildResult.reward.tier,
-                        amount: payout,
-                        tokenSymbol: project.payment_token_symbol,
-                        projectUrl: getProjectUrl(project.subdomain),
-                        badgeUrl: getBadgeUrl(buildResult.reward.tier, buildResult.reward.badgeImageId),
-                    });
-                    setShowWinModal(true);
-                }
-
-                // Refresh boxes list
-                if (onRefresh) onRefresh();
-                return;
-            }
-
-            addLog('Reveal transaction built');
-
-            // Step 2: Deserialize transaction
-            const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
-            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-            transaction.recentBlockhash = blockhash;
-            transaction.lastValidBlockHeight = lastValidBlockHeight;
-
-            // Step 3: Send transaction using wallet adapter
-            addLog('Requesting wallet signature...');
-            const signature = await sendTransaction(transaction, connection, {
-                skipPreflight: true,
-            });
-            addLog(`TX: ${signature.slice(0, 8)}...`);
-
-            // Step 4: Wait for confirmation
-            addLog('Waiting for confirmation...');
-            await connection.confirmTransaction(signature, 'confirmed');
-
-            // Step 5: Confirm with backend to read on-chain reward
-            addLog('Reading on-chain result...');
-            const confirmResponse = await fetch(`${backendUrl}/api/program/confirm-reveal`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    projectId: project.project_numeric_id,
-                    boxId: box.box_number,
-                    ownerWallet: walletAddress,
-                    signature,
-                }),
-            });
-
-            const confirmResult = await confirmResponse.json();
-            if (confirmResult.success && confirmResult.reward) {
-                // Optimistic update with reveal result (wrapped in transition)
-                startBoxTransition(() => {
-                    setOptimisticBox({
-                        box_result: confirmResult.reward?.tier || 1,
-                        payout_amount: confirmResult.reward?.payoutAmount || 0,
-                        randomness_committed: false
-                    });
-                });
-                setRevealResult(confirmResult.reward);
-
-                const tierName = getTierName(confirmResult.reward?.tier);
-                const payout = confirmResult.reward?.payoutAmount
-                    ? (confirmResult.reward.payoutAmount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
-                    : '0';
-
-                // Auto-settle: If there's a reward (tier > 1), automatically claim it
-                if (confirmResult.reward?.tier > 1 && confirmResult.reward?.payoutAmount > 0) {
-                    addLog(`Result: ${tierName}! Auto-claiming ${payout} ${project.payment_token_symbol}...`);
-
-                    // Continue with settle - don't end transaction yet
-                    try {
-                        // Build settle transaction
-                        addLog('Building claim transaction...');
-                        const settleResponse = await fetch(`${backendUrl}/api/program/build-settle-box-tx`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                projectId: project.project_numeric_id,
-                                boxId: box.box_number,
-                                ownerWallet: walletAddress,
-                            }),
-                        });
-
-                        const settleResult = await settleResponse.json();
-                        if (!settleResult.success) {
-                            throw new Error(settleResult.details || settleResult.error);
-                        }
-
-                        // Deserialize and send settle transaction
-                        const settleTransaction = Transaction.from(Buffer.from(settleResult.transaction, 'base64'));
-                        const { blockhash: settleBh, lastValidBlockHeight: settleLvbh } = await connection.getLatestBlockhash('confirmed');
-                        settleTransaction.recentBlockhash = settleBh;
-                        settleTransaction.lastValidBlockHeight = settleLvbh;
-
-                        addLog('Requesting wallet signature...');
-                        const settleSignature = await sendTransaction(settleTransaction, connection, {
-                            skipPreflight: true,
-                        });
-                        addLog(`Claim TX: ${settleSignature.slice(0, 8)}...`);
-
-                        addLog('Waiting for confirmation...');
-                        await connection.confirmTransaction(settleSignature, 'confirmed');
-
-                        // Update optimistic state with settled
-                        startBoxTransition(() => {
-                            setOptimisticBox({
-                                settled_at: new Date().toISOString(),
-                                settle_tx_signature: settleSignature,
-                            });
-                        });
-
-                        // Confirm settle with backend
-                        await fetch(`${backendUrl}/api/program/confirm-settle`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                projectId: project.project_numeric_id,
-                                boxId: box.box_number,
-                                signature: settleSignature,
-                            }),
-                        });
-
-                        endTransaction(true, `${tierName}! Claimed ${payout} ${project.payment_token_symbol}!`);
-                        toast.success(`${tierName}! Claimed ${payout} ${project.payment_token_symbol}!`);
-                    } catch (settleErr) {
-                        // Settle failed but reveal succeeded - show the result and let user manually claim
-                        console.error('Auto-settle failed:', settleErr);
-                        const errorLower = (settleErr.message || '').toLowerCase();
-                        if (errorLower.includes('user rejected') || errorLower.includes('rejected the request')) {
-                            endTransaction(true, `${tierName}! Click Claim to collect ${payout} ${project.payment_token_symbol}`);
-                        } else {
-                            endTransaction(true, `${tierName}! Auto-claim failed - click Claim button to collect`);
-                        }
-                    }
-
-                    // Show win popup for winning results
-                    setWinData({
-                        tier: confirmResult.reward.tier,
-                        amount: payout,
-                        tokenSymbol: project.payment_token_symbol,
-                        projectUrl: getProjectUrl(project.subdomain),
-                        badgeUrl: getBadgeUrl(confirmResult.reward.tier, confirmResult.reward.badgeImageId),
-                    });
-                    setShowWinModal(true);
-                } else {
-                    // No reward or dud - just end the reveal transaction
-                    endTransaction(true, `Result: ${tierName}!`);
-                }
-            } else {
-                endTransaction(true, 'Revealed!');
-            }
-
-            // Refresh boxes list
-            if (onRefresh) onRefresh();
-
-        } catch (err) {
-            console.error('Error revealing box:', err);
-
-            // Check if this is "already processed" error - means the reveal happened but we missed it
-            // Retry the reveal call to trigger backend's recovery flow
-            if (err.message?.includes('already been processed') || err.message?.includes('AlreadyProcessed')) {
-                console.log('Transaction already processed - retrying to trigger recovery flow...');
-                addLog('Recovering result...');
-
-                try {
-                    const retryResponse = await fetch(`${backendUrl}/api/program/build-reveal-box-tx`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            projectId: project.project_numeric_id,
-                            boxId: box.box_number,
-                            ownerWallet: walletAddress,
-                        }),
-                    });
-
-                    const retryResult = await retryResponse.json();
-
-                    if (retryResult.alreadyRevealed && retryResult.reward) {
-                        // Recovery succeeded!
-                        startBoxTransition(() => {
-                            setOptimisticBox({
-                                box_result: retryResult.reward.tier,
-                                payout_amount: retryResult.reward.payoutAmount,
-                                randomness_committed: false
-                            });
-                        });
-                        setRevealResult(retryResult.reward);
-
-                        const tierName = getTierName(retryResult.reward.tier);
-                        const payout = retryResult.reward.payoutAmount
-                            ? (retryResult.reward.payoutAmount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
-                            : '0';
-                        endTransaction(true, `Recovered: ${tierName}! Payout: ${payout} ${project.payment_token_symbol}`);
-
-                        // Show win popup for winning results (tier > 1, not dud)
-                        if (retryResult.reward.tier > 1) {
-                            setWinData({
-                                tier: retryResult.reward.tier,
-                                amount: payout,
-                                tokenSymbol: project.payment_token_symbol,
-                                projectUrl: getProjectUrl(project.subdomain),
-                                badgeUrl: getBadgeUrl(retryResult.reward.tier, retryResult.reward.badgeImageId),
-                            });
-                            setShowWinModal(true);
-                        }
-
-                        if (onRefresh) onRefresh();
-                        return;
-                    }
-                } catch (retryErr) {
-                    console.error('Recovery retry failed:', retryErr);
-                }
-            }
-
-            let errorMessage = err.message;
-            if (err.logs) {
-                console.error('Transaction logs:', err.logs);
-                errorMessage = err.logs.join('\n');
-            }
-            if (err.message?.includes('custom program error')) {
-                errorMessage = `Program error: ${err.message}`;
-            }
-
-            // Detect user-initiated errors that should NOT trigger refund eligibility
-            // These are errors caused by user action, not system/oracle failures
-            const errorLower = (err.message || '').toLowerCase();
-            const isUserCausedError =
-                // User rejected the transaction in their wallet
-                errorLower.includes('user rejected') ||
-                errorLower.includes('rejected the request') ||
-                errorLower.includes('user denied') ||
-                errorLower.includes('user cancelled') ||
-                errorLower.includes('user canceled') ||
-                errorLower.includes('transaction was rejected') ||
-                // Insufficient funds for transaction fees (user's responsibility)
-                errorLower.includes('insufficient funds') ||
-                errorLower.includes('insufficient lamports') ||
-                errorLower.includes('insufficient sol') ||
-                errorLower.includes('not enough sol') ||
-                // User let the reveal window expire
-                errorLower.includes('expired') ||
-                // Wallet disconnected or not connected
-                errorLower.includes('wallet disconnected') ||
-                errorLower.includes('wallet not connected') ||
-                errorLower.includes('no wallet');
-
-            // For user-caused errors, just show the error and let them retry
-            // Don't mark as refund-eligible - they can simply try again
-            if (isUserCausedError) {
-                // Clean up error message for common cases
-                if (errorLower.includes('user rejected') || errorLower.includes('rejected the request')) {
-                    errorMessage = 'Transaction cancelled. You can try revealing again.';
-                } else if (errorLower.includes('insufficient')) {
-                    errorMessage = 'Insufficient SOL for transaction fees. Please add SOL and try again.';
-                } else if (errorLower.includes('expired')) {
-                    errorMessage = 'Reveal window expired. Box is now a Dud.';
-                }
-                // Don't mark as refund-eligible - user can retry
-                console.log('User-caused error during reveal (not marking refund-eligible):', err.message);
-            } else {
-                // True system error (oracle failure, network issue, etc.)
-                // These should allow retry, and if time runs out, become refund-eligible
-                errorMessage = 'System error during reveal. Please try again. If the issue persists and time runs out, a refund will be available.';
-
-                // Only mark box as refund-eligible for actual system errors
-                // NOT for user-caused errors like rejection or insufficient funds
-                try {
-                    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
-                    const markResponse = await fetch(`${backendUrl}/api/program/mark-reveal-failed`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            projectId: project.project_numeric_id,
-                            boxId: box.box_number,
-                            ownerWallet: walletAddress,
-                            failureReason: `system_error: ${err.message?.substring(0, 200)}`,
-                        }),
-                    });
-                    const markResult = await markResponse.json();
-                    if (markResult.success) {
-                        console.log('Box marked as refund-eligible due to system error');
-                        // Update optimistic state to immediately show refund UI
-                        startBoxTransition(() => {
-                            setOptimisticBox({
-                                refund_eligible: true,
-                                randomness_committed: false  // Clear committed state so box shows refund UI
-                            });
-                        });
-                        // Don't show error - the refund UI with info tooltip is sufficient
-                        errorMessage = null;
-                    }
-                } catch (markErr) {
-                    console.error('Failed to mark box as refund-eligible:', markErr);
-                }
-            }
-
-            setError(errorMessage);
-            setRevealResult(null);
-            endTransaction(false, errorMessage);
-        } finally {
-            setIsProcessing(false);
-            setProcessingStep(null);
-        }
-    };
-
-    // Handle claim reward (settle)
-    const handleClaim = async () => {
-        if (!publicKey || !sendTransaction) return;
-
-        setIsProcessing(true);
-        setProcessingStep('claim');
-        setError(null);
-
-        startTransaction(`Claiming reward from Box #${box.box_number}...`);
-
-        try {
-            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
-
-            // Step 1: Build settle transaction
-            addLog('Building settle transaction...');
-            const buildResponse = await fetch(`${backendUrl}/api/program/build-settle-box-tx`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    projectId: project.project_numeric_id,
-                    boxId: box.box_number,
-                    ownerWallet: walletAddress,
-                }),
-            });
-
-            const buildResult = await buildResponse.json();
-
-            if (!buildResult.success) {
-                throw new Error(buildResult.details || buildResult.error);
-            }
-            addLog('Transaction built');
-
-            // Step 2: Deserialize transaction and update blockhash
-            const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
-            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-            transaction.recentBlockhash = blockhash;
-            transaction.lastValidBlockHeight = lastValidBlockHeight;
-
-            // Step 3: Send transaction using wallet adapter (handles signing internally)
-            addLog('Requesting wallet signature...');
-            const signature = await sendTransaction(transaction, connection, {
-                skipPreflight: true,
-            });
-            addLog(`TX: ${signature.slice(0, 8)}...`);
-
-            // Step 4: Wait for confirmation
-            addLog('Waiting for confirmation...');
-            await connection.confirmTransaction(signature, 'confirmed');
-
-            // Optimistic UI update - show settled state immediately
-            startBoxTransition(() => {
-                setOptimisticBox({
-                    settled_at: new Date().toISOString(),
-                    settle_tx_signature: signature,
-                });
-            });
-
-            // Step 5: Confirm with backend
-            addLog('Confirming with backend...');
-            await fetch(`${backendUrl}/api/program/confirm-settle`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    projectId: project.project_numeric_id,
-                    boxId: box.box_number,
-                    signature,
-                }),
-            });
-
-            // Show success and refresh
-            endTransaction(true, `Claimed ${payoutFormatted} ${project.payment_token_symbol}!`);
-            toast.success(`Successfully claimed ${payoutFormatted} ${project.payment_token_symbol}!`);
-            if (onRefresh) onRefresh();
-
-        } catch (err) {
-            console.error('Error claiming reward:', err);
-            // Extract more detailed error info if available
-            let errorMessage = err.message;
-            if (err.logs) {
-                console.error('Transaction logs:', err.logs);
-                errorMessage = err.logs.join('\n');
-            }
-            if (err.message?.includes('custom program error')) {
-                errorMessage = `Program error: ${err.message}`;
-            }
-
-            // Clean up error messages for common user-caused errors
-            const errorLower = (err.message || '').toLowerCase();
-            if (errorLower.includes('user rejected') || errorLower.includes('rejected the request')) {
-                errorMessage = 'Transaction cancelled. You can try claiming again.';
-            } else if (errorLower.includes('insufficient')) {
-                errorMessage = 'Insufficient SOL for transaction fees. Please add SOL and try again.';
-            }
-
-            setError(errorMessage);
-            endTransaction(false, errorMessage);
-        } finally {
-            setIsProcessing(false);
-            setProcessingStep(null);
-        }
-    };
-
-    // Handle refund (for boxes that failed due to system issues)
-    const handleRefund = async () => {
-        if (!publicKey || !sendTransaction) return;
-
-        setIsProcessing(true);
-        setProcessingStep('refund');
-        setError(null);
-
-        startTransaction(`Refunding Box #${box.box_number}...`);
-
-        try {
-            const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
-
-            // Step 1: Build refund transaction
-            addLog('Building refund transaction...');
-            const buildResponse = await fetch(`${backendUrl}/api/program/build-refund-box-tx`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    projectId: project.project_numeric_id,
-                    boxId: box.box_number,
-                    ownerWallet: walletAddress,
-                }),
-            });
-
-            const buildResult = await buildResponse.json();
-
-            if (!buildResult.success) {
-                throw new Error(buildResult.details || buildResult.error);
-            }
-            addLog('Transaction built');
-
-            // Step 2: Deserialize transaction and update blockhash
-            const transaction = Transaction.from(Buffer.from(buildResult.transaction, 'base64'));
-            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-            transaction.recentBlockhash = blockhash;
-            transaction.lastValidBlockHeight = lastValidBlockHeight;
-
-            // Step 3: Send transaction using wallet adapter
-            addLog('Requesting wallet signature...');
-            const signature = await sendTransaction(transaction, connection, {
-                skipPreflight: true,
-            });
-            addLog(`TX: ${signature.slice(0, 8)}...`);
-
-            // Step 4: Wait for confirmation
-            addLog('Waiting for confirmation...');
-            await connection.confirmTransaction(signature, 'confirmed');
-
-            // Step 5: Verify on-chain state with backend (BEFORE optimistic update)
-            // This ensures the refund actually happened before showing success
-            addLog('Verifying refund on-chain...');
-            const confirmResponse = await fetch(`${backendUrl}/api/program/confirm-refund`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    projectId: project.project_numeric_id,
-                    boxId: box.box_number,
-                    ownerWallet: walletAddress,
-                    signature,
-                }),
-            });
-
-            const confirmResult = await confirmResponse.json();
-
-            if (!confirmResult.success) {
-                // On-chain verification failed - refund didn't actually happen
-                console.error('Refund verification failed:', confirmResult.error);
-                throw new Error(confirmResult.error || 'Refund verification failed - the transaction may not have executed correctly');
-            }
-
-            // NOW apply optimistic update after on-chain verification succeeds
-            startBoxTransition(() => {
-                setOptimisticBox({
-                    box_result: 6,
-                    refund_eligible: false,
-                    payout_amount: buildResult.refundAmount,
-                    refund_tx_signature: signature
-                });
-            });
-
-            const refundFormatted = buildResult.refundAmount
-                ? (buildResult.refundAmount / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)
-                : payoutFormatted;
-
-            endTransaction(true, `Refunded ${refundFormatted} ${project.payment_token_symbol}!`);
-            toast.success(`Successfully refunded ${refundFormatted} ${project.payment_token_symbol}!`);
-            if (onRefresh) onRefresh();
-
-        } catch (err) {
-            console.error('Error refunding box:', err);
-            let errorMessage = err.message;
-            if (err.logs) {
-                console.error('Transaction logs:', err.logs);
-            }
-
-            // Clean up error messages for common user-caused errors
-            const errorLower = (err.message || '').toLowerCase();
-            if (errorLower.includes('user rejected') || errorLower.includes('rejected the request')) {
-                errorMessage = 'Transaction cancelled. You can try claiming the refund again.';
-            } else if (errorLower.includes('insufficient')) {
-                errorMessage = 'Insufficient SOL for transaction fees. Please add SOL and try again.';
-            }
-
-            setError(errorMessage);
-            endTransaction(false, errorMessage);
-        } finally {
-            setIsProcessing(false);
-            setProcessingStep(null);
-        }
-    };
-
-    // Get box status text (no emojis)
-    const getBoxStatusText = () => {
-        if (isProcessing) return 'Processing';
-        if (isRefunded) return 'Refunded';
-        if (isRefundEligible) return 'Refund Available';
-        if (isExpired) return 'Expired';
-        if (isCommitted) return 'Opened';
-        if (isPending) return 'Sealed';
-        if (isJackpot) return 'JACKPOT';
-        if (box.box_result === 4) return 'Profit';
-        if (hasReward) return 'Winner';
-        return 'Dud';
-    };
-
-    // Get badge variant for tier
-    const getTierBadgeVariant = () => {
-        if (isJackpot) return 'warning';
-        if (hasReward) return 'success';
-        return 'default';
-    };
-
     const menuItems = getMenuItems();
 
-    // Calculate reveal button progress (for the loading bar effect) - 10 second delay
+    // Calculate progress for loading bars (0-100)
+    const openBoxCooldown = config?.openBoxCooldown || 30;
+    const commitProgress = commitCooldown !== null && commitCooldown > 0
+        ? ((openBoxCooldown - commitCooldown) / openBoxCooldown) * 100
+        : 100;
     const revealProgress = revealCountdown !== null && revealCountdown > 0
         ? ((10 - revealCountdown) / 10) * 100
         : 100;
 
-    // Show skeleton during processing for a cleaner UX
-    if (isProcessing) {
-        return <BoxCardSkeleton />;
-    }
+    // Simplified action button - use min-width to prevent layout shifts
+    const getActionButton = () => {
+        // Show detailed progress during unified open flow
+        if (unifiedFlowActive) {
+            let buttonText = 'Opening...';
+            if (unifiedFlowStep === 'committing') buttonText = 'Opening...';
+            else if (unifiedFlowStep === 'waiting') buttonText = unifiedFlowCountdown > 0 ? `Wait ${unifiedFlowCountdown}s` : 'Ready!';
+            else if (unifiedFlowStep === 'revealing') buttonText = 'Revealing...';
+
+            return (
+                <span className="min-w-[100px] text-center px-6 py-1.5 text-xs font-medium uppercase tracking-wider bg-degen-black text-degen-white border border-degen-black animate-pulse">
+                    {buttonText}
+                </span>
+            );
+        }
+
+        if (isProcessing) {
+            return (
+                <span className="min-w-[100px] text-center px-6 py-1.5 text-xs font-medium uppercase tracking-wider bg-degen-container text-degen-text-muted border border-degen-black">
+                    Processing...
+                </span>
+            );
+        }
+
+        if (isPending) {
+            const disabled = commitCooldown !== null && commitCooldown > 0;
+            return (
+                <button
+                    onClick={handleUnifiedOpen}
+                    disabled={disabled || unifiedFlowActive}
+                    className={`min-w-[100px] text-center px-6 py-1.5 text-xs font-medium uppercase tracking-wider border border-degen-black transition-colors ${disabled || unifiedFlowActive ? 'bg-degen-container text-degen-text-muted cursor-not-allowed' : 'bg-degen-green text-black hover:opacity-80 cursor-pointer'}`}
+                >
+                    {disabled ? `Open in ${commitCooldown}s` : 'Open'}
+                </button>
+            );
+        }
+
+        if (isCommitted && !isExpired && !isRefundEligible) {
+            const disabled = revealCountdown !== null && revealCountdown > 0;
+            return (
+                <button
+                    onClick={handleReveal}
+                    disabled={disabled}
+                    className={`min-w-[100px] text-center px-6 py-1.5 text-xs font-medium uppercase tracking-wider border border-degen-black transition-colors ${disabled ? 'bg-degen-container text-degen-text-muted cursor-not-allowed' : 'bg-degen-green text-black hover:opacity-80 cursor-pointer'}`}
+                >
+                    {disabled ? `Reveal in ${revealCountdown}s` : 'Reveal'}
+                </button>
+            );
+        }
+
+        if (hasReward && !isSettled && !isRefunded) {
+            return (
+                <button
+                    onClick={handleClaim}
+                    className="min-w-[100px] text-center px-6 py-1.5 text-xs font-medium uppercase tracking-wider bg-degen-green text-black border border-degen-black hover:opacity-80 cursor-pointer transition-colors"
+                >
+                    Claim
+                </button>
+            );
+        }
+
+        if (isRefundEligible) {
+            const disabled = refundCooldown !== null && refundCooldown > 0;
+            return (
+                <button
+                    onClick={handleRefund}
+                    disabled={disabled}
+                    className={`min-w-[100px] text-center px-6 py-1.5 text-xs font-medium uppercase tracking-wider border border-degen-black transition-colors ${disabled ? 'bg-degen-container text-degen-text-muted cursor-not-allowed' : 'bg-degen-green text-black hover:opacity-80 cursor-pointer'}`}
+                >
+                    {disabled ? `Refund in ${refundCooldown}s` : 'Claim Refund'}
+                </button>
+            );
+        }
+
+        if (isExpired) {
+            return <span className="text-degen-text-muted text-xs">Expired</span>;
+        }
+
+        return <span className="text-degen-text-muted text-xs">-</span>;
+    };
+
+    // Determine if we should show a loading bar
+    const showCommitLoadingBar = isPending && commitCooldown !== null && commitCooldown > 0;
+    const showRevealLoadingBar = isCommitted && !isExpired && !isRefundEligible && revealCountdown !== null && revealCountdown > 0;
+    const showRefundLoadingBar = isRefundEligible && refundCooldown !== null && refundCooldown > 0;
+
+    // Calculate refund progress (0-100)
+    const refundProgress = refundCooldown !== null && refundCooldown > 0
+        ? ((REFUND_GRACE_PERIOD_SECONDS - refundCooldown) / REFUND_GRACE_PERIOD_SECONDS) * 100
+        : 100;
 
     return (
-        <div
-            className={`
-                relative p-4 text-center transition-all duration-100
-                border
-                ${isPending ? 'bg-degen-yellow/10 border-degen-yellow hover:bg-degen-yellow/20' : ''}
-                ${isCommitted && !isExpired && !isRefundEligible ? 'bg-degen-yellow/10 border-degen-yellow hover:bg-degen-yellow/20' : ''}
-                ${isRefundEligible ? 'bg-degen-container border-degen-black' : ''}
-                ${isRefunded ? 'bg-degen-container border-degen-black' : ''}
-                ${isExpired && !isRefundEligible ? 'bg-degen-feature/10 border-degen-feature' : ''}
-                ${isJackpot ? 'bg-degen-yellow/20 border-degen-yellow' : ''}
-                ${hasReward && !isJackpot && !isRefunded ? 'bg-degen-green/10 border-degen-green hover:bg-degen-green/20' : ''}
-                ${isRevealed && !hasReward && !isRefunded && !isRefundEligible ? 'bg-degen-container border-degen-black hover:bg-degen-white' : ''}
-            `}
-        >
-            {/* Top left: Luck display for pending boxes */}
-            {isPending && (
-                <div className="absolute top-1 left-1 group">
-                    <div className="text-xs font-bold text-degen-black bg-transparent px-1.5 py-0.5 cursor-default flex items-center gap-1">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                            <path d="M17.28 9.05a5.5 5.5 0 1 0-10.56 0A5.5 5.5 0 1 0 12 17.66a5.5 5.5 0 1 0 5.28-8.6Z"/>
-                            <path d="M11 17.66h2v5h-2z"/>
-                        </svg>
-                        {currentLuck}
+        <div className="relative bg-degen-container border border-degen-black/20 degen-row-hover transition-colors duration-150">
+            {/* Main row content */}
+            <div className="flex items-center gap-3 p-3">
+                {/* State indicator square */}
+                <div className={`w-8 h-8 flex-shrink-0 ${stateColor}`} />
+
+                {/* Box info */}
+                <div className="flex-1 min-w-0">
+                    <p className="text-degen-black font-medium text-sm">
+                        Box #{box.box_number}
+                    </p>
+                    <p className="text-degen-text-muted text-xs">
+                        {getStatusText()}
+                        {hasReward && !isRefunded && ` • ${payoutFormatted} ${project.payment_token_symbol}`}
+                    </p>
+                </div>
+
+                {/* Spacer */}
+                <div className="flex-1" />
+
+                {/* Pie clock for committed boxes (expiry timer) - hide if refund-eligible */}
+                {isCommitted && !isExpired && !isRefundEligible && expiryCountdown !== null && expiryCountdown > 0 && (
+                    <div className="flex-shrink-0 text-degen-text-muted">
+                        <ExpiryPieClock expiryCountdown={expiryCountdown} formatExpiryTime={formatExpiryTime} />
                     </div>
-                    {/* Tooltip on hover */}
-                    <div className="absolute left-0 top-full mt-1 z-20 w-32 bg-degen-white border border-degen-black shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                        <div className="px-2 py-1.5 text-xs text-degen-black">
-                            <strong>Current Luck</strong>
-                            <div className="mt-0.5">{currentLuck} / {config?.maxLuck || 60}</div>
-                            <div className="text-degen-text-muted mt-1">Hold longer for better odds!</div>
+                )}
+
+                {/* Action button */}
+                <div className="flex-shrink-0">
+                    {getActionButton()}
+                </div>
+
+                {/* Luck score (for pending and committed boxes) - hide if refund-eligible */}
+                {(isPending || isCommitted) && !isRefundEligible && (
+                    <DegenTooltip content={`${currentLuck !== null ? currentLuck : '-'}/${config?.maxLuck || 60}`} position="top">
+                        <div className="flex items-center gap-1 text-degen-text-muted flex-shrink-0 cursor-help">
+                            <LuckIcon className="w-3 h-3" />
+                            <span className="text-xs font-medium w-5 text-center">{currentLuck !== null ? currentLuck : '-'}</span>
                         </div>
+                    </DegenTooltip>
+                )}
+
+                {/* Menu dropdown - show whenever there are menu items */}
+                {menuItems.length > 0 && (
+                    <div className="flex-shrink-0">
+                        <CardDropdown items={menuItems} />
                     </div>
+                )}
+            </div>
+
+            {/* Bottom loading bar for cooldowns */}
+            {(showCommitLoadingBar || showRevealLoadingBar || showRefundLoadingBar) && (
+                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-degen-black/10">
+                    <div
+                        className="h-full bg-degen-green transition-all duration-1000 ease-linear"
+                        style={{ width: `${showCommitLoadingBar ? commitProgress : showRevealLoadingBar ? revealProgress : refundProgress}%` }}
+                    />
                 </div>
             )}
-
-            {/* Top right icons: Pie clock (for committed, not refund-eligible) + Proof Menu Dropdown */}
-            <div className="absolute top-1 right-1 flex items-center gap-1">
-                {/* Pie clock for committed boxes - hide if refund-eligible */}
-                {isCommitted && !isExpired && !isRefundEligible && expiryCountdown !== null && expiryCountdown > 0 && (
-                    <ExpiryPieClock expiryCountdown={expiryCountdown} formatExpiryTime={formatExpiryTime} />
-                )}
-                {/* Proof Menu Dropdown */}
-                {menuItems.length > 0 && (
-                    <CardDropdown items={menuItems} />
-                )}
-            </div>
-
-            {/* Box Status Text (no emojis) */}
-            <div className="text-sm font-medium text-degen-text-muted mb-1 mt-2">
-                {getBoxStatusText()}
-            </div>
-            <p className="text-degen-black font-medium">Box #{box.box_number}</p>
-
-            {/* Status / Result - Fixed height container */}
-            <div className="mt-2 h-[42px] flex flex-col items-center justify-center">
-                {isPending ? (
-                    <DegenBadge variant="warning" size="sm">
-                        Ready to Open
-                    </DegenBadge>
-                ) : isRefundEligible ? (
-                    <div className="flex items-center justify-center gap-1">
-                        <DegenBadge variant="default" size="sm">
-                            Refund Available
-                        </DegenBadge>
-                        <QuestionMarkTooltip variant="info">
-                            <strong>System Error</strong><br />
-                            This box failed to reveal due to an oracle or network issue. You can claim a full refund of the box price.
-                            {box.reveal_failure_reason && (
-                                <><br /><br /><em>Reason: {box.reveal_failure_reason}</em></>
-                            )}
-                        </QuestionMarkTooltip>
-                    </div>
-                ) : isRefunded ? (
-                    <>
-                        <DegenBadge variant="default" size="sm">
-                            Refunded
-                        </DegenBadge>
-                        {box.payout_amount > 0 && (
-                            <p className="text-degen-text-muted text-xs mt-1 font-medium">
-                                {payoutFormatted} {project.payment_token_symbol}
-                            </p>
-                        )}
-                    </>
-                ) : isExpired ? (
-                    <div className="flex items-center justify-center gap-1">
-                        <DegenBadge variant="danger" size="sm">
-                            Expired - Dud
-                        </DegenBadge>
-                        <QuestionMarkTooltip variant="danger">
-                            <strong>Reveal Window Expired</strong><br />
-                            This box was opened but not revealed within the 1-hour time limit. Boxes must be revealed promptly after opening to claim rewards.
-                        </QuestionMarkTooltip>
-                    </div>
-                ) : isCommitted ? (
-                    <DegenBadge variant="warning" size="sm">
-                        Awaiting Reveal
-                    </DegenBadge>
-                ) : (
-                    <>
-                        <DegenBadge variant={getTierBadgeVariant()} size="sm">
-                            {getTierName(box.box_result)}
-                        </DegenBadge>
-                        {hasReward && !isRefunded && (
-                            <p className="text-degen-black text-xs mt-1 font-medium">
-                                {payoutFormatted} {project.payment_token_symbol}
-                            </p>
-                        )}
-                    </>
-                )}
-            </div>
-
-            {/* Error Display - Fixed height container (shows content or empty space) */}
-            {/*<div className="h-[12px] mt-2 flex items-center justify-center">
-                {error ? (
-                    <div className="bg-red-50 border border-red-200 rounded px-2 py-1.5 w-full">
-                        <p className="text-red-700 text-xs font-medium">
-                            {error.includes('oracle') || error.includes('Oracle')
-                                ? 'Oracle Service Issue'
-                                : error.includes('Insufficient')
-                                    ? 'Insufficient Funds'
-                                    : 'Error'}
-                        </p>
-                        <p className="text-red-600 text-xs mt-0.5 break-words line-clamp-1">
-                            {error.length > 50 ? error.slice(0, 47) + '...' : error}
-                        </p>
-                    </div>
-                ) : null}
-            </div>*/}
-            {/* Empty spacer */}
-            <div className="h-[24px] mt-2 flex items-center justify-center" />
-
-
-            {/* Action Button - Fixed height container */}
-            <div className="h-[36px] flex items-center justify-center">
-                {config?.paused ? (
-                    // Platform is paused - show disabled message
-                    <span className="text-degen-text-muted text-xs font-medium">Platform Paused</span>
-                ) : isPending ? (
-                    // Step 1: Open Box (commit randomness) - with cooldown after purchase
-                    <button
-                        onClick={() => setShowOpenConfirm(true)}
-                        disabled={isProcessing || (commitCooldown !== null && commitCooldown > 0)}
-                        className={`
-                            relative w-full h-[36px] text-sm font-medium uppercase tracking-wider
-                            border border-degen-black overflow-hidden
-                            transition-all duration-100
-                            ${commitCooldown > 0 ? 'bg-degen-white cursor-not-allowed' : 'bg-degen-black text-degen-white hover:bg-degen-primary'}
-                        `}
-                    >
-                        {/* Progress bar that fills from left to right - black background */}
-                        {commitCooldown > 0 && (
-                            <div
-                                className="absolute inset-y-0 left-0 bg-degen-black transition-all duration-1000 ease-linear"
-                                style={{ width: `${((30 - commitCooldown) / 30) * 100}%` }}
-                            />
-                        )}
-                        {/* Text with mix-blend-difference - black on white, white on black */}
-                        <span className={`relative z-10 ${commitCooldown > 0 ? 'mix-blend-difference text-white' : ''}`}>
-                            {isProcessing && processingStep === 'commit'
-                                ? 'Opening...'
-                                : commitCooldown > 0
-                                    ? `Open in ${commitCooldown}s`
-                                    : 'Open Box'}
-                        </span>
-                    </button>
-                ) : isRefundEligible ? (
-                    // Refund available - show refund button with grace period countdown
-                    <button
-                        onClick={handleRefund}
-                        disabled={isProcessing || refundCooldown > 0}
-                        className={`
-                            relative w-full h-[36px] text-sm font-medium uppercase tracking-wider
-                            border border-degen-black overflow-hidden
-                            transition-all duration-100
-                            ${refundCooldown > 0 ? 'bg-degen-container text-degen-text-muted cursor-not-allowed' : 'bg-degen-black text-degen-white hover:bg-degen-primary'}
-                        `}
-                    >
-                        {/* Progress bar for grace period countdown */}
-                        {refundCooldown > 0 && (
-                            <div
-                                className="absolute inset-y-0 left-0 bg-degen-black/30 transition-all duration-1000 ease-linear"
-                                style={{ width: `${((REFUND_GRACE_PERIOD_SECONDS - refundCooldown) / REFUND_GRACE_PERIOD_SECONDS) * 100}%` }}
-                            />
-                        )}
-                        <span className="relative z-10">
-                            {isProcessing && processingStep === 'refund'
-                                ? 'Refunding...'
-                                : refundCooldown > 0
-                                    ? `Refund in ${refundCooldown}s`
-                                    : 'Claim Refund'}
-                        </span>
-                    </button>
-                ) : isRefunded ? (
-                    // Already refunded - text centered in fixed height
-                    <span className="text-degen-text-muted text-xs font-medium">Refund claimed</span>
-                ) : isExpired ? (
-                    // Expired - text centered in fixed height
-                    <span className="text-degen-text-muted text-xs">Reveal window expired</span>
-                ) : isCommitted ? (
-                    // Step 2: Reveal Box (after commit) - with progress bar
-                    <button
-                        onClick={handleReveal}
-                        disabled={isProcessing || revealCountdown > 0}
-                        className={`
-                            relative w-full h-[36px] text-sm font-medium uppercase tracking-wider
-                            border border-degen-black overflow-hidden
-                            transition-all duration-100
-                            ${revealCountdown > 0 ? 'bg-degen-container text-degen-text-muted cursor-not-allowed' : 'bg-degen-yellow text-degen-black hover:bg-degen-black hover:text-degen-white'}
-                        `}
-                    >
-                        {/* Progress bar that fills from left to right */}
-                        {revealCountdown > 0 && (
-                            <div
-                                className="absolute inset-y-0 left-0 bg-degen-yellow/60 transition-all duration-1000 ease-linear"
-                                style={{ width: `${revealProgress}%` }}
-                            />
-                        )}
-                        <span className="relative z-10">
-                            {isProcessing && processingStep === 'reveal'
-                                ? 'Revealing...'
-                                : revealCountdown > 0
-                                    ? `Reveal in ${revealCountdown}s`
-                                    : 'Reveal Box'}
-                        </span>
-                    </button>
-                ) : hasReward && !box.settled_at ? (
-                    // Revealed with reward - claim button
-                    <button
-                        onClick={handleClaim}
-                        disabled={isProcessing}
-                        className="w-full h-[36px] text-sm font-medium uppercase tracking-wider bg-degen-green text-degen-black border border-degen-black hover:bg-degen-black hover:text-degen-white transition-all duration-100"
-                    >
-                        {isProcessing && processingStep === 'claim' ? 'Claiming...' : 'Claim'}
-                    </button>
-                ) : hasReward ? (
-                    // Already claimed - badge centered in fixed height
-                    <DegenBadge variant="success" size="sm">Claimed</DegenBadge>
-                ) : (
-                    // Revealed but no reward (dud) - text centered in fixed height
-                    <span className="text-degen-text-muted text-xs">No reward</span>
-                )}
-            </div>
-
-            {/* Purchase Date */}
-            <p className="text-degen-text-light text-xs mt-2">
-                {new Date(box.created_at).toLocaleDateString()}
-            </p>
 
             {/* Win Modal */}
             <WinModal
@@ -2414,26 +2928,8 @@ function BoxCard({ box, project, onRefresh }) {
                 tier={winData?.tier}
                 amount={winData?.amount}
                 tokenSymbol={winData?.tokenSymbol}
+                multiplier={winData?.multiplier}
                 badgeUrl={winData?.badgeUrl}
-                onShare={winData ? getWinShareHandler(winData.tier, {
-                    amount: winData.amount,
-                    token: winData.tokenSymbol,
-                    projectUrl: winData.projectUrl,
-                }) : null}
-            />
-
-            {/* Open Box Confirmation Modal */}
-            <OpenBoxConfirmModal
-                isOpen={showOpenConfirm}
-                onClose={() => setShowOpenConfirm(false)}
-                onConfirm={() => {
-                    setShowOpenConfirm(false);
-                    handleCommit();
-                }}
-                boxNumber={box.box_number}
-                currentLuck={calculateCurrentLuck()}
-                maxLuck={config?.maxLuck || 60}
-                isProcessing={isProcessing && processingStep === 'commit'}
             />
         </div>
     );
@@ -2478,67 +2974,74 @@ function ProjectCard({ project }) {
 
     return (
         <DegenCard variant="white" className="flex flex-col">
-            {/* Network Badge */}
-            {isDevnet && (
-                <div className="mb-3">
-                    <DegenBadge variant="warning" size="sm">
-                        DEVNET
-                    </DegenBadge>
-                </div>
-            )}
-
-            {/* Project Logo */}
-            {project.logo_url && (
-                <img
-                    src={project.logo_url}
-                    alt={project.name}
-                    className="w-16 h-16 mb-4 border border-degen-black"
-                />
-            )}
-
-            {/* Project Name */}
-            <h3 className="text-degen-black text-xl font-medium uppercase tracking-wider mb-2">{project.name}</h3>
-
-            {/* Description */}
-            {project.description && (
-                <p className="text-degen-text-muted text-sm mb-4 line-clamp-2">
-                    {project.description}
-                </p>
-            )}
-
-            {/* Stats */}
-            <div className="grid grid-cols-2 gap-3 mb-4">
-                <div className="text-center bg-degen-bg p-2 border border-degen-black">
-                    <p className="text-degen-text-muted text-xs uppercase">Boxes</p>
-                    <p className="text-degen-black font-medium">{project.total_boxes_created || 0}</p>
-                </div>
-                <div className="text-center bg-degen-bg p-2 border border-degen-black">
-                    <p className="text-degen-text-muted text-xs uppercase">Settled</p>
-                    <p className="text-degen-black font-medium">{project.total_boxes_settled || 0}</p>
-                </div>
-                <div className="text-center bg-degen-bg p-2 border border-degen-black">
-                    <p className="text-degen-text-muted text-xs uppercase">Vault Balance</p>
-                    <p className="text-degen-black font-medium">
-                        {balanceLoading
-                            ? '...'
-                            : `${(vaultBalance / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)} ${project.payment_token_symbol || 'tokens'}`}
-                    </p>
-                </div>
-                <div className="text-center bg-degen-bg p-2 border border-degen-black">
-                    <p className="text-degen-text-muted text-xs uppercase">Status</p>
-                    <DegenBadge
-                        variant={project.closed_at ? 'default' : (project.is_active ? 'success' : 'danger')}
-                        size="sm"
-                        dot
-                    >
-                        {project.closed_at ? 'Permanently Closed' : (project.is_active ? 'Active' : 'Paused')}
-                    </DegenBadge>
+            {/* Header: Logo + Title + Badges */}
+            <div className="flex items-center gap-3 mb-4">
+                {/* Project Logo */}
+                {project.logo_url ? (
+                    <div className="w-12 h-12 rounded-full border border-degen-black flex-shrink-0 overflow-hidden">
+                        <Image
+                            src={project.logo_url}
+                            alt={project.project_name}
+                            width={48}
+                            height={48}
+                            className="w-full h-full object-cover"
+                        />
+                    </div>
+                ) : (
+                    <div className="w-12 h-12 rounded-full bg-degen-black flex items-center justify-center flex-shrink-0">
+                        <span className="text-degen-white text-lg font-bold">
+                            {project.project_name?.charAt(0) || '?'}
+                        </span>
+                    </div>
+                )}
+                <div className="flex-1 min-w-0">
+                    <h3 className="text-degen-black text-lg font-medium uppercase tracking-wider truncate">{project.project_name}</h3>
+                    <div className="flex items-center gap-2 mt-1">
+                        {isDevnet && (
+                            <DegenBadge variant="warning" size="sm">
+                                DEVNET
+                            </DegenBadge>
+                        )}
+                        {project.closed_at ? (
+                            <DegenBadge variant="default" size="sm" dot>
+                                Closed
+                            </DegenBadge>
+                        ) : !project.is_active ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium uppercase tracking-wider bg-red-500 text-white rounded">
+                                Paused
+                            </span>
+                        ) : (
+                            <DegenBadge variant="success" size="sm" dot>
+                                Active
+                            </DegenBadge>
+                        )}
+                    </div>
                 </div>
             </div>
 
-            {/* Subdomain */}
+            {/* Stats */}
+            <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="text-center bg-degen-bg p-2 border border-degen-black">
+                    <p className="text-degen-black text-lg font-medium">{project.total_boxes_created || 0}</p>
+                    <p className="text-degen-text-muted text-[10px] uppercase">Boxes</p>
+                </div>
+                <div className="text-center bg-degen-bg p-2 border border-degen-black">
+                    <p className="text-degen-black text-lg font-medium">{project.total_boxes_settled || 0}</p>
+                    <p className="text-degen-text-muted text-[10px] uppercase">Settled</p>
+                </div>
+                <div className="text-center bg-degen-bg p-2 border border-degen-black">
+                    <p className="text-degen-black text-lg font-medium">
+                        {balanceLoading
+                            ? '...'
+                            : `${(vaultBalance / Math.pow(10, project.payment_token_decimals || 9)).toFixed(2)}`}
+                    </p>
+                    <p className="text-degen-text-muted text-[10px] uppercase">Vault ({project.payment_token_symbol || 'tokens'})</p>
+                </div>
+            </div>
+
+            {/* Site URL */}
             <div className="mb-4 p-3 bg-degen-bg border border-degen-black">
-                <p className="text-degen-text-muted text-xs uppercase mb-1">Your Subdomain</p>
+                <p className="text-degen-text-muted text-xs uppercase mb-1">Your Site URL</p>
                 <a
                     href={projectUrl}
                     target="_blank"

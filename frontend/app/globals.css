@@ -3,43 +3,42 @@
 /*
  * DEGEN-CORE THEME
  * ================
- * MSCHF-inspired - Brutalist, bold, edge-to-edge, anti-design
- * Edit colors in /lib/theme.js - this file mirrors those values for CSS.
- * Keep both files in sync when making changes.
+ * Dark, terminal-inspired, brutalist aesthetic
+ * Black/green/white hacker vibes
  */
 
 :root {
-  --background: #e7e7e8;
-  --foreground: #000000;
+  --background: #111113;
+  --foreground: #ffffff;
 
-  /* Base palette - stark, minimal */
-  --degen-bg: #e7e7e8;
-  --degen-container: #e8e8e8;
-  --degen-white: #ffffff;
-  --degen-black: #000000;
+  /* Base palette - dark mode */
+  --degen-bg: #111113;
+  --degen-container: #212225;
+  --degen-white: #212225;
+  --degen-black: #ffffff;
 
-  /* Feature colors - bold pops */
-  --degen-feature: #ff0000;
-  --degen-blue: #0000ff;
+  /* Feature colors - toned for dark mode */
+  --degen-feature: #6cd46c;
+  --degen-blue: #00aaff;
   --degen-yellow: #ffff00;
-  --degen-green: #00ff00;
+  --degen-green: #6cd46c;
   --degen-magenta: #ff00ff;
 
-  /* Text */
-  --degen-text: #000000;
-  --degen-text-muted: #666666;
-  --degen-text-light: #999999;
+  /* Text - white for titles, muted for body */
+  --degen-text: #ffffff;
+  --degen-text-muted: rgba(255, 255, 255, 0.6);
+  --degen-text-light: rgba(255, 255, 255, 0.4);
 
   /* Semantic colors */
-  --degen-success: #00ff00;
-  --degen-error: #ff0000;
+  --degen-success: #6cd46c;
+  --degen-error: #ff4444;
   --degen-warning: #ffff00;
-  --degen-info: #0000ff;
+  --degen-info: #00aaff;
 
-  /* Styling tokens - brutalist, no frills */
+  /* Styling tokens - slightly rounded for dark theme */
   --degen-border-width: 1px;
   --degen-border-width-thick: 2px;
-  --degen-border-radius: 0px;
+  --degen-border-radius: 8px;
   --degen-grid-gap: 1px;
 }
 
@@ -49,23 +48,23 @@
   --font-sans: var(--font-3eyes);
   --font-mono: var(--font-3eyes);
 
-  /* Expose degen colors to Tailwind */
-  --color-degen-bg: #e7e7e8;
-  --color-degen-container: #e8e8e8;
-  --color-degen-white: #ffffff;
-  --color-degen-black: #000000;
-  --color-degen-feature: #ff0000;
-  --color-degen-blue: #0000ff;
+  /* Expose degen colors to Tailwind - dark theme values */
+  --color-degen-bg: #111113;
+  --color-degen-container: #212225;
+  --color-degen-white: #212225;
+  --color-degen-black: #ffffff;
+  --color-degen-feature: #6cd46c;
+  --color-degen-blue: #00aaff;
   --color-degen-yellow: #ffff00;
-  --color-degen-green: #00ff00;
+  --color-degen-green: #6cd46c;
   --color-degen-magenta: #ff00ff;
-  --color-degen-text: #000000;
-  --color-degen-text-muted: #666666;
-  --color-degen-text-light: #999999;
-  --color-degen-success: #00ff00;
-  --color-degen-error: #ff0000;
+  --color-degen-text: #ffffff;
+  --color-degen-text-muted: rgba(255, 255, 255, 0.6);
+  --color-degen-text-light: rgba(255, 255, 255, 0.4);
+  --color-degen-success: #6cd46c;
+  --color-degen-error: #ff4444;
   --color-degen-warning: #ffff00;
-  --color-degen-info: #0000ff;
+  --color-degen-info: #00aaff;
 }
 
 body {
@@ -74,8 +73,326 @@ body {
   font-family: var(--font-3eyes), monospace;
 }
 
-/* Brutalist selection */
+/* Selection styling */
 ::selection {
-  background: var(--degen-feature);
-  color: var(--degen-white);
+  background: #6cd46c;
+  color: #111113;
+}
+
+/* =============================================
+   DARK THEME OVERRIDES
+   Tailwind classes need explicit overrides since
+   @theme inline values are resolved at build time
+   ============================================= */
+
+/* Text colors */
+.text-degen-black {
+  color: #ffffff;
+}
+
+.text-degen-text {
+  color: #ffffff;
+}
+
+.text-degen-text-muted {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.text-degen-text-light {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* Background colors - cards have subtle lift from body */
+.bg-degen-bg {
+  background-color: #111113;
+}
+
+.bg-degen-container {
+  background-color: #18191b;
+}
+
+.bg-degen-white {
+  background-color: #18191b;
+}
+
+.bg-degen-black {
+  background-color: #272a2d;
+}
+
+.bg-degen-black.text-degen-white {
+  color: #ffffff;
+}
+
+.bg-degen-feature {
+  background-color: #6cd46c;
+}
+
+.bg-degen-green {
+  background-color: #6cd46c;
+}
+
+.bg-degen-success {
+  background-color: #6cd46c;
+}
+
+/* Text on green/feature backgrounds should be black for readability */
+.bg-degen-green .text-degen-black,
+.bg-degen-green .text-degen-white,
+.bg-degen-feature .text-degen-black,
+.bg-degen-feature .text-degen-white,
+.bg-degen-success .text-degen-black,
+.bg-degen-success .text-degen-white {
+  color: #000000 !important;
+}
+
+/* Also handle elements that are themselves green bg with text classes */
+.bg-degen-green.text-degen-black,
+.bg-degen-green.text-degen-white,
+.bg-degen-feature.text-degen-black,
+.bg-degen-feature.text-degen-white,
+.bg-degen-success.text-degen-black,
+.bg-degen-success.text-degen-white {
+  color: #000000 !important;
+}
+
+/* Child backgrounds on green should also be black */
+.bg-degen-green .bg-degen-black,
+.bg-degen-feature .bg-degen-black,
+.bg-degen-success .bg-degen-black {
+  background-color: #000000 !important;
+}
+
+/* Border colors - subtle in dark mode */
+.border-degen-black {
+  border-color: #212225;
+}
+
+.border-degen-black\/10 {
+  border-color: rgba(33, 34, 37, 0.5);
+}
+
+.border-degen-black\/20 {
+  border-color: rgba(33, 34, 37, 0.7);
+}
+
+/* Rounded borders */
+.border {
+  border-radius: 8px;
+}
+
+.border-b {
+  border-radius: 0;
+}
+
+.border-t {
+  border-radius: 0;
+}
+
+/* Feature/accent colors */
+.text-degen-feature {
+  color: #6cd46c;
+}
+
+.text-degen-success {
+  color: #6cd46c;
+}
+
+.text-degen-green {
+  color: #6cd46c;
+}
+
+.text-degen-error {
+  color: #ff4444;
+}
+
+.text-degen-blue {
+  color: #00aaff;
+}
+
+.text-degen-info {
+  color: #00aaff;
+}
+
+/* Yellow backgrounds should have black text for readability */
+.bg-degen-yellow .text-degen-black,
+.bg-degen-yellow .text-degen-white,
+.bg-degen-warning .text-degen-black,
+.bg-degen-warning .text-degen-white,
+.bg-degen-yellow.text-degen-black,
+.bg-degen-yellow.text-degen-white,
+.bg-degen-warning.text-degen-black,
+.bg-degen-warning.text-degen-white {
+  color: #000000 !important;
+}
+
+/* Border fallback class */
+.border-degen-border {
+  border-color: #212225;
+}
+
+/* Raw white backgrounds */
+.bg-white {
+  background-color: #18191b;
+}
+
+/* Form inputs */
+input,
+textarea,
+select {
+  background-color: #242527 !important;
+  border-color: #212225;
+  color: #ffffff;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: #6cd46c;
+  outline: none;
+}
+
+/* Box row hover */
+.degen-row-hover:hover {
+  background-color: #242527 !important;
+}
+
+/* =============================================
+   PAGE TRANSITIONS
+   View Transitions API + fallback animations
+   ============================================= */
+
+/* View Transitions API - old page fades out */
+::view-transition-old(root) {
+  animation: page-fade-out 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* View Transitions API - new page fades in with slide up */
+::view-transition-new(root) {
+  animation: page-fade-in-up 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes page-fade-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes page-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* =============================================
+   ENTRANCE ANIMATIONS
+   For elements that animate in on page load
+   ============================================= */
+
+/* Elastic fade in up - for dashboard boxes and cards */
+@keyframes entrance-fade-in-up {
+  0% {
+    opacity: 0;
+    transform: translateY(30px) scale(0.95);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-5px) scale(1.02);
+  }
+  80% {
+    transform: translateY(2px) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Staggered entrance for list items */
+.animate-entrance {
+  animation: entrance-fade-in-up 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  opacity: 0;
+}
+
+.animate-entrance-delay-1 {
+  animation-delay: 0.05s;
+}
+
+.animate-entrance-delay-2 {
+  animation-delay: 0.1s;
+}
+
+.animate-entrance-delay-3 {
+  animation-delay: 0.15s;
+}
+
+.animate-entrance-delay-4 {
+  animation-delay: 0.2s;
+}
+
+.animate-entrance-delay-5 {
+  animation-delay: 0.25s;
+}
+
+/* Subtle bounce for newly arrived content */
+@keyframes subtle-bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.animate-subtle-bounce {
+  animation: subtle-bounce 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* =============================================
+   TRANSITION OVERLAY
+   Full-screen overlay for smooth page transitions
+   ============================================= */
+
+/* Cover animation - slides up from bottom */
+@keyframes overlay-cover {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+/* Reveal animation - slides up and out */
+@keyframes overlay-reveal {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(-100%);
+    opacity: 1;
+  }
+}
+
+.animate-overlay-cover {
+  animation: overlay-cover 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.animate-overlay-reveal {
+  animation: overlay-reveal 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }

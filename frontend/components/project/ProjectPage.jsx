@@ -28,6 +28,7 @@ import WalletButton from '@/components/wallet/WalletButton';
 import LoadingOverlay from '@/components/ui/LoadingOverlay';
 import ProjectMainCanvas from '@/components/three/projectMainCanvas';
 import usePurchasingStore from '@/store/usePurchasingStore';
+import useOpeningStore from '@/store/useOpeningStore';
 
 export default function ProjectPage({ subdomain }) {
     const router = useRouter();
@@ -443,11 +444,15 @@ export default function ProjectPage({ subdomain }) {
             return;
         }
 
+        // Set local UI state
         setOpenFlowActive(true);
         setOpenFlowStep('committing');
         setOpenFlowLog('');
         setOpenFlowError(null);
         setOpenFlowResult(null);
+
+        // Set global opening state (for 3D canvas, etc.)
+        useOpeningStore.getState().startOpening({ boxId, projectId: currentProject?.project_numeric_id });
 
         const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3333';
         // Get cooldown from config (default 10s if not loaded)
@@ -512,6 +517,7 @@ export default function ProjectPage({ subdomain }) {
             // STEP 2: WAIT FOR ORACLE
             // ============================================
             setOpenFlowStep('waiting');
+            useOpeningStore.getState().setOpeningStep('waiting', 'Waiting for oracle');
 
             // Use cooldown from config + 2s buffer
             const waitTime = revealCooldown + 2;
@@ -527,6 +533,7 @@ export default function ProjectPage({ subdomain }) {
             // STEP 3: REVEAL + SETTLE (Combined - one signature!)
             // ============================================
             setOpenFlowStep('revealing');
+            useOpeningStore.getState().setOpeningStep('revealing', 'Revealing result');
             setLog('Building transaction');
 
             // Use combined reveal+settle endpoint for single signature
@@ -545,6 +552,7 @@ export default function ProjectPage({ subdomain }) {
             if (!revealBuildResult.success) {
                 if (revealBuildResult.refundEligible) {
                     setOpenFlowError('Oracle unavailable - refund available in dashboard');
+                    useOpeningStore.getState().endOpening();
                     setTimeout(() => {
                         startOverlayTransition(() => {
                             markTransition('dashboard-entrance');
@@ -611,6 +619,9 @@ export default function ProjectPage({ subdomain }) {
             }
             setOpenFlowStep('complete');
 
+            // End global opening state
+            useOpeningStore.getState().endOpening();
+
             // Refresh balances
             fetchBalances();
 
@@ -627,6 +638,9 @@ export default function ProjectPage({ subdomain }) {
             }
 
             setOpenFlowError(errorMessage);
+
+            // End global opening state on error
+            useOpeningStore.getState().endOpening();
         }
     };
 
